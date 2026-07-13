@@ -115,6 +115,36 @@ class EnhancedQualityAnalyzer:
         salt = self.encryption_salt
         return hashlib.sha256(f"{salt}:{ip}".encode()).hexdigest()[:16]
 
+    def _init_history(self) -> Dict:
+        """Возвращает словарь с полной структурой истории."""
+        return {
+            'runs': [],
+            'configs': {},
+            'protocol_stats': {},
+            'country_stats': {},
+            'anomalies': [],
+            'thresholds': {
+                'score_min': 30.0,
+                'latency_max': 2000.0,
+                'success_rate_min': 0.5
+            },
+            'last_updated': datetime.now().isoformat()
+        }
+
+    def _ensure_history_structure(self, data: Dict) -> Dict:
+        """Гарантирует наличие всех обязательных ключей в загруженной истории."""
+        required_keys = ['runs', 'configs', 'protocol_stats', 'country_stats',
+                         'anomalies', 'thresholds', 'last_updated']
+        for key in required_keys:
+            if key not in data:
+                if key == 'thresholds':
+                    data[key] = {'score_min': 30.0, 'latency_max': 2000.0, 'success_rate_min': 0.5}
+                elif key == 'last_updated':
+                    data[key] = datetime.now().isoformat()
+                else:
+                    data[key] = {} if key in ('configs', 'protocol_stats', 'country_stats') else []
+        return data
+
     def _load_history_with_recovery(self) -> Dict:
         """
         Загружает историю с поэтапным восстановлением при повреждении JSON.
@@ -127,7 +157,10 @@ class EnhancedQualityAnalyzer:
         # Пытаемся загрузить основной файл
         try:
             with open(self.history_file, 'r') as f:
-                return json.load(f)
+                data = json.load(f)
+            # Проверяем структуру и восстанавливаем при необходимости
+            data = self._ensure_history_structure(data)
+            return data
         except (json.JSONDecodeError, OSError) as e:
             logger.warning(f"History file corrupted: {e}. Attempting recovery from backups.")
 
@@ -144,6 +177,7 @@ class EnhancedQualityAnalyzer:
                     logger.info(f"Recovered history from {backup_path}")
                     # Копируем восстановленный файл обратно
                     shutil.copy2(backup_path, self.history_file)
+                    data = self._ensure_history_structure(data)
                     return data
                 except (json.JSONDecodeError, OSError) as e2:
                     logger.warning(f"Backup {backup_path} also corrupted: {e2}")
@@ -158,21 +192,6 @@ class EnhancedQualityAnalyzer:
             shutil.copy2(self.history_file, corrupted_backup)
             logger.info(f"Saved corrupted file as {corrupted_backup}")
         return self._init_history()
-
-    def _init_history(self) -> Dict:
-        return {
-            'runs': [],
-            'configs': {},
-            'protocol_stats': {},
-            'country_stats': {},
-            'anomalies': [],
-            'thresholds': {
-                'score_min': 30.0,
-                'latency_max': 2000.0,
-                'success_rate_min': 0.5
-            },
-            'last_updated': datetime.now().isoformat()
-        }
 
     def _save_history_sync(self, data: Dict = None):
         if data is None:
@@ -207,15 +226,22 @@ class EnhancedQualityAnalyzer:
         )
 
         with self._lock:
+            # Убеждаемся, что ключ 'runs' существует
+            if 'runs' not in self.history:
+                self.history['runs'] = []
             self.history['runs'].append(asdict(run))
             if len(self.history['runs']) > self.max_history_runs:
                 self.history['runs'] = self.history['runs'][-self.max_history_runs:]
 
+            if 'protocol_stats' not in self.history:
+                self.history['protocol_stats'] = {}
             for proto, count in run.protocols.items():
                 if proto not in self.history['protocol_stats']:
                     self.history['protocol_stats'][proto] = {'total': 0, 'runs': []}
                 self.history['protocol_stats'][proto]['total'] += count
 
+            if 'country_stats' not in self.history:
+                self.history['country_stats'] = {}
             for country, count in run.geo_distribution.items():
                 if country not in self.history['country_stats']:
                     self.history['country_stats'][country] = 0
@@ -247,6 +273,8 @@ class EnhancedQualityAnalyzer:
                 return
             # Добавляем в историю
             with self._lock:
+                if 'anomalies' not in self.history:
+                    self.history['anomalies'] = []
                 self.history['anomalies'].extend(_anomaly_batch)
                 if len(self.history['anomalies']) > 500:
                     self.history['anomalies'] = self.history['anomalies'][-500:]
@@ -264,7 +292,7 @@ class EnhancedQualityAnalyzer:
         if 'protocol_stats' not in self.history:
             return result
         protocol_success = defaultdict(list)
-        for run in self.history['runs'][-window:]:
+        for run in self.history.get('runs', [])[-window:]:
             for proto, count in run.get('protocols', {}).items():
                 if run.get('total_raw', 0) > 0:
                     success_rate = run.get('total_final', 0) / run.get('total_raw', 1)
@@ -279,7 +307,7 @@ class EnhancedQualityAnalyzer:
 
     def calculate_protocol_correlations(self) -> Dict[str, float]:
         protocol_data = defaultdict(list)
-        for run in self.history['runs']:
+        for run in self.history.get('runs', []):
             for proto, count in run.get('protocols', {}).items():
                 if count > 0 and run.get('avg_score', 0) > 0:
                     protocol_data[proto].append(run['avg_score'])
@@ -372,6 +400,8 @@ class EnhancedQualityAnalyzer:
         config_hash = self._hash_ip(server)
         timestamp = datetime.now().isoformat()
         with self._lock:
+            if 'configs' not in self.history:
+                self.history['configs'] = {}
             if config_hash not in self.history['configs']:
                 self.history['configs'][config_hash] = {
                     'protocol': protocol,
@@ -406,7 +436,7 @@ class EnhancedQualityAnalyzer:
                     cfg['is_active'] = False
 
     def predict_lifetime(self, config_hash: str) -> Optional[float]:
-        if config_hash not in self.history['configs']:
+        if config_hash not in self.history.get('configs', {}):
             return None
         cfg = self.history['configs'][config_hash]
         if len(cfg['scores']) < 3:
