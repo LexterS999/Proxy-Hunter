@@ -117,10 +117,14 @@ class OptimizedPipeline:
     def _load_parsed_cache(self) -> Dict:
         if os.path.exists(self.parsed_cache_file):
             try:
-                with open(self.parsed_cache_file, 'r') as f:
-                    return json.load(f)
-            except:
-                pass
+                # Проверяем, что файл не пустой
+                if os.path.getsize(self.parsed_cache_file) > 0:
+                    with open(self.parsed_cache_file, 'r') as f:
+                        return json.load(f)
+                else:
+                    logger.warning(f"Parsed cache file {self.parsed_cache_file} is empty, starting fresh.")
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"Failed to load parsed cache: {e}, starting fresh.")
         return {}
 
     def _save_parsed_cache(self, cache: Dict):
@@ -322,50 +326,79 @@ class OptimizedPipeline:
 
             # Шаг 7: Обогащение геоданными
             logger.info("🌍 Enriching configs with geolocation...")
+
+            # Проверяем наличие и корректность location_cache.json
             cache_exists = os.path.exists(self.location_cache_file)
             cache_empty = True
             if cache_exists:
-                with open(self.location_cache_file, 'r') as f:
-                    data = json.load(f)
-                    if data:
-                        cache_empty = False
-            if not cache_exists or cache_empty:
+                try:
+                    # Проверяем размер файла
+                    if os.path.getsize(self.location_cache_file) > 0:
+                        with open(self.location_cache_file, 'r') as f:
+                            data = json.load(f)
+                            if data:
+                                cache_empty = False
+                    else:
+                        logger.warning(f"Location cache file {self.location_cache_file} is empty, treating as empty cache.")
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.warning(f"Location cache file {self.location_cache_file} is corrupted: {e}, treating as empty cache.")
+                    cache_empty = True
+
+            if cache_empty:
                 logger.info("Location cache missing or empty, running enrich_configs...")
                 enricher = ConfigEnricher()
                 temp_file = 'configs/temp_for_enrich.txt'
-                with open(temp_file, 'w') as f:
-                    for cfg in deduped:
-                        f.write(cfg + '\n')
-                enricher.process_configs(temp_file, self.location_cache_file)
-                os.remove(temp_file)
+                try:
+                    with open(temp_file, 'w') as f:
+                        for cfg in deduped:
+                            f.write(cfg + '\n')
+                    enricher.process_configs(temp_file, self.location_cache_file)
+                except Exception as e:
+                    logger.error(f"Error during enrich_configs: {e}")
+                finally:
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)
             else:
                 logger.info("Location cache found, skipping enrich_configs.")
 
             # Шаг 8: Сохранение результатов
             logger.info("💾 Saving output with new naming...")
             temp_file = 'configs/temp_for_rename.txt'
-            with open(temp_file, 'w') as f:
-                for cfg in deduped:
-                    f.write(cfg + '\n')
-            renamer = ConfigRenamer(self.location_cache_file)
-            renamer.process_configs(temp_file, self.output_file)
-            os.remove(temp_file)
+            try:
+                with open(temp_file, 'w') as f:
+                    for cfg in deduped:
+                        f.write(cfg + '\n')
+                renamer = ConfigRenamer(self.location_cache_file)
+                renamer.process_configs(temp_file, self.output_file)
+            except Exception as e:
+                logger.error(f"Error during rename_configs: {e}")
+            finally:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
 
             # Шаг 9: Сохранение упрощённого списка
             logger.info("📄 Saving simple output...")
             simple_file = 'configs/output_simple.txt'
-            with open(self.output_file, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
+            try:
+                with open(self.output_file, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+            except FileNotFoundError:
+                logger.error(f"Output file {self.output_file} not found, cannot create simple output.")
+                return False
+
             simple_configs = []
             for line in lines:
                 line = line.strip()
                 if line.startswith('//') or not line:
                     continue
                 simple_configs.append(line)
-            with open(simple_file, 'w', encoding='utf-8') as f:
-                for cfg in simple_configs:
-                    f.write(cfg + '\n')
-            logger.info(f"✅ Simple output saved: {len(simple_configs)} configs")
+            try:
+                with open(simple_file, 'w', encoding='utf-8') as f:
+                    for cfg in simple_configs:
+                        f.write(cfg + '\n')
+                logger.info(f"✅ Simple output saved: {len(simple_configs)} configs")
+            except Exception as e:
+                logger.error(f"Failed to write simple output: {e}")
 
             # Шаг 10: Обновление истории качества
             logger.info("📊 Updating quality history...")
