@@ -1,0 +1,253 @@
+name: Proxy-Hunter
+
+on:
+  schedule:
+    - cron: '0 */3 * * *'
+  workflow_dispatch:
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmaxminddb-dev
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install -r requirements.txt
+
+      - name: Create necessary directories
+        run: mkdir -p configs logs assets
+
+      - name: Ensure required files exist
+        run: |
+          touch configs/output.txt
+          touch configs/output_simple.txt
+          touch configs/channel_stats.json
+          touch configs/quality_history.json
+          touch configs/quality_data.csv
+          touch configs/location_cache.json
+          touch configs/parsed_cache.json
+
+      - name: Run optimized pipeline
+        id: pipeline
+        run: |
+          time python src/pipeline_optimized.py
+
+      - name: Generate HTML report
+        run: |
+          python src/generate_charts.py
+
+      - name: Remove inactive channels from custom_channels.txt
+        run: |
+          python -c "
+          import json
+          import re
+          from urllib.parse import urlparse
+
+          def normalize_url(url):
+              url = url.strip()
+              if not url:
+                  return ''
+              if not url.startswith('http'):
+                  url = 'https://t.me/s/' + url.lstrip('/')
+              parsed = urlparse(url)
+              if parsed.scheme and parsed.netloc:
+                  netloc = parsed.netloc.replace('www.', '')
+                  path = parsed.path.rstrip('/')
+                  return f\"{parsed.scheme}://{netloc}{path}\"
+              return url
+
+          # Загружаем статистику
+          try:
+              with open('configs/channel_stats.json', 'r') as f:
+                  stats = json.load(f)
+          except FileNotFoundError:
+              print('channel_stats.json not found, skipping')
+              exit(0)
+
+          # Собираем неактивные URL
+          inactive_urls = set()
+          for ch in stats.get('channels', []):
+              if not ch.get('enabled', True):
+                  url = ch.get('url', '')
+                  if url:
+                      inactive_urls.add(normalize_url(url))
+
+          if not inactive_urls:
+              print('No inactive channels found')
+              exit(0)
+
+          print(f'Found {len(inactive_urls)} inactive channels')
+
+          # Читаем custom_channels.txt
+          try:
+              with open('custom_channels.txt', 'r') as f:
+                  lines = f.readlines()
+          except FileNotFoundError:
+              lines = []
+
+          # Фильтруем
+          filtered = []
+          removed_count = 0
+          for line in lines:
+              line = line.strip()
+              if not line or line.startswith('#'):
+                  filtered.append(line)
+                  continue
+              norm = normalize_url(line)
+              if norm in inactive_urls:
+                  removed_count += 1
+                  print(f'Removing: {line}')
+              else:
+                  filtered.append(line)
+
+          # Записываем обратно
+          with open('custom_channels.txt', 'w') as f:
+              for line in filtered:
+                  f.write(line + '\n' if line else '\n')
+
+          print(f'Removed {removed_count} inactive channels')
+          "
+
+      - name: Check output files
+        id: check_output
+        run: |
+          echo "Checking output files..."
+          if [ -f "configs/output.txt" ] && [ -s "configs/output.txt" ]; then
+            echo "output_exists=true" >> $GITHUB_OUTPUT
+            echo "✅ output.txt exists! Size: $(wc -c < configs/output.txt) bytes"
+          else
+            echo "output_exists=false" >> $GITHUB_OUTPUT
+            echo "❌ output.txt not found or empty!"
+          fi
+          if [ -f "configs/output_simple.txt" ] && [ -s "configs/output_simple.txt" ]; then
+            echo "simple_output_exists=true" >> $GITHUB_OUTPUT
+            echo "✅ output_simple.txt exists! Size: $(wc -c < configs/output_simple.txt) bytes"
+          else
+            echo "simple_output_exists=false" >> $GITHUB_OUTPUT
+            echo "❌ output_simple.txt not found or empty!"
+          fi
+          if [ -f "configs/quality_history.json" ]; then
+            echo "history_exists=true" >> $GITHUB_OUTPUT
+            echo "✅ quality_history.json exists"
+          else
+            echo "history_exists=false" >> $GITHUB_OUTPUT
+          fi
+          if [ -f "configs/quality_data.csv" ]; then
+            echo "csv_exists=true" >> $GITHUB_OUTPUT
+            echo "✅ quality_data.csv exists"
+          else
+            echo "csv_exists=false" >> $GITHUB_OUTPUT
+          fi
+          if [ -f "configs/location_cache.json" ]; then
+            echo "location_cache_exists=true" >> $GITHUB_OUTPUT
+            echo "✅ location_cache.json exists"
+          else
+            echo "location_cache_exists=false" >> $GITHUB_OUTPUT
+          fi
+          if [ -f "configs/parsed_cache.json" ]; then
+            echo "parsed_cache_exists=true" >> $GITHUB_OUTPUT
+            echo "✅ parsed_cache.json exists"
+          else
+            echo "parsed_cache_exists=false" >> $GITHUB_OUTPUT
+          fi
+          if [ -f "assets/performance_report.html" ]; then
+            echo "report_exists=true" >> $GITHUB_OUTPUT
+            echo "✅ performance_report.html exists"
+          else
+            echo "report_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Show quality summary
+        if: steps.check_output.outputs.history_exists == 'true'
+        run: |
+          echo "📊 Quality Summary:"
+          python -c "
+          import json
+          try:
+              with open('configs/quality_history.json') as f:
+                  data = json.load(f)
+              runs = data.get('runs', [])
+              if runs:
+                  latest = runs[-1]
+                  print(f'  Total runs: {len(runs)}')
+                  print(f'  Latest run: {latest.get(\"timestamp\", \"?\")}')
+                  print(f'  Final configs: {latest.get(\"total_final\", 0)}')
+                  print(f'  Avg score: {latest.get(\"avg_score\", 0):.1f}')
+                  print(f'  P50 latency: {latest.get(\"p50_latency\", 0):.0f}ms')
+                  print(f'  P95 latency: {latest.get(\"p95_latency\", 0):.0f}ms')
+                  print(f'  P99 latency: {latest.get(\"p99_latency\", 0):.0f}ms')
+                  protocols = latest.get('protocols', {})
+                  if protocols:
+                      print('  Protocols:')
+                      for p, count in protocols.items():
+                          print(f'    {p}: {count}')
+              else:
+                  print('  No history data yet')
+          except Exception as e:
+              print(f'  ⚠️  Could not read history: {e}')
+          "
+
+      - name: Upload all artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxy-output
+          path: |
+            configs/output.txt
+            configs/output_simple.txt
+            configs/channel_stats.json
+            configs/quality_history.json
+            configs/quality_data.csv
+            configs/location_cache.json
+            configs/parsed_cache.json
+            assets/performance_report.html
+          retention-days: 7
+
+      - name: Commit output to repo
+        if: steps.check_output.outputs.output_exists == 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add configs/output.txt configs/output_simple.txt configs/channel_stats.json configs/quality_history.json configs/quality_data.csv configs/location_cache.json configs/parsed_cache.json assets/performance_report.html custom_channels.txt
+          if git diff --staged --quiet; then
+            echo "✅ No changes to commit"
+          else
+            git commit -m "Update proxy configs and quality history $(date +'%Y-%m-%d %H:%M:%S') [skip ci]"
+            git push
+            echo "✅ Committed updated files to repository"
+          fi
+
+      - name: Upload logs (if failed)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: logs/
+          retention-days: 3
+
+      - name: Cleanup old artifacts (optional)
+        if: always()
+        run: |
+          find . -name "bloom_cache.bin" -type f -mtime +7 -delete 2>/dev/null || true
+          find logs -name "*.log" -type f -mtime +7 -delete 2>/dev/null || true
