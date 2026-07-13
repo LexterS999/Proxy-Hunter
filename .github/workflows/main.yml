@@ -52,6 +52,17 @@ jobs:
           # CSV-файл может быть пустым, но для совместимости создаём с заголовками
           echo "timestamp,total_final,avg_score,p50_latency,p95_latency,p99_latency,success_rate" > configs/quality_data.csv || true
 
+      - name: Verify and fix JSON files (if corrupted)
+        run: |
+          for file in configs/channel_stats.json configs/quality_history.json configs/location_cache.json configs/parsed_cache.json; do
+            if [ -f "$file" ]; then
+              if ! python -c "import json; json.load(open('$file'))" 2>/dev/null; then
+                echo "⚠️ $file is corrupted, recreating..."
+                echo '{}' > "$file"
+              fi
+            fi
+          done
+
       - name: Run optimized pipeline
         id: pipeline
         run: |
