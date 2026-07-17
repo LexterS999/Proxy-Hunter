@@ -16,9 +16,7 @@ RETRYABLE_EXCEPTIONS = (
     asyncio.TimeoutError,
     ConnectionError,
     OSError,
-    # aiohttp.ClientError добавляется динамически, если aiohttp импортирован
 )
-
 
 def is_retryable(exc: Exception) -> bool:
     """Определяет, стоит ли повторять попытку при данной ошибке."""
@@ -49,31 +47,29 @@ def retry_with_backoff(
         max_delay: максимальная задержка (сек)
         retryable_exceptions: кортеж типов исключений, при которых повторяем (по умолчанию сетевые)
         deadline: общее время выполнения (сек) — если превышено, бросаем TimeoutError
-    
-    Использование:
-        @retry_with_backoff(attempts=3, deadline=10.0)
-        async def fetch_data(url):
-            ...
     """
     if retryable_exceptions is None:
         retryable_exceptions = RETRYABLE_EXCEPTIONS
 
+    # Включаем aiohttp.ClientError, если он доступен
+    try:
+        import aiohttp
+        retryable_exceptions = retryable_exceptions + (aiohttp.ClientError,)
+    except ImportError:
+        pass
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def wrapper(*args, **kwargs):
-            # Внутренняя функция, выполняющая попытки
             async def _attempt_loop():
                 for attempt in range(attempts):
                     try:
                         return await func(*args, **kwargs)
                     except asyncio.CancelledError:
-                        # Никогда не повторяем при отмене
                         raise
                     except Exception as e:
-                        # Проверяем, является ли исключение retryable
                         if not isinstance(e, retryable_exceptions) or attempt == attempts - 1:
                             raise
-                        # Рассчитываем задержку с джиттером (0.5x–1.5x от базовой)
                         delay = min(max_delay, base_delay * (2 ** attempt))
                         jittered = delay * (0.5 + random.random())
                         logger.debug(
@@ -81,10 +77,7 @@ def retry_with_backoff(
                             f"after {jittered:.2f}s due to {e.__class__.__name__}"
                         )
                         await asyncio.sleep(jittered)
-                # Если все попытки исчерпаны
                 raise TimeoutError(f"{func.__name__} failed after {attempts} attempts")
-            
-            # Используем asyncio.wait_for для ограничения общего времени (совместимо с Python 3.10)
             return await asyncio.wait_for(_attempt_loop(), timeout=deadline)
         return wrapper
     return decorator
