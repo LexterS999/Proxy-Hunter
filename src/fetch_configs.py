@@ -16,28 +16,27 @@ from config import ProxyConfig, ChannelConfig
 from config_validator import ConfigValidator
 from parse_fallback import FallbackParser
 from pathlib import Path
-
-# NEW: импорты для улучшений
 from retry_utils import retry_with_backoff, is_retryable
 from session_pool import SessionPool
+from protocol_registry import registry
 
 logger = logging.getLogger(__name__)
 
-# === Rate Limiter для Telegram ===
+# === Rate Limiter с фиксированной скоростью ===
 class RateLimiter:
     def __init__(self, calls_per_second: float = 1.5):
-        self._sem = asyncio.Semaphore(int(calls_per_second * 60))  # Запросов в минуту
+        self._rate = calls_per_second
+        self._interval = 1.0 / calls_per_second
+        self._last_request_time = 0.0
         self._lock = asyncio.Lock()
-        self._calls_per_second = calls_per_second
 
     async def acquire(self):
         async with self._lock:
-            await self._sem.acquire()
-            asyncio.create_task(self._release_after_delay())
-
-    async def _release_after_delay(self):
-        await asyncio.sleep(60 / self._calls_per_second)
-        self._sem.release()
+            now = time.time()
+            wait_time = self._interval - (now - self._last_request_time)
+            if wait_time > 0:
+                await asyncio.sleep(wait_time)
+            self._last_request_time = time.time()
 
 # === Основной класс ===
 class AsyncConfigFetcher:
@@ -53,18 +52,14 @@ class AsyncConfigFetcher:
         self.seen_configs: Set[str] = set()
         self.channel_protocol_counts: Dict[str, Dict[str, int]] = {}
 
-        # NEW: динамические лимиты для TCPConnector на основе числа каналов
         num_channels = len(config.SOURCE_URLS) if config.SOURCE_URLS else 1
         self._connector_limit = min(200, num_channels * 10)
         self._connector_per_host = min(50, num_channels * 5)
 
-        # Rate limiter
         self._rate_limiter = RateLimiter(calls_per_second=1.5)
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
-        """Возвращает общую сессию из SessionPool."""
         pool = SessionPool()
-        # Используем динамические лимиты
         self._session = await pool.get_session(
             connector_limit=self._connector_limit,
             per_host_limit=self._connector_per_host,
@@ -73,25 +68,20 @@ class AsyncConfigFetcher:
         )
         return self._session
 
-    # декоратор retry_with_backoff применяется к _fetch_with_retry
     @retry_with_backoff(attempts=3, base_delay=0.2, max_delay=5.0, deadline=30.0)
     async def _fetch_with_retry(self, url: str) -> Optional[str]:
-        """Выполняет один запрос с повторными попытками (реализация декоратора)."""
-        # Применяем rate limit перед каждым запросом
         await self._rate_limiter.acquire()
 
         session = await self._ensure_session()
         async with session.get(url) as response:
             if response.status == 429:
-                # Throttling — обрабатываем отдельно, даём Retry-After
                 retry_after = response.headers.get('Retry-After', '5')
                 try:
                     wait_time = int(retry_after)
                 except ValueError:
                     wait_time = 5
                 await asyncio.sleep(wait_time)
-                # Повторяем запрос — декоратор подхватит исключение, если response.status не 2xx
-                # Но мы можем просто вызвать исключение, чтобы ретрай сработал
+                # Повторяем запрос, выбрасывая исключение для ретрая
                 raise aiohttp.ClientResponseError(
                     response.request_info,
                     response.history,
@@ -140,7 +130,6 @@ class AsyncConfigFetcher:
                 self.config.update_channel_stats(channel, True, response_time)
             return configs
 
-        # Используем _fetch_with_retry (с декоратором)
         text = await self._fetch_with_retry(channel.url)
         if text is None:
             self.config.update_channel_stats(channel, False)
@@ -182,7 +171,6 @@ class AsyncConfigFetcher:
                 channel.metrics.total_configs += len(found)
                 configs.extend(found)
         else:
-            # Обычный текст
             parts = text.split()
             for part in parts:
                 part = part.strip()
@@ -215,34 +203,28 @@ class AsyncConfigFetcher:
 
     def process_config(self, config: str, channel: ChannelConfig) -> List[str]:
         processed = []
+        # Нормализация hysteria2
         if config.startswith('hy2://'):
             config = self.validator.normalize_hysteria2_protocol(config)
-        for protocol in self.config.SUPPORTED_PROTOCOLS:
-            aliases = self.config.SUPPORTED_PROTOCOLS[protocol].get('aliases', [])
-            match = False
-            if config.startswith(protocol):
-                match = True
-            else:
-                for alias in aliases:
-                    if config.startswith(alias):
-                        match = True
-                        config = config.replace(alias, protocol, 1)
-                        break
-            if match:
-                if not self.config.is_protocol_enabled(protocol):
-                    break
-                if protocol == "vmess://":
-                    config = self.validator.clean_vmess_config(config)
-                clean = self.validator.clean_config(config)
-                if self.validator.validate_protocol_config(clean, protocol):
-                    channel.metrics.valid_configs += 1
-                    channel.metrics.protocol_counts[protocol] = channel.metrics.protocol_counts.get(protocol, 0) + 1
-                    if clean not in self.seen_configs:
-                        channel.metrics.unique_configs += 1
-                        self.seen_configs.add(clean)
-                        processed.append(clean)
-                        self.protocol_counts[protocol] = self.protocol_counts.get(protocol, 0) + 1
-                break
+
+        # Определяем протокол через registry
+        prefix = registry.get_protocol_prefix(config)
+        if prefix:
+            # Проверяем, включён ли протокол
+            if not self.config.is_protocol_enabled(prefix):
+                return []
+            # Для VMess требуется очистка
+            if prefix == 'vmess://':
+                config = self.validator.clean_vmess_config(config)
+            clean = self.validator.clean_config(config)
+            if self.validator.validate_protocol_config(clean, prefix):
+                channel.metrics.valid_configs += 1
+                channel.metrics.protocol_counts[prefix] = channel.metrics.protocol_counts.get(prefix, 0) + 1
+                if clean not in self.seen_configs:
+                    channel.metrics.unique_configs += 1
+                    self.seen_configs.add(clean)
+                    processed.append(clean)
+                    self.protocol_counts[prefix] = self.protocol_counts.get(prefix, 0) + 1
         return processed
 
     def check_and_decode_base64(self, text: str) -> str:
@@ -315,7 +297,6 @@ class AsyncConfigFetcher:
         return all_configs
 
     async def close(self):
-        # Сессия закрывается через SessionPool глобально, но здесь можно оставить для совместимости
         pass
 
 # Для обратной совместимости
