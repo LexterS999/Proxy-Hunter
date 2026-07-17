@@ -1,12 +1,12 @@
 {
   "runs": [
     {
-      "timestamp": "2026-07-16T14:41:41.137949",
-      "total_raw": 1262,
-      "total_valid": 1248,
+      "timestamp": "2026-07-17T02:48:10.451567",
+      "total_raw": 1165,
+      "total_valid": 1152,
       "total_quality": 0,
-      "total_final": 461,
-      "avg_score": 77.06393733555397,
+      "total_final": 437,
+      "avg_score": 77.23817192362361,
       "p50_latency": 0,
       "p95_latency": 0,
       "p99_latency": 0,
@@ -26,5 +26,5 @@
     "latency_max": 2000.0,
     "success_rate_min": 0.5
   },
-  "last_updated": "2026-07-16T14:41:41.137949"
+  "last_updated": "2026-07-17T02:48:10.451567"
 }
