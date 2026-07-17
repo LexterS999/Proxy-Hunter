@@ -6,6 +6,7 @@
 import logging
 import os
 import pickle
+import hashlib
 from pathlib import Path
 from pybloom_live import ScalableBloomFilter
 
@@ -27,8 +28,10 @@ class ShardedBloomDeduplicator:
         self._loaded_shards = set()
 
     def _get_shard_index(self, config: str) -> int:
-        """Определяет номер шарда по хешу конфигурации."""
-        return abs(hash(config)) % self.num_shards
+        """Определяет номер шарда по стабильному MD5-хешу конфигурации."""
+        # Используем hashlib.md5 для детерминированного хеша
+        hash_hex = hashlib.md5(config.encode()).hexdigest()
+        return int(hash_hex, 16) % self.num_shards
 
     def _get_shard_file(self, shard_idx: int) -> Path:
         return self.cache_dir / f"bloom_shard_{shard_idx}.bin"
