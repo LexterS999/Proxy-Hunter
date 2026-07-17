@@ -37,6 +37,7 @@ from active_checker import ActiveChecker
 from parse_fallback import FallbackParser
 from session_pool import SessionPool
 from channel_quality_analyzer import ChannelQualityAnalyzer
+from protocol_registry import registry
 
 # Настройка логирования с ротацией
 from logging.handlers import RotatingFileHandler
@@ -83,7 +84,6 @@ class OptimizedPipeline:
         self._check_dependencies()
 
     def _check_dependencies(self):
-        """Проверяет наличие критических зависимостей."""
         missing = []
         try:
             import aiohttp
@@ -120,7 +120,6 @@ class OptimizedPipeline:
     def _load_parsed_cache(self) -> Dict:
         if os.path.exists(self.parsed_cache_file):
             try:
-                # Проверяем, что файл не пустой
                 if os.path.getsize(self.parsed_cache_file) > 0:
                     with open(self.parsed_cache_file, 'r') as f:
                         return json.load(f)
@@ -142,13 +141,6 @@ class OptimizedPipeline:
         return self.analyzer.history
 
     def _save_channel_stats(self):
-        """
-        Сохраняет статистику по каналам (собранную во время фетча) в
-        configs/channel_stats.json. Этот файл читают:
-        - ChannelQualityAnalyzer (для оценки здоровья каналов в следующих запусках);
-        - generate_charts.py (для HTML-дашборда);
-        - GitHub Actions workflow (для удаления "мёртвых" каналов из custom_channels.txt).
-        """
         try:
             channels_data = []
             for ch in self.config.SOURCE_URLS:
@@ -180,15 +172,12 @@ class OptimizedPipeline:
         except Exception as e:
             logger.error(f"Failed to save channel stats: {e}")
 
-    def _refresh_channel_health(self):
-        """
-        Пересчитывает здоровье каналов на основе только что сохранённой
-        статистики (свежий экземпляр анализатора перечитывает файл с диска).
-        """
+    def _refresh_channel_health(self, history_data: Dict):
+        """Обновляет здоровье каналов, используя переданные данные вместо повторного чтения с диска."""
         try:
             self.channel_analyzer = ChannelQualityAnalyzer()
-            urls = [ch.url for ch in self.config.SOURCE_URLS]
-            self.channel_analyzer.update_health(urls)
+            # Передаём уже загруженные данные
+            self.channel_analyzer.update_health([ch.url for ch in self.config.SOURCE_URLS], history_data=history_data)
             report = self.channel_analyzer.get_health_report()
             summary = report.get('summary', {})
             logger.info(
@@ -199,12 +188,6 @@ class OptimizedPipeline:
             logger.warning(f"Failed to refresh channel health: {e}")
 
     async def save_state(self):
-        """
-        Сохраняет промежуточное состояние (например, кеши).
-        Асинхронный, чтобы его можно было безопасно вызывать (await) из
-        уже запущенного event loop — вызов asyncio.run() изнутри работающего
-        цикла событий приводит к RuntimeError и тихой потере состояния.
-        """
         logger.info("Saving state before shutdown...")
         if hasattr(self.deduplicator, '_bloom'):
             try:
@@ -214,12 +197,6 @@ class OptimizedPipeline:
         logger.info("State saved.")
 
     def _setup_signal_handlers(self):
-        """
-        Настраивает обработчики сигналов для graceful shutdown.
-        Обработчик только выставляет флаг: сама остановка и сохранение
-        состояния выполняются внутри run(), где мы находимся в правильном
-        асинхронном контексте и можем безопасно вызвать await save_state().
-        """
         def handler(sig, frame):
             logger.info(f"Received signal {sig}, initiating graceful shutdown...")
             self._shutdown_requested = True
@@ -244,11 +221,12 @@ class OptimizedPipeline:
                 return False
 
             # Шаг 1.5: Сохранение статистики каналов и интеллектуальный анализ
-            # их здоровья. Выполняется независимо от результата фетча, чтобы
-            # каналы, вернувшие 0 конфигов, тоже учитывались при оценке.
             logger.info("📊 Saving channel statistics...")
             self._save_channel_stats()
-            self._refresh_channel_health()
+            # Загружаем свежую историю для анализа
+            with open(self.channel_stats_file, 'r') as f:
+                history_data = json.load(f)
+            self._refresh_channel_health(history_data)
 
             if not raw_configs:
                 logger.error("No configs fetched.")
@@ -306,9 +284,9 @@ class OptimizedPipeline:
                     if self._shutdown_requested:
                         break
                     try:
-                        info = self.quality_checker.extract_server_info(cfg)
-                        if info and info.get('parsed'):
-                            score_info = self.scorer.score_profile(cfg, info['parsed'], success=True)
+                        parsed = registry.parse(cfg)
+                        if parsed:
+                            score_info = self.scorer.score_profile(cfg, parsed, success=True)
                             scored_configs.append({
                                 'config': cfg,
                                 'score': score_info['score'],
@@ -316,7 +294,7 @@ class OptimizedPipeline:
                                 'lifetime': score_info['lifetime'],
                                 'is_datacenter': score_info['is_datacenter'],
                                 'server_type': score_info['server_type'],
-                                'parsed': info['parsed']
+                                'parsed': parsed
                             })
                     except Exception as e:
                         logger.error(f"Scoring error for config {idx}: {e}")
@@ -353,7 +331,7 @@ class OptimizedPipeline:
 
             history = self._safe_load_history()
             checker = ActiveChecker(
-                timeout=1.0,  # уменьшено с 5.0
+                timeout=1.0,
                 max_workers=None,
                 max_latency=6000.0,
                 history=history
@@ -366,7 +344,6 @@ class OptimizedPipeline:
                 await self.save_state()
                 return False
 
-            # Явное закрытие сессии после проверки
             await SessionPool().close()
 
             good_configs = [
@@ -375,7 +352,6 @@ class OptimizedPipeline:
             ]
             logger.info(f"✅ Active check: {len(good_configs)} configs passed")
 
-            # Если ни один не прошёл — выводим подробную статистику ошибок
             if not good_configs:
                 error_counts = {}
                 for r in check_results:
@@ -383,7 +359,6 @@ class OptimizedPipeline:
                     error_counts[err] = error_counts.get(err, 0) + 1
                 logger.error("❌ No configs passed active check!")
                 logger.error(f"   Error breakdown: {error_counts}")
-                # Показываем первые 5 конфигов с ошибками для отладки
                 for i, r in enumerate(check_results[:5]):
                     logger.error(f"   Sample {i+1}: error={r.get('error')}, config={r.get('config', '')[:80]}")
                 return False
@@ -412,12 +387,10 @@ class OptimizedPipeline:
             # Шаг 7: Обогащение геоданными
             logger.info("🌍 Enriching configs with geolocation...")
 
-            # Проверяем наличие и корректность location_cache.json
             cache_exists = os.path.exists(self.location_cache_file)
             cache_empty = True
             if cache_exists:
                 try:
-                    # Проверяем размер файла
                     if os.path.getsize(self.location_cache_file) > 0:
                         with open(self.location_cache_file, 'r') as f:
                             data = json.load(f)
