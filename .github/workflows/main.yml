@@ -67,6 +67,7 @@ jobs:
 
       - name: Run optimized pipeline
         id: pipeline
+        continue-on-error: true
         run: |
           time python src/pipeline_optimized.py
 
@@ -231,7 +232,18 @@ jobs:
               print(f'  ⚠️  Could not read history: {e}')
           "
 
+      # Публикуем статус самого шага пайплайна отдельно и заметно в логе,
+      # чтобы при разборе падений не приходилось скроллить весь вывод.
+      - name: Show pipeline step status
+        run: |
+          echo "Pipeline step outcome: ${{ steps.pipeline.outcome }}"
+          if [ "${{ steps.pipeline.outcome }}" != "success" ]; then
+            echo "⚠️ Pipeline step did NOT succeed. See 'Run optimized pipeline' step output above"
+            echo "   and the 'pipeline-debug-log' artifact for details."
+          fi
+
       - name: Upload all artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: proxy-output
@@ -246,6 +258,7 @@ jobs:
             configs/channel_health.json
             assets/performance_report.html
           retention-days: 7
+          if-no-files-found: warn
 
       - name: Commit output to repo
         if: steps.check_output.outputs.output_exists == 'true'
@@ -261,13 +274,23 @@ jobs:
             echo "✅ Committed updated files to repository"
           fi
 
-      - name: Upload logs (if failed)
-        if: failure()
+      - name: Upload logs (if pipeline failed)
+        if: always() && steps.pipeline.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: logs
-          path: logs/
-          retention-days: 3
+          name: pipeline-debug-log
+          path: |
+            pipeline_debug.log
+            pipeline_debug.log.*
+            logs/
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Fail job if pipeline failed
+        if: steps.pipeline.outcome == 'failure'
+        run: |
+          echo "❌ 'Run optimized pipeline' step failed. Failing the job after diagnostics were uploaded."
+          exit 1
 
       - name: Cleanup old artifacts (optional)
         if: always()
