@@ -21,6 +21,7 @@ from aiohttp import ClientTimeout
 from concurrency import ConcurrencyLimiter
 from session_pool import SessionPool
 from retry_utils import retry_with_backoff
+from protocol_registry import registry
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +36,12 @@ SPEED_TAGS = {
 class ActiveChecker:
     """
     Активная проверка с кешированием, пулом соединений и фильтрацией.
+    ВАЖНО: этот модуль выполняет только проверку достижимости (TCP + HTTP HEAD),
+    НЕ проверяет работоспособность самого прокси-протокола (VLESS/VMess/Trojan handshake).
     """
 
     def __init__(self,
-                 timeout: float = 1.0,  # уменьшено
+                 timeout: float = 1.0,
                  max_workers: int = None,
                  test_url: str = "https://www.google.com/generate_204",
                  max_latency: float = 6000.0,
@@ -56,7 +59,6 @@ class ActiveChecker:
             per_host_limit=max(2, self.max_workers // 10)
         )
 
-        # Простой LRU-кеш для TCP-задержек
         self._tcp_cache = {}
         self._cache_max_size = 10000
 
@@ -67,7 +69,7 @@ class ActiveChecker:
         from profile_scorer import ProfileScorer
         scorer = ProfileScorer()
         try:
-            parsed = self._extract_parsed(config)
+            parsed = registry.parse(config)
             if not parsed:
                 return False
             key = scorer.get_profile_key(config, parsed)
@@ -79,18 +81,6 @@ class ActiveChecker:
         except Exception:
             pass
         return False
-
-    def _extract_parsed(self, config: str) -> Optional[Dict]:
-        import config_parser as parser
-        if config.startswith('vless://'):
-            return parser.parse_vless(config)
-        elif config.startswith('vmess://'):
-            return parser.decode_vmess(config)
-        elif config.startswith('trojan://'):
-            return parser.parse_trojan(config)
-        elif config.startswith('ss://'):
-            return parser.parse_shadowsocks(config)
-        return None
 
     async def _get_session(self) -> aiohttp.ClientSession:
         pool = SessionPool()
@@ -106,10 +96,8 @@ class ActiveChecker:
         return await self._tcp_latency_raw(host, port)
 
     async def _tcp_latency_raw(self, host: str, port: int) -> float:
-        """Реализация TCP-проверки без кеша."""
         start = time.time()
         try:
-            # Используем asyncio.open_connection с явным таймаутом
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(host, port, ssl=False),
                 timeout=self.timeout
@@ -135,28 +123,27 @@ class ActiveChecker:
             return -1.0
 
     async def _tcp_latency(self, host: str, port: int) -> float:
-        """Возвращает задержку из кеша или выполняет проверку."""
         key = (host, port)
         if key in self._tcp_cache:
             return self._tcp_cache[key]
 
         latency = await self._tcp_latency_with_retry(host, port)
 
-        # LRU-обновление с ограничением размера
         if len(self._tcp_cache) >= self._cache_max_size:
-            # Очищаем половину
             items = list(self._tcp_cache.items())
             self._tcp_cache = dict(items[len(items)//2:])
         self._tcp_cache[key] = latency
         return latency
 
     async def _http_probe(self, host: str, port: int, use_tls: bool) -> float:
+        """HTTP HEAD-запрос для проверки доступности сервера (без проверки сертификата)."""
         try:
             session = await self._get_session()
             proto = 'https' if use_tls else 'http'
             url = f"{proto}://{host}:{port}"
             start = time.time()
-            async with session.head(url, allow_redirects=True, timeout=self.timeout) as resp:
+            # Игнорируем ошибки сертификата, так как мы проверяем только достижимость
+            async with session.head(url, allow_redirects=True, timeout=self.timeout, ssl=False) as resp:
                 if resp.status in (200, 204, 301, 302, 307, 308):
                     return (time.time() - start) * 1000
             return -1.0
@@ -188,7 +175,7 @@ class ActiveChecker:
             proto = 'https' if use_tls else 'http'
             url = f"{proto}://{host}:{port}/speedtest?size={test_file_size}"
             start = time.time()
-            async with session.get(url, timeout=self.timeout) as resp:
+            async with session.get(url, timeout=self.timeout, ssl=False) as resp:
                 if resp.status != 200:
                     return -1.0
                 content = await resp.read()
@@ -219,7 +206,8 @@ class ActiveChecker:
             logger.debug(f"Config skipped by history: {config[:80]}")
             return result
 
-        server_info = self._extract_server_info(config)
+        # Используем ProtocolRegistry для извлечения серверной информации
+        server_info = registry.get_server_info(config)
         if not server_info:
             result['error'] = 'no_server_info'
             logger.debug(f"Could not extract server info from: {config[:100]}")
@@ -227,7 +215,6 @@ class ActiveChecker:
 
         host, port, use_tls = server_info
 
-        # Проверяем TCP через лимитер
         try:
             tcp_latency = await self._limiter.run(host, self._tcp_latency(host, port))
         except Exception as e:
@@ -240,7 +227,6 @@ class ActiveChecker:
             logger.debug(f"TCP failed for {host}:{port}")
             return result
 
-        # Если TCP успешен и задержка приемлема, пробуем HTTP
         if tcp_latency > 0 and tcp_latency < self.max_latency:
             http_latency = await self._limiter.run(host, self._http_probe(host, port, use_tls))
             if http_latency > 0:
@@ -248,13 +234,11 @@ class ActiveChecker:
                 result['valid'] = True
                 result['success'] = True
                 result['speed_tag'] = self._classify_speed(http_latency)
-                # Дополнительная SNI-проверка (не влияет на валидность)
                 sni = self._extract_sni(config)
                 if sni:
                     await self._limiter.run(host, self._sni_probe(host, port, sni))
                 return result
 
-        # Если HTTP не удался, но TCP прошёл, считаем валидным (с задержкой TCP)
         if tcp_latency <= self.max_latency:
             result['latency'] = tcp_latency
             result['valid'] = True
@@ -267,22 +251,9 @@ class ActiveChecker:
         return result
 
     def _extract_sni(self, config: str) -> Optional[str]:
-        try:
-            import config_parser as parser
-            if config.startswith('vless://'):
-                data = parser.parse_vless(config)
-                if data:
-                    return data.get('sni')
-            elif config.startswith('vmess://'):
-                data = parser.decode_vmess(config)
-                if data:
-                    return data.get('sni')
-            elif config.startswith('trojan://'):
-                data = parser.parse_trojan(config)
-                if data:
-                    return data.get('sni')
-        except Exception:
-            pass
+        parsed = registry.parse(config)
+        if parsed:
+            return parsed.get('sni') or parsed.get('host')
         return None
 
     async def check_batch(self, configs: List[str]) -> List[Dict]:
@@ -291,21 +262,18 @@ class ActiveChecker:
 
         filtered_configs = [c for c in configs if not self._should_skip(c)]
 
-        # Группируем для прогрева кеша
         server_groups = defaultdict(list)
         for cfg in filtered_configs:
-            info = self._extract_server_info(cfg)
+            info = registry.get_server_info(cfg)
             if info:
                 server_groups[(info[0], info[1])].append(cfg)
 
-        # Прогрев кеша TCP (без ограничений per-host, но с лимитером)
         warm_tasks = []
         for (host, port), cfgs in server_groups.items():
             warm_tasks.append(self._limiter.run(host, self._tcp_latency(host, port)))
         if warm_tasks:
             await asyncio.gather(*warm_tasks, return_exceptions=True)
 
-        # Проверяем каждую конфигурацию
         sem = asyncio.Semaphore(self.max_workers * 2)
 
         async def check_one(cfg: str):
@@ -332,92 +300,7 @@ class ActiveChecker:
         return final
 
     async def close(self):
-        # Сессия закрывается глобально через SessionPool
         pass
-
-    def _extract_server_info(self, config: str) -> Optional[Tuple[str, int, bool]]:
-        """
-        Извлекает хост, порт и флаг TLS из конфигурации.
-        Возвращает (host, port, use_tls) или None.
-        Улучшенная версия с регулярными выражениями.
-        """
-        # Сначала пробуем через config_parser
-        try:
-            import config_parser as parser
-            if config.startswith('vmess://'):
-                data = parser.decode_vmess(config)
-                if data and data.get('add') and data.get('port'):
-                    host = data.get('add')
-                    port = int(data.get('port'))
-                    tls = data.get('tls', '').lower() in ('tls', 'xtls', 'reality')
-                    return (host, port, tls)
-            elif config.startswith('vless://'):
-                data = parser.parse_vless(config)
-                if data and data.get('address') and data.get('port'):
-                    host = data.get('address')
-                    port = int(data.get('port'))
-                    tls = data.get('security', '').lower() in ('tls', 'reality')
-                    return (host, port, tls)
-            elif config.startswith('trojan://'):
-                data = parser.parse_trojan(config)
-                if data and data.get('address') and data.get('port'):
-                    host = data.get('address')
-                    port = int(data.get('port'))
-                    tls = data.get('security', 'tls').lower() in ('tls', 'reality')
-                    return (host, port, tls)
-            elif config.startswith('ss://'):
-                data = parser.parse_shadowsocks(config)
-                if data and data.get('address') and data.get('port'):
-                    host = data.get('address')
-                    port = int(data.get('port'))
-                    return (host, port, False)
-        except Exception as e:
-            logger.debug(f"Parser extraction failed: {e}")
-
-        # Fallback: используем urlparse
-        try:
-            # Удаляем фрагмент (якорь) для чистоты
-            base = config.split('#')[0]
-            parsed = urlparse(base)
-            if parsed.hostname:
-                host = parsed.hostname
-                port = parsed.port
-                if port is None:
-                    # Определяем порт по умолчанию для протокола
-                    if parsed.scheme in ('https', 'vless', 'trojan'):
-                        port = 443
-                    elif parsed.scheme == 'ss':
-                        port = 8388
-                    elif parsed.scheme == 'vmess':
-                        port = 80
-                    else:
-                        port = 443
-                params = parse_qs(parsed.query)
-                security = params.get('security', [''])[0].lower()
-                tls = security in ('tls', 'reality', 'xtls') or parsed.scheme in ('https', 'trojan')
-                return (host, port, tls)
-        except Exception as e:
-            logger.debug(f"urlparse extraction failed: {e}")
-
-        # Второй fallback: регулярное выражение для поиска @host:port
-        match = re.search(r'@([^:]+):(\d+)', config)
-        if match:
-            host = match.group(1)
-            port = int(match.group(2))
-            # Попытаемся определить TLS по наличию security=tls или sni
-            tls = 'security=tls' in config or 'security=reality' in config or 'sni=' in config
-            return (host, port, tls)
-
-        # Третий fallback: ищем IP:port или domain:port без @ (для некоторых форматов)
-        match = re.search(r'([0-9a-zA-Z.-]+):(\d+)', config)
-        if match:
-            host = match.group(1)
-            port = int(match.group(2))
-            tls = 'security=tls' in config or 'security=reality' in config or 'sni=' in config
-            return (host, port, tls)
-
-        logger.debug(f"Could not extract server info from config: {config[:100]}")
-        return None
 
     def filter_by_latency(self, results: List[Dict], max_latency: float = None) -> List[str]:
         if max_latency is None:
