@@ -13,9 +13,10 @@ from typing import Dict, List, Set, Optional, Tuple
 from collections import defaultdict
 from urllib.parse import urlparse, parse_qs
 
-import config_parser
+import config_parser as parser
 from parse_fallback import FallbackParser
 from bloom_async import ShardedBloomDeduplicator
+from protocol_registry import registry
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,7 @@ class DeepDeduplicator:
         self._bloom = ShardedBloomDeduplicator(cache_dir="bloom_shards")
         self._trie = PrefixTrie()
         self._server_cache = {}
-        self._index: Dict[str, Set[str]] = {}
+        self._seen_in_run = set()  # для дедупликации внутри одного запуска
 
     def generate_fingerprint(self, config: str) -> Optional[Dict]:
         try:
@@ -173,23 +174,6 @@ class DeepDeduplicator:
             return True
         return False
 
-    def _add_to_index(self, fp_data: Dict) -> bool:
-        server = fp_data.get('server')
-        port = fp_data.get('port')
-        protocol = fp_data.get('protocol')
-        if not server or not port or not protocol:
-            return False
-        key = f"{server}:{port}:{protocol}"
-        if key not in self._index:
-            self._index[key] = set()
-        fp = fp_data.get('fingerprint')
-        if not fp:
-            return False
-        if fp in self._index[key]:
-            return False
-        self._index[key].add(fp)
-        return True
-
     async def deduplicate_configs_async(self, configs: List[str], quality_scores: Dict[str, float] = None) -> List[str]:
         if quality_scores is None:
             quality_scores = {}
@@ -197,18 +181,25 @@ class DeepDeduplicator:
         groups = defaultdict(list)
         fingerprint_data = {}
 
+        # Локальный set для дедупликации в рамках одного запуска
+        seen_in_run = set()
+
         for config in configs:
+            # Проверяем персистентный Bloom
             if await self._bloom.contains(config):
-                fp_data = self.generate_fingerprint(config)
-                if fp_data:
-                    key = f"{fp_data.get('server')}:{fp_data.get('port')}:{fp_data.get('protocol')}"
-                    if key in self._index and fp_data.get('fingerprint') in self._index[key]:
-                        continue
+                # Если конфиг уже был когда-либо обработан, пропускаем
+                continue
+            # Если уже видели в этом запуске, пропускаем
+            if config in seen_in_run:
+                continue
+
             fp_data = self.generate_fingerprint(config)
             if fp_data:
+                # Добавляем в Bloom для будущих запусков
                 await self._bloom.add(config)
                 groups[fp_data['fingerprint']].append(config)
                 fingerprint_data[config] = fp_data
+                seen_in_run.add(config)
 
         await self._bloom.save()
 
@@ -231,13 +222,11 @@ class DeepDeduplicator:
 
             best = max(group, key=lambda c: quality_scores.get(c, 0))
             fp_best = self.generate_fingerprint(best)
-            if fp_best and not self._add_to_index(fp_best):
-                continue
+            if fp_best and fp_best.get('server'):
+                self._trie.insert(fp_best.get('server'), fp_best)
             best_configs.append(best)
             seen_fingerprints.add(fingerprint)
             seen_similar.add(best)
-            if fp_best and fp_best.get('server'):
-                self._trie.insert(fp_best.get('server'), fp_best)
 
         logger.info(f"Deep deduplication: {len(configs)} → {len(best_configs)} configs")
         return best_configs
