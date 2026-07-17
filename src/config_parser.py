@@ -2,6 +2,7 @@
 Модуль парсинга прокси-конфигураций с поддержкой fallback-стратегий.
 Использует строгий парсинг через библиотечные функции и эвристический парсинг
 как резервный вариант.
+Добавлена валидация портов с учётом протокола.
 """
 
 import json
@@ -9,7 +10,7 @@ import base64
 import re
 import logging
 import shutil
-from typing import Dict, Optional, Tuple, Any
+from typing import Dict, Optional, Tuple, Any, List
 from urllib.parse import urlparse, parse_qs, unquote
 import binascii
 from functools import lru_cache
@@ -31,11 +32,33 @@ VALID_VLESS_FLOWS = {'', 'xtls-rprx-origin', 'xtls-rprx-direct', 'xtls-rprx-visi
 VALID_VLESS_SECURITY = {'none', 'tls', 'reality', 'xtls'}
 VALID_TRANSPORT_TYPES = {'tcp', 'kcp', 'ws', 'http', 'h2', 'quic', 'grpc', 'httpupgrade', 'splithttp', 'xhttp', 'raw'}
 
+# Определение допустимых портов для протоколов
+PORT_RANGES = {
+    'tcp': range(1, 65536),
+    'udp': range(1, 65536),
+    'wireguard': [51820, 51821, 51822] + list(range(1, 65536)),
+    'quic': [443, 8443] + list(range(1, 65536)),
+    'vmess': range(1, 65536),
+    'vless': range(1, 65536),
+    'trojan': range(1, 65536),
+    'ss': range(1, 65536),
+    'hysteria2': range(1, 65536),
+    'tuic': range(1, 65536),
+}
 
+def validate_port_for_protocol(port: int, protocol: str) -> bool:
+    """Проверяет, что порт допустим для данного протокола."""
+    if not isinstance(port, int) or port < 1 or port > 65535:
+        return False
+    valid_ranges = PORT_RANGES.get(protocol, range(1, 65536))
+    if isinstance(valid_ranges, list):
+        return port in valid_ranges
+    return port in valid_ranges
+
+# Для обратной совместимости
 def validate_port(port: int) -> bool:
-    """Проверяет, что порт находится в допустимом диапазоне 1–65535."""
-    return isinstance(port, int) and 1 <= port <= 65535
-
+    """Устаревшая функция, использует 'tcp' как протокол по умолчанию."""
+    return validate_port_for_protocol(port, 'tcp')
 
 def is_base64(s: str) -> bool:
     if not s or len(s) < 4:
@@ -45,7 +68,6 @@ def is_base64(s: str) -> bool:
         return bool(re.match(r'^[A-Za-z0-9+/\-_]+$', s)) and len(s) % 4 in (0, 2, 3)
     except Exception:
         return False
-
 
 @lru_cache(maxsize=2048)
 def safe_b64decode(s: str) -> Optional[str]:
@@ -67,7 +89,6 @@ def safe_b64decode(s: str) -> Optional[str]:
         logger.debug(f"Base64 decode error (fallback): {e}")
         return None
 
-
 def safe_json_loads(text: str) -> Optional[Dict]:
     """Безопасный парсинг JSON с восстановлением повреждённых данных."""
     try:
@@ -79,7 +100,6 @@ def safe_json_loads(text: str) -> Optional[Dict]:
             return json.loads(cleaned)
         except:
             return None
-
 
 def decode_vmess(config: str) -> Optional[Dict]:
     """Декодирует VMess-конфигурацию с fallback-стратегией."""
@@ -106,7 +126,7 @@ def decode_vmess(config: str) -> Optional[Dict]:
 
         try:
             port = int(data['port'])
-            if not validate_port(port):
+            if not validate_port_for_protocol(port, 'vmess'):
                 logger.debug(f"VMess invalid port: {port}")
                 return None
             data['port'] = port
@@ -128,7 +148,6 @@ def decode_vmess(config: str) -> Optional[Dict]:
     # Пробуем fallback-парсинг
     return FallbackParser.parse_vmess_fallback(config)
 
-
 def parse_vless(config: str) -> Optional[Dict]:
     """Парсит VLESS-конфигурацию с fallback-стратегией."""
     if not config or not isinstance(config, str) or not config.startswith('vless://'):
@@ -141,7 +160,7 @@ def parse_vless(config: str) -> Optional[Dict]:
             return FallbackParser.parse_vless_fallback(config)
 
         port = url.port or 443
-        if not validate_port(port):
+        if not validate_port_for_protocol(port, 'vless'):
             logger.debug(f"VLESS invalid port: {port}")
             return FallbackParser.parse_vless_fallback(config)
 
@@ -180,7 +199,6 @@ def parse_vless(config: str) -> Optional[Dict]:
     
     return FallbackParser.parse_vless_fallback(config)
 
-
 def parse_trojan(config: str) -> Optional[Dict]:
     """Парсит Trojan-конфигурацию с fallback-стратегией."""
     if not config or not isinstance(config, str) or not config.startswith('trojan://'):
@@ -192,7 +210,7 @@ def parse_trojan(config: str) -> Optional[Dict]:
             return FallbackParser.parse_trojan_fallback(config)
 
         port = url.port or 443
-        if not validate_port(port):
+        if not validate_port_for_protocol(port, 'trojan'):
             logger.debug(f"Trojan invalid port: {port}")
             return FallbackParser.parse_trojan_fallback(config)
 
@@ -220,7 +238,6 @@ def parse_trojan(config: str) -> Optional[Dict]:
     
     return FallbackParser.parse_trojan_fallback(config)
 
-
 def parse_hysteria2(config: str) -> Optional[Dict]:
     """Парсит Hysteria2-конфигурацию."""
     if not config or not isinstance(config, str) or not config.startswith(('hysteria2://', 'hy2://')):
@@ -232,7 +249,7 @@ def parse_hysteria2(config: str) -> Optional[Dict]:
             return None
 
         port = url.port or 443
-        if not validate_port(port):
+        if not validate_port_for_protocol(port, 'hysteria2'):
             logger.debug(f"Hysteria2 invalid port: {port}")
             return None
 
@@ -255,7 +272,6 @@ def parse_hysteria2(config: str) -> Optional[Dict]:
     except Exception as e:
         logger.debug(f"Hysteria2 parse failed: {e}")
         return None
-
 
 def parse_shadowsocks(config: str) -> Optional[Dict]:
     """Парсит Shadowsocks-конфигурацию с fallback-стратегией."""
@@ -283,7 +299,7 @@ def parse_shadowsocks(config: str) -> Optional[Dict]:
             host = host.strip('[]')
             try:
                 port = int(port_str)
-                if not validate_port(port):
+                if not validate_port_for_protocol(port, 'ss'):
                     logger.debug(f"SS invalid port: {port}")
                     return FallbackParser.parse_ss_fallback(config)
             except ValueError as e:
@@ -318,7 +334,7 @@ def parse_shadowsocks(config: str) -> Optional[Dict]:
             host = host.strip('[]')
             try:
                 port = int(port_str)
-                if not validate_port(port):
+                if not validate_port_for_protocol(port, 'ss'):
                     logger.debug(f"SS invalid port: {port}")
                     return FallbackParser.parse_ss_fallback(config)
             except ValueError as e:
@@ -349,7 +365,6 @@ def parse_shadowsocks(config: str) -> Optional[Dict]:
         logger.debug(f"Shadowsocks parse failed: {e}")
         return FallbackParser.parse_ss_fallback(config)
 
-
 def parse_wireguard(config: str) -> Optional[Dict]:
     """Парсит WireGuard-конфигурацию."""
     if not config or not isinstance(config, str) or not config.startswith('wireguard://'):
@@ -361,7 +376,7 @@ def parse_wireguard(config: str) -> Optional[Dict]:
             return None
 
         port = url.port or 51820
-        if not validate_port(port):
+        if not validate_port_for_protocol(port, 'wireguard'):
             logger.debug(f"WireGuard invalid port: {port}")
             return None
 
@@ -386,7 +401,6 @@ def parse_wireguard(config: str) -> Optional[Dict]:
         logger.debug(f"WireGuard parse failed: {e}")
         return None
 
-
 def parse_tuic(config: str) -> Optional[Dict]:
     """Парсит TUIC-конфигурацию."""
     if not config or not isinstance(config, str) or not config.startswith('tuic://'):
@@ -398,7 +412,7 @@ def parse_tuic(config: str) -> Optional[Dict]:
             return None
 
         port = url.port or 443
-        if not validate_port(port):
+        if not validate_port_for_protocol(port, 'tuic'):
             logger.debug(f"TUIC invalid port: {port}")
             return None
 
@@ -429,7 +443,6 @@ def parse_tuic(config: str) -> Optional[Dict]:
     except Exception as e:
         logger.debug(f"TUIC parse failed: {e}")
         return None
-
 
 # Экспортируем функции для обратной совместимости
 def parse_with_fallback(config: str) -> Tuple[Optional[Dict], str]:

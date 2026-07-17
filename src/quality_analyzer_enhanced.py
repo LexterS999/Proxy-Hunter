@@ -13,6 +13,7 @@
 - Автоматического создания файла истории
 - Пакетной записи аномалий
 - Поэтапного восстановления при повреждении JSON
+- Гарантированной записи при завершении (atexit)
 """
 
 import json
@@ -23,6 +24,7 @@ import threading
 import queue
 import time
 import shutil
+import atexit
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
 from collections import defaultdict, deque
@@ -44,7 +46,6 @@ _anomaly_batch = []
 _ANOMALY_BATCH_SIZE = 50
 _anomaly_lock = threading.Lock()
 
-
 @dataclass
 class RunStats:
     timestamp: str
@@ -62,7 +63,6 @@ class RunStats:
     anomalies: List[Dict]
     protocol_correlations: Dict[str, float]
 
-
 @dataclass
 class ConfigQualityHistory:
     config_hash: str
@@ -77,7 +77,6 @@ class ConfigQualityHistory:
     last_seen: str
     is_active: bool = True
 
-
 class EnhancedQualityAnalyzer:
     def __init__(self, history_file: str = 'configs/quality_history.json',
                  max_history_runs: int = 100,
@@ -88,11 +87,14 @@ class EnhancedQualityAnalyzer:
         self._lock = threading.Lock()
         self.history = self._load_history_with_recovery()
         self._save_queue = queue.Queue()
+        self._stop_event = threading.Event()
         self._start_save_thread()
+        # Гарантированная запись при завершении
+        atexit.register(self.flush_and_stop)
 
     def _start_save_thread(self):
         def save_worker():
-            while True:
+            while not self._stop_event.is_set():
                 try:
                     data = self._save_queue.get(timeout=SAVE_INTERVAL)
                     if data is None:
@@ -100,14 +102,35 @@ class EnhancedQualityAnalyzer:
                     self._save_history_sync(data)
                 except queue.Empty:
                     # Периодическая проверка, не нужно ли сохранить накопленные данные
-                    # NEW: если есть накопленные аномалии, сбрасываем
                     self._flush_anomalies_if_needed(force=False)
                 except Exception as e:
                     logger.error(f"Save worker error: {e}")
+            # Финальная запись при завершении потока
+            self._flush_anomalies(force=True)
+            # Сохраняем оставшиеся данные в очереди
+            while not self._save_queue.empty():
+                try:
+                    data = self._save_queue.get_nowait()
+                    self._save_history_sync(data)
+                except queue.Empty:
+                    break
+
         global save_thread
         if save_thread is None or not save_thread.is_alive():
             save_thread = threading.Thread(target=save_worker, daemon=True)
             save_thread.start()
+
+    def flush_and_stop(self):
+        """Гарантированно сохраняет все данные и останавливает поток записи."""
+        self._stop_event.set()
+        # Дожидаемся опустошения очереди
+        timeout = 10  # секунд
+        start = time.time()
+        while not self._save_queue.empty() and (time.time() - start) < timeout:
+            time.sleep(0.1)
+        # Принудительная запись истории
+        self._save_history_sync(self.history)
+        logger.info("Flushed all pending data and stopped save thread.")
 
     def _hash_ip(self, ip: str) -> str:
         if not ip:

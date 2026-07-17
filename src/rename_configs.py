@@ -5,13 +5,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import json
 import base64
 import logging
-from typing import Dict, Optional
+import shutil
+from typing import Dict, Optional, Tuple
 from urllib.parse import urlparse, parse_qs, unquote
 import pycountry
 import config_parser as parser
 from profile_scorer import ProfileScorer
 from geo_loader import GeoLoader
 from user_settings import GEO_COUNTRY_URL, GEO_ASN_URL, NAMING_FORMAT, NAMING_SEPARATOR, SHOW_DC_TAG
+from enrich_configs import load_location_cache_safe  # Импортируем общую функцию
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -29,15 +31,9 @@ class ConfigRenamer:
         self.load_location_cache(location_file)
 
     def load_location_cache(self, location_file: str):
-        try:
-            with open(location_file, 'r', encoding='utf-8') as f:
-                raw_cache = json.load(f)
-                for key, value in raw_cache.items():
-                    if isinstance(value, (list, tuple)) and len(value) >= 2:
-                        self.location_cache[key] = (value[0], value[1])  # flag, country_code
-            logger.info(f"Loaded {len(self.location_cache)} location entries")
-        except Exception as e:
-            logger.error(f"Error loading location cache: {e}")
+        """Загружает кэш с проверкой целостности."""
+        self.location_cache = load_location_cache_safe(location_file)
+        logger.info(f"Loaded {len(self.location_cache)} location entries")
 
     def get_location(self, address: str) -> tuple:
         """Возвращает (флаг, код_страны) из кэша или через GeoLoader."""

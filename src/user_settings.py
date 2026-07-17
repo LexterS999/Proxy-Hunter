@@ -1,6 +1,10 @@
 import os
 import re
+import logging
 from urllib.parse import urlparse
+from typing import List
+
+logger = logging.getLogger(__name__)
 
 # Загрузка каналов из внешнего файла, если он существует
 CUSTOM_CHANNELS_FILE = 'custom_channels.txt'
@@ -48,21 +52,46 @@ DEFAULT_SOURCE_URLS = [
 custom_channels = load_channels_from_file(CUSTOM_CHANNELS_FILE)
 SOURCE_URLS = custom_channels if custom_channels else DEFAULT_SOURCE_URLS
 
-# Переменные окружения имеют приоритет над файловыми настройками
-USE_MAXIMUM_POWER = os.getenv('PROXY_HUNTER_USE_MAXIMUM_POWER', 'True').lower() in ('true', '1', 'yes')
-SPECIFIC_CONFIG_COUNT = int(os.getenv('PROXY_HUNTER_SPECIFIC_CONFIG_COUNT', '1000'))
-MAX_CONFIG_AGE_DAYS = int(os.getenv('PROXY_HUNTER_MAX_CONFIG_AGE_DAYS', '1'))
+# Валидатор переменных окружения
+def get_safe_env(key: str, default: str, valid_values: List[str] = None, value_type: type = str) -> object:
+    """
+    Безопасно получает переменную окружения, проверяя её на соответствие допустимым значениям.
+    Если значение невалидно, возвращает default.
+    """
+    value = os.getenv(key, default)
+    if valid_values is not None:
+        if value not in valid_values:
+            logger.warning(f"Invalid value for {key}: {value}, using {default}")
+            return default
+    if value_type == bool:
+        return value.lower() in ('true', '1', 'yes')
+    if value_type == int:
+        try:
+            return int(value)
+        except ValueError:
+            logger.warning(f"Invalid integer for {key}: {value}, using {default}")
+            return int(default)
+    return value
+
+# Применяем валидацию ко всем переменным окружения
+USE_MAXIMUM_POWER = get_safe_env('PROXY_HUNTER_USE_MAXIMUM_POWER', 'True', value_type=bool)
+SPECIFIC_CONFIG_COUNT = get_safe_env('PROXY_HUNTER_SPECIFIC_CONFIG_COUNT', '1000', value_type=int)
+MAX_CONFIG_AGE_DAYS = get_safe_env('PROXY_HUNTER_MAX_CONFIG_AGE_DAYS', '1', value_type=int)
 
 # Протоколы из переменных окружения
-ENABLED_PROTOCOLS = {
-    "wireguard://": os.getenv('PROXY_HUNTER_ENABLE_WIREGUARD', 'False').lower() in ('true', '1', 'yes'),
-    "hysteria2://": os.getenv('PROXY_HUNTER_ENABLE_HYSTERIA2', 'True').lower() in ('true', '1', 'yes'),
-    "vless://": os.getenv('PROXY_HUNTER_ENABLE_VLESS', 'True').lower() in ('true', '1', 'yes'),
-    "vmess://": os.getenv('PROXY_HUNTER_ENABLE_VMESS', 'False').lower() in ('true', '1', 'yes'),
-    "ss://": os.getenv('PROXY_HUNTER_ENABLE_SS', 'False').lower() in ('true', '1', 'yes'),
-    "trojan://": os.getenv('PROXY_HUNTER_ENABLE_TROJAN', 'True').lower() in ('true', '1', 'yes'),
-    "tuic://": os.getenv('PROXY_HUNTER_ENABLE_TUIC', 'False').lower() in ('true', '1', 'yes'),
+_ENABLED_PROTOCOLS_RAW = {
+    "wireguard://": os.getenv('PROXY_HUNTER_ENABLE_WIREGUARD', 'False'),
+    "hysteria2://": os.getenv('PROXY_HUNTER_ENABLE_HYSTERIA2', 'True'),
+    "vless://": os.getenv('PROXY_HUNTER_ENABLE_VLESS', 'True'),
+    "vmess://": os.getenv('PROXY_HUNTER_ENABLE_VMESS', 'False'),
+    "ss://": os.getenv('PROXY_HUNTER_ENABLE_SS', 'False'),
+    "trojan://": os.getenv('PROXY_HUNTER_ENABLE_TROJAN', 'True'),
+    "tuic://": os.getenv('PROXY_HUNTER_ENABLE_TUIC', 'False'),
 }
+
+ENABLED_PROTOCOLS = {}
+for proto, val in _ENABLED_PROTOCOLS_RAW.items():
+    ENABLED_PROTOCOLS[proto] = get_safe_env(f'PROXY_HUNTER_ENABLE_{proto.replace("://", "").upper()}', val, value_type=bool)
 
 GEO_COUNTRY_URL = "https://media.githubusercontent.com/media/iplocate/ip-address-databases/refs/heads/main/ip-to-country/ip-to-country.mmdb"
 GEO_ASN_URL = "https://media.githubusercontent.com/media/iplocate/ip-address-databases/refs/heads/main/ip-to-asn/ip-to-asn.mmdb"

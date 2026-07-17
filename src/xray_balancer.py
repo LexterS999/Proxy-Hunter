@@ -20,11 +20,12 @@ class ConfigToXray:
         self.outbounds = []
 
     @staticmethod
-    def is_ipv4(address: str) -> bool:
+    def is_valid_address(address: str) -> bool:
+        """Проверяет, является ли строка корректным IPv4 или IPv6 адресом."""
         try:
-            ipaddress.IPv4Address(address)
+            ipaddress.ip_address(address)
             return True
-        except (ipaddress.AddressValueError, ValueError):
+        except ValueError:
             return False
 
     @staticmethod
@@ -169,8 +170,8 @@ class ConfigToXray:
     def convert_vmess(self, data: Dict) -> Optional[Dict]:
         if not data.get('add') or not data.get('port') or not data.get('id'):
             return None
-        if not self.is_ipv4(data.get('add', '')):
-            logger.debug(f"Skipping VMess config: address '{data.get('add')}' is not IPv4")
+        if not self.is_valid_address(data.get('add', '')):
+            logger.debug(f"Skipping VMess config: address '{data.get('add')}' is not a valid IP")
             return None
         outbound = {
             "protocol": "vmess",
@@ -197,8 +198,8 @@ class ConfigToXray:
     def convert_vless(self, data: Dict) -> Optional[Dict]:
         if not data.get('address') or not data.get('port') or not data.get('uuid'):
             return None
-        if not self.is_ipv4(data.get('address', '')):
-            logger.debug(f"Skipping VLESS config: address '{data.get('address')}' is not IPv4")
+        if not self.is_valid_address(data.get('address', '')):
+            logger.debug(f"Skipping VLESS config: address '{data.get('address')}' is not a valid IP")
             return None
         outbound = {
             "protocol": "vless",
@@ -225,8 +226,8 @@ class ConfigToXray:
     def convert_trojan(self, data: Dict) -> Optional[Dict]:
         if not data.get('address') or not data.get('port') or not data.get('password'):
             return None
-        if not self.is_ipv4(data.get('address', '')):
-            logger.debug(f"Skipping Trojan config: address '{data.get('address')}' is not IPv4")
+        if not self.is_valid_address(data.get('address', '')):
+            logger.debug(f"Skipping Trojan config: address '{data.get('address')}' is not a valid IP")
             return None
         outbound = {
             "protocol": "trojan",
@@ -247,8 +248,8 @@ class ConfigToXray:
     def convert_shadowsocks(self, data: Dict) -> Optional[Dict]:
         if not data.get('address') or not data.get('port') or not data.get('method') or not data.get('password'):
             return None
-        if not self.is_ipv4(data.get('address', '')):
-            logger.debug(f"Skipping Shadowsocks config: address '{data.get('address')}' is not IPv4")
+        if not self.is_valid_address(data.get('address', '')):
+            logger.debug(f"Skipping Shadowsocks config: address '{data.get('address')}' is not a valid IP")
             return None
         return {
             "protocol": "shadowsocks",

@@ -8,12 +8,14 @@
 - Композитный скор
 - Старение (упрощённое)
 - Дополнительные факторы: страна, ASN, датацентр, privacy-флаги
+- Добавлен fallback через внешний API (ipinfo.io) с кешированием
 """
 
 import json
 import os
 import logging
 import numpy as np
+import requests
 from typing import Dict, Optional, Tuple, List
 from datetime import datetime, timedelta
 
@@ -27,6 +29,7 @@ class ProfileScorer:
         self.history_file = history_file
         self.history = self._load_history()
         self.geo = GeoLoader(GEO_COUNTRY_URL, GEO_ASN_URL)
+        self._server_type_cache = {}  # Кеш для fallback-запросов
 
     def _load_history(self) -> Dict:
         if os.path.exists(self.history_file):
@@ -168,12 +171,37 @@ class ProfileScorer:
         return max(0, min(1, round(score, 2)))
 
     def get_server_type(self, server_ip: str) -> Tuple[bool, str]:
-        """Определяет, является ли сервер датацентром, и возвращает тип."""
+        """Определяет, является ли сервер датацентром, с использованием локальной базы и fallback."""
         if not server_ip:
             return False, 'UNK'
+        # Проверяем кеш
+        if server_ip in self._server_type_cache:
+            return self._server_type_cache[server_ip]
+
+        # 1. Пробуем локальный GeoLoader
         self.geo.ensure_databases()
         is_dc = self.geo.is_datacenter(server_ip)
-        return is_dc, 'DC' if is_dc else 'UNK'
+        if is_dc:
+            result = (True, 'DC')
+            self._server_type_cache[server_ip] = result
+            return result
+
+        # 2. Fallback: запрос к ipinfo.io (синхронный, с таймаутом)
+        try:
+            response = requests.get(f"https://ipinfo.io/{server_ip}/json", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                org = data.get('org', '')
+                if 'hosting' in org.lower() or 'cloud' in org.lower():
+                    result = (True, 'DC')
+                    self._server_type_cache[server_ip] = result
+                    return result
+        except Exception as e:
+            logger.debug(f"Fallback IP check failed for {server_ip}: {e}")
+
+        result = (False, 'UNK')
+        self._server_type_cache[server_ip] = result
+        return result
 
     def get_reputation_score(self, server_ip: str) -> float:
         """
@@ -187,7 +215,7 @@ class ProfileScorer:
 
         self.geo.ensure_databases()
         country_code, _ = self.geo.get_country(server_ip)
-        is_dc = self.geo.is_datacenter(server_ip)
+        is_dc, _ = self.get_server_type(server_ip)
 
         # Базовый рейтинг
         score = 0.5
@@ -225,11 +253,12 @@ class ProfileScorer:
         Возвращает словарь с privacy-флагами.
         Сейчас заглушка — можно расширить, подключив другую базу данных.
         """
+        is_dc, _ = self.get_server_type(server_ip)
         return {
             'is_abuser': False,
             'is_anonymous': False,
             'is_bogon': False,
-            'is_hosting': self.geo.is_datacenter(server_ip) if server_ip else False,
+            'is_hosting': is_dc,
             'is_icloud_relay': False,
             'is_proxy': False,
             'is_tor': False,

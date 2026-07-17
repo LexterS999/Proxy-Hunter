@@ -4,8 +4,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import json
 import logging
+import shutil
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 import config_parser as parser
 from user_settings import GEO_COUNTRY_URL, GEO_ASN_URL
 from geo_loader import GeoLoader
@@ -17,6 +18,33 @@ COUNTRY_BLACKLIST = os.getenv('PROXY_HUNTER_COUNTRY_BLACKLIST', 'CN,RU,IR').spli
 
 def is_country_allowed(country_code: str) -> bool:
     return country_code not in COUNTRY_BLACKLIST
+
+# Функция безопасной загрузки location_cache
+def load_location_cache_safe(location_file: str) -> Dict:
+    """Загружает location_cache с проверкой структуры и восстановлением."""
+    cache = {}
+    if not os.path.exists(location_file):
+        return cache
+    try:
+        with open(location_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            for key, value in data.items():
+                # Валидация структуры: ожидаем list или tuple из двух элементов
+                if isinstance(value, (list, tuple)) and len(value) >= 2:
+                    flag, code = value[0], value[1]
+                    if isinstance(flag, str) and isinstance(code, str):
+                        cache[key] = (flag, code)
+                    else:
+                        logger.warning(f"Skipping invalid cache entry for {key}: {value}")
+                else:
+                    logger.warning(f"Skipping invalid cache entry for {key}: {value}")
+        logger.info(f"Loaded {len(cache)} location entries from {location_file}")
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        logger.error(f"Location cache corrupted: {e}, creating backup and resetting")
+        if os.path.exists(location_file):
+            shutil.copy2(location_file, f"{location_file}.corrupted")
+        cache = {}
+    return cache
 
 class ConfigEnricher:
     def __init__(self):
@@ -57,7 +85,6 @@ class ConfigEnricher:
         # Фильтр по стране
         if not is_country_allowed(country_code):
             logger.info(f"Address {address} in blacklisted country {country_code}, skipping")
-            # Возвращаем "XX", но для совместимости с форматом флага
             country_code = 'XX'
 
         if country_code != 'XX' and country_code:

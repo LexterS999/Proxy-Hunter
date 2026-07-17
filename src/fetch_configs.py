@@ -23,7 +23,23 @@ from session_pool import SessionPool
 
 logger = logging.getLogger(__name__)
 
+# === Rate Limiter для Telegram ===
+class RateLimiter:
+    def __init__(self, calls_per_second: float = 1.5):
+        self._sem = asyncio.Semaphore(int(calls_per_second * 60))  # Запросов в минуту
+        self._lock = asyncio.Lock()
+        self._calls_per_second = calls_per_second
 
+    async def acquire(self):
+        async with self._lock:
+            await self._sem.acquire()
+            asyncio.create_task(self._release_after_delay())
+
+    async def _release_after_delay(self):
+        await asyncio.sleep(60 / self._calls_per_second)
+        self._sem.release()
+
+# === Основной класс ===
 class AsyncConfigFetcher:
     """Полностью асинхронный сборщик конфигураций с поддержкой лимитов."""
 
@@ -42,6 +58,9 @@ class AsyncConfigFetcher:
         self._connector_limit = min(200, num_channels * 10)
         self._connector_per_host = min(50, num_channels * 5)
 
+        # Rate limiter
+        self._rate_limiter = RateLimiter(calls_per_second=1.5)
+
     async def _ensure_session(self) -> aiohttp.ClientSession:
         """Возвращает общую сессию из SessionPool."""
         pool = SessionPool()
@@ -58,6 +77,9 @@ class AsyncConfigFetcher:
     @retry_with_backoff(attempts=3, base_delay=0.2, max_delay=5.0, deadline=30.0)
     async def _fetch_with_retry(self, url: str) -> Optional[str]:
         """Выполняет один запрос с повторными попытками (реализация декоратора)."""
+        # Применяем rate limit перед каждым запросом
+        await self._rate_limiter.acquire()
+
         session = await self._ensure_session()
         async with session.get(url) as response:
             if response.status == 429:
