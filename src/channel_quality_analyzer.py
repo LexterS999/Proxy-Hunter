@@ -13,7 +13,6 @@ from typing import Dict, List, Optional, Tuple, Set
 from collections import defaultdict, deque
 import statistics
 
-from config import ChannelConfig
 from user_settings import (
     CHANNEL_HEALTH_THRESHOLD,
     CHANNEL_MIN_CONFIGS,
@@ -190,39 +189,4 @@ class ChannelQualityAnalyzer:
         for url in channel_urls:
             if not self.is_channel_healthy(url):
                 unhealthy.append(url)
-        return unhealthy
 
-    def update_health(self, channel_urls: List[str]):
-        """Обновляет данные о здоровье для списка каналов."""
-        for url in channel_urls:
-            score = self.calculate_health_score(url)
-            self.health_data['channels'][url] = {
-                'health_score': score,
-                'last_checked': datetime.now().isoformat(),
-                'is_healthy': score >= CHANNEL_HEALTH_THRESHOLD
-            }
-        self._save_health()
-
-    def get_health_report(self) -> Dict:
-        """Возвращает отчёт о состоянии всех каналов."""
-        return {
-            'channels': self.health_data.get('channels', {}),
-            'last_updated': self.health_data.get('last_updated'),
-            'summary': {
-                'total': len(self.health_data.get('channels', {})),
-                'healthy': sum(1 for c in self.health_data.get('channels', {}).values() if c.get('is_healthy', False)),
-                'unhealthy': sum(1 for c in self.health_data.get('channels', {}).values() if not c.get('is_healthy', False))
-            }
-        }
-
-    def prune_bad_channels(self, channel_urls: List[str]) -> List[str]:
-        """
-        Возвращает список каналов, которые следует оставить (удаляет плохие).
-        """
-        healthy = []
-        for url in channel_urls:
-            if self.is_channel_healthy(url):
-                healthy.append(url)
-            else:
-                logger.info(f"Channel {url} marked as unhealthy, will be removed.")
-        return healthy
