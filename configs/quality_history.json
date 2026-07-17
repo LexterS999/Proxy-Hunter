@@ -1,1 +1,30 @@
-{}
+{
+  "runs": [
+    {
+      "timestamp": "2026-07-17T09:29:53.640761",
+      "total_raw": 668,
+      "total_valid": 658,
+      "total_quality": 0,
+      "total_final": 293,
+      "avg_score": 78.67842620196424,
+      "p50_latency": 0,
+      "p95_latency": 0,
+      "p99_latency": 0,
+      "success_rate": 0,
+      "protocols": {},
+      "geo_distribution": {},
+      "anomalies": [],
+      "protocol_correlations": {}
+    }
+  ],
+  "configs": {},
+  "protocol_stats": {},
+  "country_stats": {},
+  "anomalies": [],
+  "thresholds": {
+    "score_min": 30.0,
+    "latency_max": 2000.0,
+    "success_rate_min": 0.5
+  },
+  "last_updated": "2026-07-17T09:29:53.640761"
+}
