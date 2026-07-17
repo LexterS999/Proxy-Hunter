@@ -1,6 +1,6 @@
 """
 Глубокая дедупликация с оптимизацией через Bloom filter и префиксные деревья.
-Теперь использует асинхронный Bloom фильтр (на основе pybloom_live).
+Теперь использует асинхронный Bloom фильтр (на основе pybloom_live) с шардированием.
 """
 
 import re
@@ -15,10 +15,9 @@ from urllib.parse import urlparse, parse_qs
 
 import config_parser
 from parse_fallback import FallbackParser
-from bloom_async import AsyncBloomDeduplicator
+from bloom_async import ShardedBloomDeduplicator
 
 logger = logging.getLogger(__name__)
-
 
 class PrefixTrieNode:
     __slots__ = ('children', 'is_end', 'data')
@@ -26,7 +25,6 @@ class PrefixTrieNode:
         self.children = {}
         self.is_end = False
         self.data = None
-
 
 class PrefixTrie:
     def __init__(self):
@@ -67,13 +65,12 @@ class PrefixTrie:
             node = node.children.get(next(iter(node.children))) if node.children else None
         return None
 
-
 class DeepDeduplicator:
     def __init__(self):
         self.fingerprints = {}
         self.fingerprint_to_config = {}
         self.best_configs = {}
-        self._bloom = AsyncBloomDeduplicator(cache_file="bloom_cache.bin")
+        self._bloom = ShardedBloomDeduplicator(cache_dir="bloom_shards")
         self._trie = PrefixTrie()
         self._server_cache = {}
         self._index: Dict[str, Set[str]] = {}

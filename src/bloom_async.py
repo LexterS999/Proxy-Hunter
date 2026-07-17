@@ -90,3 +90,6 @@ class ShardedBloomDeduplicator:
                 shard_file.unlink()
         self._loaded_shards.clear()
         logger.info("Reset all bloom shards")
+
+# Для обратной совместимости
+AsyncBloomDeduplicator = ShardedBloomDeduplicator
