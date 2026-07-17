@@ -71,6 +71,12 @@ def get_safe_env(key: str, default: str, valid_values: List[str] = None, value_t
         except ValueError:
             logger.warning(f"Invalid integer for {key}: {value}, using {default}")
             return int(default)
+    if value_type == float:
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid float for {key}: {value}, using {default}")
+            return float(default)
     return value
 
 # Применяем валидацию ко всем переменным окружения
