@@ -104,7 +104,7 @@ GEO_ASN_URL = "https://media.githubusercontent.com/media/iplocate/ip-address-dat
 GEO_COUNTRY_CACHE_PATH = None
 GEO_ASN_CACHE_PATH = None
 
-NAMING_FORMAT = "[{country_code}]{dc_tag}{protocol_info}⚡{score}"
+NAMING_FORMAT = "{protocol_info}"
 NAMING_SEPARATOR = ""
 SHOW_DC_TAG = True
 
