@@ -127,3 +127,13 @@ SAVE_INTERVAL_SECONDS = 30
 ENCRYPT_IPS = True
 ENCRYPTION_SALT = 'proxy_hunter_salt_2026'
 USE_COMPOSITE_SCORE = True
+
+# === Настройки анализа каналов ===
+CHANNEL_HEALTH_THRESHOLD = get_safe_env('PROXY_HUNTER_CHANNEL_HEALTH_THRESHOLD', '25.0', value_type=float)
+CHANNEL_MIN_CONFIGS = get_safe_env('PROXY_HUNTER_CHANNEL_MIN_CONFIGS', '5', value_type=int)
+CHANNEL_MIN_VALID_RATIO = get_safe_env('PROXY_HUNTER_CHANNEL_MIN_VALID_RATIO', '0.1', value_type=float)
+CHANNEL_MIN_PROTOCOLS = get_safe_env('PROXY_HUNTER_CHANNEL_MIN_PROTOCOLS', '1', value_type=int)
+CHANNEL_HISTORY_DAYS = get_safe_env('PROXY_HUNTER_CHANNEL_HISTORY_DAYS', '7', value_type=int)
+# Белый список каналов (разделённые запятыми URL)
+_whitelist_raw = os.getenv('PROXY_HUNTER_CHANNEL_WHITELIST', '')
+CHANNEL_WHITELIST = [url.strip() for url in _whitelist_raw.split(',') if url.strip()]

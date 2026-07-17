@@ -13,8 +13,9 @@ from math import inf
 
 from user_settings import (
     SOURCE_URLS, USE_MAXIMUM_POWER, SPECIFIC_CONFIG_COUNT, ENABLED_PROTOCOLS,
-    MAX_CONFIG_AGE_DAYS
+    MAX_CONFIG_AGE_DAYS, CHANNEL_HEALTH_THRESHOLD
 )
+from channel_quality_analyzer import ChannelQualityAnalyzer
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -79,6 +80,8 @@ class ProxyConfig:
         self.SUPPORTED_PROTOCOLS = self._initialize_protocols()
         self._initialize_settings()
         self._set_smart_limits()
+        # Анализатор каналов (ленивая инициализация)
+        self._analyzer = None
 
     def _initialize_protocols(self) -> Dict:
         return {
@@ -201,10 +204,32 @@ class ProxyConfig:
 
     def get_enabled_channels(self) -> List[ChannelConfig]:
         channels = [channel for channel in self.SOURCE_URLS if channel.enabled]
+        # Применяем анализ каналов, чтобы отключить плохие
+        self._apply_channel_health_filter()
+        # Повторно получаем список после фильтрации
+        channels = [channel for channel in self.SOURCE_URLS if channel.enabled]
         if not channels:
             self.save_empty_config_file()
-            logger.error("No enabled channels found. Empty config file created.")
+            logger.error("No enabled channels found after health filter. Empty config file created.")
         return channels
+
+    def _apply_channel_health_filter(self):
+        """Применяет фильтр здоровья к каналам."""
+        if not self.SOURCE_URLS:
+            return
+        # Загружаем анализатор, если ещё не загружен
+        if self._analyzer is None:
+            self._analyzer = ChannelQualityAnalyzer()
+        # Обновляем данные о здоровье для всех каналов
+        urls = [ch.url for ch in self.SOURCE_URLS]
+        self._analyzer.update_health(urls)
+        # Отключаем нездоровые каналы
+        for ch in self.SOURCE_URLS:
+            if not self._analyzer.is_channel_healthy(ch.url):
+                ch.enabled = False
+                logger.info(f"Channel {ch.url} disabled due to poor health.")
+            else:
+                ch.enabled = True
 
     def update_channel_stats(self, channel: ChannelConfig, success: bool, response_time: float = 0):
         if success:
