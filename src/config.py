@@ -80,7 +80,6 @@ class ProxyConfig:
         self.SUPPORTED_PROTOCOLS = self._initialize_protocols()
         self._initialize_settings()
         self._set_smart_limits()
-        # Анализатор каналов (ленивая инициализация)
         self._analyzer = None
 
     def _initialize_protocols(self) -> Dict:
@@ -97,7 +96,8 @@ class ProxyConfig:
     def _initialize_settings(self):
         self.CHANNEL_RETRY_LIMIT = min(10, max(1, 5))
         self.CHANNEL_ERROR_THRESHOLD = min(0.9, max(0.1, 0.7))
-        self.OUTPUT_FILE = 'configs/proxy_configs.txt'
+        # ЕДИНЫЙ ВЫХОДНОЙ ФАЙЛ
+        self.OUTPUT_FILE = 'configs/output.txt'
         self.STATS_FILE = 'configs/channel_stats.json'
         self.MAX_RETRIES = min(10, max(1, 5))
         self.RETRY_DELAY = min(60, max(5, 15))
@@ -204,9 +204,7 @@ class ProxyConfig:
 
     def get_enabled_channels(self) -> List[ChannelConfig]:
         channels = [channel for channel in self.SOURCE_URLS if channel.enabled]
-        # Применяем анализ каналов, чтобы отключить плохие
         self._apply_channel_health_filter()
-        # Повторно получаем список после фильтрации
         channels = [channel for channel in self.SOURCE_URLS if channel.enabled]
         if not channels:
             self.save_empty_config_file()
@@ -214,16 +212,12 @@ class ProxyConfig:
         return channels
 
     def _apply_channel_health_filter(self):
-        """Применяет фильтр здоровья к каналам."""
         if not self.SOURCE_URLS:
             return
-        # Загружаем анализатор, если ещё не загружен
         if self._analyzer is None:
             self._analyzer = ChannelQualityAnalyzer()
-        # Обновляем данные о здоровье для всех каналов
         urls = [ch.url for ch in self.SOURCE_URLS]
         self._analyzer.update_health(urls)
-        # Отключаем нездоровые каналы
         for ch in self.SOURCE_URLS:
             if not self._analyzer.is_channel_healthy(ch.url):
                 ch.enabled = False
