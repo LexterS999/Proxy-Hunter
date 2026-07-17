@@ -53,6 +53,8 @@ jobs:
           echo '{}' > configs/channel_health.json
           # CSV-файл может быть пустым, но для совместимости создаём с заголовками
           echo "timestamp,total_final,avg_score,p50_latency,p95_latency,p99_latency,success_rate" > configs/quality_data.csv || true
+          # Убедимся, что custom_channels.txt существует (если нет — создаём пустой)
+          touch custom_channels.txt
 
       - name: Verify and fix JSON files (if corrupted)
         run: |
@@ -117,7 +119,7 @@ jobs:
 
           print(f'Found {len(inactive_urls)} inactive channels')
 
-          # Читаем custom_channels.txt
+          # Читаем custom_channels.txt (уже создан на предыдущем шаге)
           try:
               with open('custom_channels.txt', 'r') as f:
                   lines = f.readlines()
@@ -201,6 +203,28 @@ jobs:
           else
             echo "report_exists=false" >> $GITHUB_OUTPUT
           fi
+
+      - name: Validate output configs
+        if: steps.check_output.outputs.output_exists == 'true'
+        run: |
+          echo "Validating output configs..."
+          python -c "
+          import re
+          VALID_PROTOCOLS = ['vmess://', 'vless://', 'trojan://', 'ss://', 'hysteria2://', 'hy2://', 'wireguard://', 'tuic://']
+          with open('configs/output.txt', 'r') as f:
+              lines = [l.strip() for l in f if l.strip()]
+          if not lines:
+              print('❌ output.txt is empty')
+              exit(1)
+          valid_count = 0
+          for line in lines:
+              if any(line.startswith(p) for p in VALID_PROTOCOLS):
+                  valid_count += 1
+          if valid_count == 0:
+              print('❌ No valid protocol lines found in output.txt')
+              exit(1)
+          print(f'✅ {valid_count} valid configs found')
+          "
 
       - name: Show quality summary
         if: steps.check_output.outputs.history_exists == 'true'
