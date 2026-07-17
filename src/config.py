@@ -163,4 +163,109 @@ class ProxyConfig:
             logger.error(f"URL normalization error: {str(e)}")
             raise
 
-    def _remove_duplicate_urls(self, channel_configs: List[
+    def _remove_duplicate_urls(self, channel_configs: List[ChannelConfig]) -> List[ChannelConfig]:
+        try:
+            seen_urls = {}
+            unique_configs = []
+            for config in channel_configs:
+                if not isinstance(config, ChannelConfig):
+                    logger.warning(f"Invalid config skipped: {config}")
+                    continue
+                try:
+                    normalized_url = self._normalize_url(config.url)
+                    if normalized_url not in seen_urls:
+                        seen_urls[normalized_url] = True
+                        unique_configs.append(config)
+                except Exception:
+                    continue
+            if not unique_configs:
+                self.save_empty_config_file()
+                logger.error("No valid sources found. Empty config file created.")
+                return []
+            return unique_configs
+        except Exception as e:
+            logger.error(f"Error removing duplicate URLs: {str(e)}")
+            self.save_empty_config_file()
+            return []
+
+    def is_protocol_enabled(self, protocol: str) -> bool:
+        try:
+            if not protocol:
+                return False
+            protocol = protocol.lower().strip()
+            if protocol in self.SUPPORTED_PROTOCOLS:
+                return self.SUPPORTED_PROTOCOLS[protocol].get("enabled", False)
+            for main_protocol, info in self.SUPPORTED_PROTOCOLS.items():
+                if protocol in info.get("aliases", []):
+                    return info.get("enabled", False)
+            return False
+        except Exception:
+            return False
+
+    def get_enabled_channels(self) -> List[ChannelConfig]:
+        channels = [channel for channel in self.SOURCE_URLS if channel.enabled]
+        # Применяем анализ каналов, чтобы отключить плохие
+        self._apply_channel_health_filter()
+        # Повторно получаем список после фильтрации
+        channels = [channel for channel in self.SOURCE_URLS if channel.enabled]
+        if not channels:
+            self.save_empty_config_file()
+            logger.error("No enabled channels found after health filter. Empty config file created.")
+        return channels
+
+    def _apply_channel_health_filter(self):
+        """Применяет фильтр здоровья к каналам."""
+        if not self.SOURCE_URLS:
+            return
+        # Загружаем анализатор, если ещё не загружен
+        if self._analyzer is None:
+            self._analyzer = ChannelQualityAnalyzer()
+        # Обновляем данные о здоровье для всех каналов
+        urls = [ch.url for ch in self.SOURCE_URLS]
+        self._analyzer.update_health(urls)
+        # Отключаем нездоровые каналы
+        for ch in self.SOURCE_URLS:
+            if not self._analyzer.is_channel_healthy(ch.url):
+                ch.enabled = False
+                logger.info(f"Channel {ch.url} disabled due to poor health.")
+            else:
+                ch.enabled = True
+
+    def update_channel_stats(self, channel: ChannelConfig, success: bool, response_time: float = 0):
+        if success:
+            channel.metrics.success_count += 1
+            channel.metrics.last_success_time = datetime.now()
+        else:
+            channel.metrics.fail_count += 1
+        if response_time > 0:
+            if channel.metrics.avg_response_time == 0:
+                channel.metrics.avg_response_time = response_time
+            else:
+                channel.metrics.avg_response_time = (channel.metrics.avg_response_time * 0.7) + (response_time * 0.3)
+        channel.calculate_overall_score()
+        if channel.metrics.overall_score < 25:
+            channel.enabled = False
+        if not any(c.enabled for c in self.SOURCE_URLS):
+            self.save_empty_config_file()
+            logger.error("All channels are disabled. Empty config file created.")
+
+    def adjust_protocol_limits(self, channel: ChannelConfig):
+        if self.use_maximum_power:
+            return
+        for protocol in channel.metrics.protocol_counts:
+            if protocol in self.SUPPORTED_PROTOCOLS:
+                current_count = channel.metrics.protocol_counts[protocol]
+                if current_count > 0:
+                    self.SUPPORTED_PROTOCOLS[protocol]["min_configs"] = min(
+                        self.SUPPORTED_PROTOCOLS[protocol]["min_configs"],
+                        current_count
+                    )
+
+    def save_empty_config_file(self) -> bool:
+        try:
+            Path(self.OUTPUT_FILE).parent.mkdir(parents=True, exist_ok=True)
+            with open(self.OUTPUT_FILE, 'w', encoding='utf-8') as f:
+                f.write("")
+            return True
+        except Exception:
+            return False
