@@ -12,7 +12,7 @@ import socket
 import os
 import re
 from typing import Dict, List, Optional, Tuple
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from urllib.parse import urlparse, parse_qs
 
 import aiohttp
@@ -38,7 +38,7 @@ class ActiveChecker:
     """
 
     def __init__(self,
-                 timeout: float = 1.0,  # уменьшено
+                 timeout: float = 1.0,
                  max_workers: int = None,
                  test_url: str = "https://www.google.com/generate_204",
                  max_latency: float = 6000.0,
@@ -56,9 +56,9 @@ class ActiveChecker:
             per_host_limit=max(2, self.max_workers // 10)
         )
 
-        # Простой LRU-кеш для TCP-задержек
-        self._tcp_cache = {}
-        self._cache_max_size = 10000
+        # Используем OrderedDict как LRU-кеш с ограничением размера
+        self._tcp_cache = OrderedDict()
+        self._cache_max_size = 5000  # уменьшено с 10000 для эффективности
 
     def _should_skip(self, config: str) -> bool:
         """Фильтрация по историческим данным: пропускаем заведомо мёртвые."""
@@ -101,7 +101,8 @@ class ActiveChecker:
         )
         return self._session
 
-    @retry_with_backoff(attempts=3, base_delay=0.2, max_delay=1.0, deadline=5.0)
+    @retry_with_backoff(attempts=3, base_delay=0.2, max_delay=1.0, deadline=5.0,
+                        retryable_exceptions=(asyncio.TimeoutError, ConnectionError, OSError, ConnectionResetError))
     async def _tcp_latency_with_retry(self, host: str, port: int) -> float:
         return await self._tcp_latency_raw(host, port)
 
@@ -109,7 +110,6 @@ class ActiveChecker:
         """Реализация TCP-проверки без кеша."""
         start = time.time()
         try:
-            # Используем asyncio.open_connection с явным таймаутом
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(host, port, ssl=False),
                 timeout=self.timeout
@@ -138,26 +138,31 @@ class ActiveChecker:
         """Возвращает задержку из кеша или выполняет проверку."""
         key = (host, port)
         if key in self._tcp_cache:
+            # Перемещаем в конец (LRU)
+            self._tcp_cache.move_to_end(key)
             return self._tcp_cache[key]
 
         latency = await self._tcp_latency_with_retry(host, port)
 
         # LRU-обновление с ограничением размера
         if len(self._tcp_cache) >= self._cache_max_size:
-            # Очищаем половину
-            items = list(self._tcp_cache.items())
-            self._tcp_cache = dict(items[len(items)//2:])
+            # Удаляем самый старый элемент (первый в OrderedDict)
+            self._tcp_cache.popitem(last=False)
         self._tcp_cache[key] = latency
         return latency
 
     async def _http_probe(self, host: str, port: int, use_tls: bool) -> float:
+        """
+        HTTP-пробинг с использованием GET и Range: bytes=0-0 для минимизации трафика.
+        """
         try:
             session = await self._get_session()
             proto = 'https' if use_tls else 'http'
             url = f"{proto}://{host}:{port}"
+            headers = {'Range': 'bytes=0-0'}
             start = time.time()
-            async with session.head(url, allow_redirects=True, timeout=self.timeout) as resp:
-                if resp.status in (200, 204, 301, 302, 307, 308):
+            async with session.get(url, headers=headers, allow_redirects=True, timeout=self.timeout) as resp:
+                if resp.status in (200, 204, 206, 301, 302, 307, 308):
                     return (time.time() - start) * 1000
             return -1.0
         except Exception as e:
@@ -227,7 +232,6 @@ class ActiveChecker:
 
         host, port, use_tls = server_info
 
-        # Проверяем TCP через лимитер
         try:
             tcp_latency = await self._limiter.run(host, self._tcp_latency(host, port))
         except Exception as e:
@@ -240,7 +244,6 @@ class ActiveChecker:
             logger.debug(f"TCP failed for {host}:{port}")
             return result
 
-        # Если TCP успешен и задержка приемлема, пробуем HTTP
         if tcp_latency > 0 and tcp_latency < self.max_latency:
             http_latency = await self._limiter.run(host, self._http_probe(host, port, use_tls))
             if http_latency > 0:
@@ -248,13 +251,11 @@ class ActiveChecker:
                 result['valid'] = True
                 result['success'] = True
                 result['speed_tag'] = self._classify_speed(http_latency)
-                # Дополнительная SNI-проверка (не влияет на валидность)
                 sni = self._extract_sni(config)
                 if sni:
                     await self._limiter.run(host, self._sni_probe(host, port, sni))
                 return result
 
-        # Если HTTP не удался, но TCP прошёл, считаем валидным (с задержкой TCP)
         if tcp_latency <= self.max_latency:
             result['latency'] = tcp_latency
             result['valid'] = True
@@ -291,21 +292,18 @@ class ActiveChecker:
 
         filtered_configs = [c for c in configs if not self._should_skip(c)]
 
-        # Группируем для прогрева кеша
         server_groups = defaultdict(list)
         for cfg in filtered_configs:
             info = self._extract_server_info(cfg)
             if info:
                 server_groups[(info[0], info[1])].append(cfg)
 
-        # Прогрев кеша TCP (без ограничений per-host, но с лимитером)
         warm_tasks = []
         for (host, port), cfgs in server_groups.items():
             warm_tasks.append(self._limiter.run(host, self._tcp_latency(host, port)))
         if warm_tasks:
             await asyncio.gather(*warm_tasks, return_exceptions=True)
 
-        # Проверяем каждую конфигурацию
         sem = asyncio.Semaphore(self.max_workers * 2)
 
         async def check_one(cfg: str):
@@ -332,7 +330,6 @@ class ActiveChecker:
         return final
 
     async def close(self):
-        # Сессия закрывается глобально через SessionPool
         pass
 
     def _extract_server_info(self, config: str) -> Optional[Tuple[str, int, bool]]:
@@ -341,7 +338,6 @@ class ActiveChecker:
         Возвращает (host, port, use_tls) или None.
         Улучшенная версия с регулярными выражениями.
         """
-        # Сначала пробуем через config_parser
         try:
             import config_parser as parser
             if config.startswith('vmess://'):
@@ -374,16 +370,13 @@ class ActiveChecker:
         except Exception as e:
             logger.debug(f"Parser extraction failed: {e}")
 
-        # Fallback: используем urlparse
         try:
-            # Удаляем фрагмент (якорь) для чистоты
             base = config.split('#')[0]
             parsed = urlparse(base)
             if parsed.hostname:
                 host = parsed.hostname
                 port = parsed.port
                 if port is None:
-                    # Определяем порт по умолчанию для протокола
                     if parsed.scheme in ('https', 'vless', 'trojan'):
                         port = 443
                     elif parsed.scheme == 'ss':
@@ -399,16 +392,13 @@ class ActiveChecker:
         except Exception as e:
             logger.debug(f"urlparse extraction failed: {e}")
 
-        # Второй fallback: регулярное выражение для поиска @host:port
         match = re.search(r'@([^:]+):(\d+)', config)
         if match:
             host = match.group(1)
             port = int(match.group(2))
-            # Попытаемся определить TLS по наличию security=tls или sni
             tls = 'security=tls' in config or 'security=reality' in config or 'sni=' in config
             return (host, port, tls)
 
-        # Третий fallback: ищем IP:port или domain:port без @ (для некоторых форматов)
         match = re.search(r'([0-9a-zA-Z.-]+):(\d+)', config)
         if match:
             host = match.group(1)
