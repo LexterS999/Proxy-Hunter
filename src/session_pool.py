@@ -14,6 +14,14 @@ import time
 
 logger = logging.getLogger(__name__)
 
+# Проверка наличия aiodns для асинхронного резолвера
+try:
+    import aiodns
+    HAS_AIODNS = True
+except ImportError:
+    HAS_AIODNS = False
+    logger.warning("aiodns not installed, using ThreadedResolver (may block). Install aiodns for better performance.")
+
 
 class SessionPool:
     """
@@ -79,7 +87,13 @@ class SessionPool:
                 await self._cleanup_old()
 
                 # Создаём коннектор с разрешённым DNS-кешем
-                resolver = aiohttp.AsyncResolver()
+                if HAS_AIODNS:
+                    resolver = aiohttp.AsyncResolver()
+                    logger.info("Using AsyncResolver (aiodns)")
+                else:
+                    resolver = aiohttp.ThreadedResolver()
+                    logger.info("Using ThreadedResolver (fallback, may block)")
+
                 self._connector = aiohttp.TCPConnector(
                     limit=connector_limit,
                     limit_per_host=per_host_limit,
