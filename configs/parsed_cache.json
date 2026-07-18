@@ -1529,6 +1529,23 @@
     "spx": "",
     "name": "@Generalconfiig"
   },
+  "fc8ca8b994deff0a1258a2bfdd6d18ea": {
+    "uuid": "7e544a9d-7667-413b-bbb0-b3bb1aac6d77",
+    "address": "162.159.38.119",
+    "port": 443,
+    "flow": "",
+    "sni": "shegeftihaaa.net",
+    "type": "ws",
+    "path": "/rsedgws#@NexVexo-NexVexo_NexVexo_NexVexo_NexVexo?ed=2560",
+    "host": "shegeftihaaa.net",
+    "security": "tls",
+    "alpn": "",
+    "fp": "chrome",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "@GozargahAzad|#CloudFlare@GozargahAzad"
+  },
   "22295a00f5e793e2899c367d3024fd4b": {
     "uuid": "7e544a9d-7667-413b-bbb0-b3bb1aac6d77",
     "address": "162.159.38.119",
@@ -2447,23 +2464,6 @@
     "spx": "",
     "name": "kurdconfig"
   },
-  "426d4b3b00b9237037dbcf6d3d3d24ce": {
-    "uuid": "bcb02430-4f92-4b7d-b461-9de75966ccf6",
-    "address": "ser.coolfrog-bot.ir",
-    "port": 8080,
-    "flow": "",
-    "sni": "ser.coolfrog-bot.ir",
-    "type": "ws",
-    "path": "/steam",
-    "host": "ser.coolfrog-bot.ir",
-    "security": "none",
-    "alpn": "",
-    "fp": "",
-    "pbk": "",
-    "sid": "",
-    "spx": "",
-    "name": "@GozargahAzad|#CloudFlare@GozargahAzad"
-  },
   "28bd679bb08cf7fd739ed5dee359dd42": {
     "uuid": "c09d7f00-bac6-4b26-af83-cab341e089aa",
     "address": "holand2.tehran-game.ir",
@@ -3297,20 +3297,6 @@
     "spx": "",
     "name": "\ud83c\udde8\ud83c\udde6114253 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
-  "232fb760e327fe5640804a34e08e9c88": {
-    "password": "0cc6b4268dea0ba8",
-    "address": "5.44.249.53",
-    "port": 3306,
-    "sni": "n2.gladns.com",
-    "alpn": "",
-    "type": "ws",
-    "path": "/gateway/connect",
-    "host": "TG.WangCai_1",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "@GozargahAzad|\ud83c\uddf8\ud83c\uddec#Singapore\ud83c\uddf8\ud83c\uddec@GozargahAzad"
-  },
   "0bdae181ea5c1c0cb8124290c43dc1b9": {
     "password": "257d8622-6701-4c98-a432-67a9696f58ae",
     "address": "172.67.218.196",
@@ -3367,20 +3353,6 @@
     "flow": "",
     "name": "\ud83c\udde9\ud83c\uddea114184 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
-  "6d3679a154f91e2a87c879929e7598d5": {
-    "password": "Htbm5NChh4",
-    "address": "136.244.101.16",
-    "port": 22328,
-    "sni": "ne.atrinshops.ir",
-    "alpn": "",
-    "type": "tcp",
-    "path": "",
-    "host": "136.244.101.16",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "@GozargahAzad|\ud83c\uddf3\ud83c\uddf1#TheNetherlands\ud83c\uddf3\ud83c\uddf1@GozargahAzad"
-  },
   "9ef4dd3a44e56f016efd7ea836e9fa6d": {
     "password": "KV63147582",
     "address": "3.76.41.23",
@@ -3436,20 +3408,6 @@
     "fp": "chrome",
     "flow": "",
     "name": "kurdconfig"
-  },
-  "b3e30a70a6aa82b84445f8608ec48242": {
-    "password": "MITIVPN",
-    "address": "188.114.97.6",
-    "port": 443,
-    "sni": "9bvv292-28bv3v-3j82vvb-jkk282-8bvc2.App-ClouD.Ir",
-    "alpn": "http/1.1",
-    "type": "ws",
-    "path": "/---@MiTiVPN/---@MiTiVPN/---@MiTiVPN/---@MiTiVPN/---@MiTiVPN=win---usa",
-    "host": "8jidkdj282-2ododvb-28.App-ClouD.Ir",
-    "security": "tls",
-    "fp": "chrome",
-    "flow": "",
-    "name": "@GozargahAzad|#CloudFlare@GozargahAzad"
   },
   "6c988639673a01d718e39079dc99d587": {
     "password": "MiTiVPN",
@@ -3773,20 +3731,6 @@
     "flow": "",
     "name": "\ud83c\udde9\ud83c\uddea114214 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
-  "2b7ade688dcf641c1e0355687828e5d5": {
-    "password": "telegram-id-privatevpns",
-    "address": "13.41.235.27",
-    "port": 22222,
-    "sni": "trojan.burgerip.co.uk",
-    "alpn": "",
-    "type": "tcp",
-    "path": "",
-    "host": "13.41.235.27",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "@GozargahAzad|\ud83c\uddec\ud83c\udde7#UnitedKingdom\ud83c\uddec\ud83c\udde7@GozargahAzad"
-  },
   "5898cb07e42f1b1542631c8b9a9a509b": {
     "password": "tg-dns68",
     "address": "162.159.152.132",
@@ -3814,20 +3758,6 @@
     "fp": "",
     "flow": "",
     "name": "\ud83c\udde8\ud83c\udde6114293 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
-  },
-  "d914ec88bb993e447c2e43e717b2b91c": {
-    "password": "tg-dns68",
-    "address": "162.159.153.87",
-    "port": 443,
-    "sni": "vip.putata.eu.org",
-    "alpn": "",
-    "type": "ws",
-    "path": "/?ed=2560",
-    "host": "vip.putata.eu.org",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "@GozargahAzad|#CloudFlare@GozargahAzad"
   },
   "8ebd97ac25d1bc4f5c1e674a28d235cf": null
 }
