@@ -115,7 +115,10 @@ class ChannelQualityAnalyzer:
         self.history = self._load_history()
         self.health_data = self._load_health()
         self._whitelist = set(CHANNEL_WHITELIST)
-        self._is_first_run = not self.history.get('channels')
+        # Количество выполненных запусков (runs) из истории
+        self._run_count = len(self.history.get('runs', []))
+        # Флаг первого запуска: считаем, что это первый запуск, если запусков меньше 2
+        self._is_first_run = self._run_count < 2
 
         # Новые компоненты
         self.adaptive_thresholds = AdaptiveThresholds()
@@ -158,12 +161,21 @@ class ChannelQualityAnalyzer:
         Рекурсивно преобразует все numpy-типы и другие несериализуемые объекты
         в стандартные Python-типы для JSON.
         """
+        # Обрабатываем numpy скаляры
         if isinstance(obj, np.generic):
             return obj.item()
+        # Явно обрабатываем numpy.bool_ (отдельно на всякий случай)
+        if isinstance(obj, np.bool_):
+            return bool(obj)
         if isinstance(obj, dict):
             return {k: self._convert_to_serializable(v) for k, v in obj.items()}
         if isinstance(obj, list):
             return [self._convert_to_serializable(v) for v in obj]
+        if isinstance(obj, tuple):
+            return tuple(self._convert_to_serializable(v) for v in obj)
+        if isinstance(obj, set):
+            return [self._convert_to_serializable(v) for v in obj]
+        # Если это bool или другие стандартные типы, возвращаем как есть
         return obj
 
     def _save_health(self):
@@ -239,11 +251,8 @@ class ChannelQualityAnalyzer:
 
         metrics = self._extract_current_metrics(channel_url)
         if not metrics:
-            return 50.0 if self._is_first_run else 25.0
-
-        history = self._get_channel_history(channel_url)
-        derived = self._calculate_derived_metrics(history)
-        current_metrics = {**metrics, **derived}
+            # Нет никаких данных — считаем нейтральным (не unhealthy)
+            return 60.0
 
         total = metrics.get('total_configs', 0)
         valid = metrics.get('valid_configs', 0)
@@ -251,6 +260,14 @@ class ChannelQualityAnalyzer:
         last_success = metrics.get('last_success')
         protocol_counts = metrics.get('protocol_counts', {})
         unique_protocols = len([p for p, c in protocol_counts.items() if c > 0])
+
+        # Если канал никогда не давал конфигов, даём ему шанс
+        if total == 0 and not last_success:
+            return 60.0
+
+        history = self._get_channel_history(channel_url)
+        derived = self._calculate_derived_metrics(history)
+        current_metrics = {**metrics, **derived}
 
         score = 0.0
 
@@ -301,6 +318,7 @@ class ChannelQualityAnalyzer:
     def is_channel_healthy(self, channel_url: str) -> bool:
         if channel_url in self._whitelist:
             return True
+        # Если это первый запуск или запусков меньше 2, считаем все каналы здоровыми
         if self._is_first_run:
             return True
 
@@ -324,6 +342,10 @@ class ChannelQualityAnalyzer:
             self.history = history_data
         else:
             self.history = self._load_history()
+
+        # Обновляем количество запусков
+        self._run_count = len(self.history.get('runs', []))
+        self._is_first_run = self._run_count < 2
 
         all_channel_data = []
         for url in channel_urls:
@@ -349,17 +371,21 @@ class ChannelQualityAnalyzer:
             cluster_id = self.clustering.predict(current_metrics)
             score = self.calculate_health_score(url)
 
+            # Приводим порог к float
+            threshold = float(self.adaptive_thresholds.get_thresholds().get('base_health', CHANNEL_HEALTH_THRESHOLD))
+            is_healthy = score >= threshold
+
             self.health_data['channels'][url] = {
-                'health_score': score,
+                'health_score': float(score),
                 'last_checked': datetime.now().isoformat(),
-                'is_healthy': score >= self.adaptive_thresholds.get_thresholds().get('base_health', CHANNEL_HEALTH_THRESHOLD),
-                'cluster': cluster_id,
+                'is_healthy': bool(is_healthy),   # явно приводим к bool
+                'cluster': int(cluster_id) if cluster_id != -1 else -1,
                 'metrics_summary': {
-                    'total_configs': metrics.get('total_configs', 0),
-                    'valid_configs': metrics.get('valid_configs', 0),
-                    'overall_score': metrics.get('overall_score', 0),
-                    'score_trend': derived.get('score_trend', 0),
-                    'config_volatility': derived.get('config_volatility', 0),
+                    'total_configs': int(metrics.get('total_configs', 0)),
+                    'valid_configs': int(metrics.get('valid_configs', 0)),
+                    'overall_score': float(metrics.get('overall_score', 0)),
+                    'score_trend': float(derived.get('score_trend', 0)),
+                    'config_volatility': float(derived.get('config_volatility', 0)),
                 }
             }
 
@@ -382,6 +408,9 @@ class ChannelQualityAnalyzer:
         if self.graceful_removal:
             watch_list = list(self.graceful_removal.watch_list.keys())
 
+        # Приводим пороги к сериализуемому виду
+        thresholds = self._convert_to_serializable(self.adaptive_thresholds.get_thresholds())
+
         return {
             'channels': channels,
             'last_updated': self.health_data.get('last_updated'),
@@ -391,7 +420,7 @@ class ChannelQualityAnalyzer:
                 'unhealthy': unhealthy,
                 'cluster_distribution': dict(cluster_dist),
                 'watch_list': watch_list,
-                'thresholds': self._convert_to_serializable(self.adaptive_thresholds.get_thresholds()),
+                'thresholds': thresholds,
             }
         }
 
