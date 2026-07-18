@@ -122,7 +122,7 @@ ENCRYPT_IPS = True
 ENCRYPTION_SALT = 'proxy_hunter_salt_2026'
 USE_COMPOSITE_SCORE = True
 
-# === Настройки анализа каналов (долгосрочные) ===
+# === Настройки анализа каналов ===
 CHANNEL_HEALTH_THRESHOLD = get_safe_env('PROXY_HUNTER_CHANNEL_HEALTH_THRESHOLD', '30.0', value_type=float)
 CHANNEL_MIN_CONFIGS = get_safe_env('PROXY_HUNTER_CHANNEL_MIN_CONFIGS', '3', value_type=int)
 CHANNEL_MIN_VALID_RATIO = get_safe_env('PROXY_HUNTER_CHANNEL_MIN_VALID_RATIO', '0.05', value_type=float)
