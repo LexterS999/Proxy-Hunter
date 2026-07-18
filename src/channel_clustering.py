@@ -42,9 +42,13 @@ class ChannelClustering:
             logger.warning("Not enough valid data for clustering")
             return
 
-        # Определяем фактическое число кластеров, не превышающее количество образцов
+        # Определяем фактическое число кластеров, не превышающее количество уникальных образцов
+        # и не превышающее количество образцов
         n_samples = len(features)
-        actual_clusters = min(self.n_clusters, n_samples)
+        # Удаляем дубликаты, чтобы избежать предупреждения sklearn
+        unique_features = np.unique(features, axis=0)
+        n_unique = len(unique_features)
+        actual_clusters = min(self.n_clusters, n_unique, n_samples)
         if actual_clusters < 1:
             actual_clusters = 1
 
@@ -112,7 +116,6 @@ class ChannelClustering:
         if not cluster_data:
             return {}
 
-        # Агрегируем метрики
         scores = [d.get('overall_score', 0) for d in cluster_data if d.get('overall_score') is not None]
         configs = [d.get('total_configs', 0) for d in cluster_data if d.get('total_configs') is not None]
         success_rates = []
@@ -125,10 +128,10 @@ class ChannelClustering:
         volatilities = [d.get('config_volatility', 0) for d in cluster_data if d.get('config_volatility') is not None]
 
         profile = {
-            'avg_score': np.mean(scores) if scores else 0,
-            'avg_configs': np.mean(configs) if configs else 0,
-            'avg_success_rate': np.mean(success_rates) if success_rates else 0,
-            'avg_volatility': np.mean(volatilities) if volatilities else 0,
+            'avg_score': float(np.mean(scores)) if scores else 0.0,
+            'avg_configs': float(np.mean(configs)) if configs else 0.0,
+            'avg_success_rate': float(np.mean(success_rates)) if success_rates else 0.0,
+            'avg_volatility': float(np.mean(volatilities)) if volatilities else 0.0,
             'size': len(cluster_data),
         }
         return profile
