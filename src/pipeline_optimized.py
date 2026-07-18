@@ -31,7 +31,7 @@ from deep_deduplicate import DeepDeduplicator
 from config_quality import ConfigQualityChecker
 from quality_analyzer_enhanced import EnhancedQualityAnalyzer
 from profile_scorer import ProfileScorer
-from rename_configs import ConfigRenamer
+from rename_configs import ConfigRenamer          # <-- НОВЫЙ ИМПОРТ
 from enrich_configs import ConfigEnricher
 from active_checker import ActiveChecker
 from parse_fallback import FallbackParser
@@ -426,6 +426,21 @@ class OptimizedPipeline:
                 if self._shutdown_requested:
                     await self.save_state()
                 return False
+
+            # ============= НОВЫЙ БЛОК: Применяем нейминг =============
+            logger.info("🏷️ Applying naming to configs...")
+            renamer = ConfigRenamer(self.location_cache_file)
+            renamed_new = []
+            for idx, cfg in enumerate(deduped, 1):
+                new_cfg = renamer.rename_config(cfg, idx)
+                if new_cfg:
+                    renamed_new.append(new_cfg)
+            logger.info(f"✅ Renamed {len(renamed_new)} configs")
+            deduped = renamed_new  # заменяем для дальнейшего использования
+            if not deduped:
+                logger.warning("All configs were filtered out by naming (blacklist or error).")
+                return False
+            # =======================================================
 
             # Шаг 7: Обогащение геоданными (если нужно)
             logger.info("🌍 Enriching configs with geolocation...")
