@@ -163,6 +163,8 @@ class ChannelQualityAnalyzer:
             return obj.tolist()
         elif isinstance(obj, (np.str_,)):
             return str(obj)
+        elif isinstance(obj, (np.bool_, bool)):
+            return bool(obj)
         elif isinstance(obj, dict):
             return {k: self._convert_to_serializable(v) for k, v in obj.items()}
         elif isinstance(obj, list):
@@ -425,7 +427,7 @@ class ChannelQualityAnalyzer:
                 'unhealthy': unhealthy,
                 'cluster_distribution': dict(cluster_dist),
                 'watch_list': watch_list,
-                'thresholds': self.adaptive_thresholds.get_thresholds(),
+                'thresholds': self._convert_to_serializable(self.adaptive_thresholds.get_thresholds()),
             }
         }
 
