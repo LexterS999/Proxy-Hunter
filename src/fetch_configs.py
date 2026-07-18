@@ -19,6 +19,7 @@ from pathlib import Path
 from retry_utils import retry_with_backoff, is_retryable
 from session_pool import SessionPool
 from protocol_registry import registry
+from channel_metrics_v2 import ChannelMetricsV2
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class RateLimiter:
 
 # === Основной класс ===
 class AsyncConfigFetcher:
-    """Полностью асинхронный сборщик конфигураций с поддержкой лимитов."""
+    """Полностью асинхронный сборщик конфигураций с поддержкой лимитов и расширенной статистикой."""
 
     def __init__(self, config: ProxyConfig, max_concurrent: int = 50):
         self.config = config
@@ -51,6 +52,11 @@ class AsyncConfigFetcher:
         self.protocol_counts: Dict[str, int] = {p: 0 for p in config.SUPPORTED_PROTOCOLS}
         self.seen_configs: Set[str] = set()
         self.channel_protocol_counts: Dict[str, Dict[str, int]] = {}
+
+        # Расширенная статистика
+        self.total_parsed = 0
+        self.response_times: List[float] = []
+        self.channel_response_times: Dict[str, List[float]] = {}
 
         num_channels = len(config.SOURCE_URLS) if config.SOURCE_URLS else 1
         self._connector_limit = min(200, num_channels * 10)
@@ -81,7 +87,6 @@ class AsyncConfigFetcher:
                 except ValueError:
                     wait_time = 5
                 await asyncio.sleep(wait_time)
-                # Повторяем запрос, выбрасывая исключение для ретрая
                 raise aiohttp.ClientResponseError(
                     response.request_info,
                     response.history,
@@ -123,11 +128,17 @@ class AsyncConfigFetcher:
         channel.metrics.protocol_counts = {p: 0 for p in self.config.SUPPORTED_PROTOCOLS}
         start_time = time.time()
 
+        # Расширенная статистика
+        parsed_count = 0
+        response_times_channel = []
+
         if channel.url.startswith('ssconf://'):
             configs.extend(await self.fetch_ssconf_configs(channel.url))
             if configs:
                 response_time = time.time() - start_time
                 self.config.update_channel_stats(channel, True, response_time)
+                self.response_times.append(response_time)
+                self.channel_response_times.setdefault(channel.url, []).append(response_time)
             return configs
 
         text = await self._fetch_with_retry(channel.url)
@@ -136,6 +147,8 @@ class AsyncConfigFetcher:
             return configs
 
         response_time = time.time() - start_time
+        self.response_times.append(response_time)
+        self.channel_response_times.setdefault(channel.url, []).append(response_time)
 
         if channel.is_telegram:
             soup = BeautifulSoup(text, 'html.parser')
@@ -161,14 +174,17 @@ class AsyncConfigFetcher:
                         ssconf_configs = await self.fetch_ssconf_configs(part)
                         configs.extend(ssconf_configs)
                         channel.metrics.total_configs += len(ssconf_configs)
+                        parsed_count += len(ssconf_configs)
                     else:
                         decoded_part = self.check_and_decode_base64(part)
                         if decoded_part != part:
                             found = self.validator.split_configs(decoded_part)
                             channel.metrics.total_configs += len(found)
+                            parsed_count += len(found)
                             configs.extend(found)
                 found = self.validator.split_configs(msg_text)
                 channel.metrics.total_configs += len(found)
+                parsed_count += len(found)
                 configs.extend(found)
         else:
             parts = text.split()
@@ -180,17 +196,38 @@ class AsyncConfigFetcher:
                 if decoded_part != part:
                     found = self.validator.split_configs(decoded_part)
                     channel.metrics.total_configs += len(found)
+                    parsed_count += len(found)
                     configs.extend(found)
             found = self.validator.split_configs(text)
             channel.metrics.total_configs += len(found)
+            parsed_count += len(found)
             configs.extend(found)
 
+        # Обновляем расширенные метрики
+        self.total_parsed += parsed_count
+        channel.metrics.total_parsed = parsed_count
+        channel.metrics.parse_success_rate = channel.metrics.valid_configs / parsed_count if parsed_count > 0 else 0.0
+
+        # Уникальные конфиги и протоколы
         configs = list(set(configs))
         processed = []
         for cfg in configs:
             proc = self.process_config(cfg, channel)
             if proc:
                 processed.extend(proc)
+
+        # Вычисляем производные метрики для канала
+        if processed:
+            channel.metrics.unique_configs = len(processed)
+            channel.metrics.protocol_diversity = ChannelMetricsV2.calculate_protocol_diversity(
+                channel.metrics.protocol_counts
+            )
+            # Сохраняем время ответа для расчёта статистик позже
+            channel.metrics.response_time_std = 0.0  # будет вычислено позже
+            channel.metrics.response_time_p50 = 0.0
+            channel.metrics.response_time_p95 = 0.0
+            # Частота обновлений: приблизительно 1 / интервал между успешными сборами
+            # (будет вычислено в анализаторе)
 
         if len(processed) >= self.config.MIN_CONFIGS_PER_CHANNEL:
             self.config.update_channel_stats(channel, True, response_time)
@@ -203,17 +240,13 @@ class AsyncConfigFetcher:
 
     def process_config(self, config: str, channel: ChannelConfig) -> List[str]:
         processed = []
-        # Нормализация hysteria2
         if config.startswith('hy2://'):
             config = self.validator.normalize_hysteria2_protocol(config)
 
-        # Определяем протокол через registry
         prefix = registry.get_protocol_prefix(config)
         if prefix:
-            # Проверяем, включён ли протокол
             if not self.config.is_protocol_enabled(prefix):
                 return []
-            # Для VMess требуется очистка
             if prefix == 'vmess://':
                 config = self.validator.clean_vmess_config(config)
             clean = self.validator.clean_config(config)
