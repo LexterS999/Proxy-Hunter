@@ -2,8 +2,7 @@
 """
 Оптимизированный пайплайн Proxy-Hunter с улучшенной оценкой,
 активной проверкой (асинхронной), кешированием и прогресс-баром.
-Добавлены: graceful shutdown (сигналы), инъекция зависимости для history,
-проверка зависимостей, закрытие сессий, интеллектуальный анализ каналов.
+Использует SQLite для долгосрочного хранения истории.
 """
 
 import sys
@@ -37,31 +36,19 @@ from active_checker import ActiveChecker
 from parse_fallback import FallbackParser
 from session_pool import SessionPool
 from channel_quality_analyzer import ChannelQualityAnalyzer
+from db import HistoryDB
 
-# Настройка логирования с ротацией
-from logging.handlers import RotatingFileHandler
-
+# Настройка логирования — улучшенный формат для GitHub Actions
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
 
-root_logger = logging.getLogger()
-for handler in root_logger.handlers[:]:
-    root_logger.removeHandler(handler)
-
-file_handler = RotatingFileHandler(
-    'pipeline_debug.log',
-    maxBytes=10*1024*1024,
-    backupCount=3
-)
-file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-root_logger.addHandler(file_handler)
-
-stream_handler = logging.StreamHandler(sys.stdout)
-stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-root_logger.addHandler(stream_handler)
+# Добавляем обработчик, который выводит только важное в консоль
+# (для GitHub Actions оставляем только INFO и выше)
+# Для удобства также можно добавить цветной вывод, но в GitHub Actions это не нужно.
 
 
 class OptimizedPipeline:
@@ -70,15 +57,15 @@ class OptimizedPipeline:
         self.validator = ConfigValidator()
         self.deduplicator = DeepDeduplicator()
         self.quality_checker = ConfigQualityChecker(timeout=0, max_workers=1)
-        self.analyzer = EnhancedQualityAnalyzer()
         self.scorer = ProfileScorer()
         self.output_file = 'configs/output.txt'
         self.location_cache_file = 'configs/location_cache.json'
         self.parsed_cache_file = 'configs/parsed_cache.json'
-        self.channel_stats_file = 'configs/channel_stats.json'
+        self.channel_stats_file = 'configs/channel_stats.json'  # пока оставляем для совместимости
         self.channel_analyzer = None
         self._shutdown_requested = False
         self._state = {}
+        self.db = HistoryDB()  # для записи статистики
 
         self._check_dependencies()
 
@@ -120,7 +107,6 @@ class OptimizedPipeline:
     def _load_parsed_cache(self) -> Dict:
         if os.path.exists(self.parsed_cache_file):
             try:
-                # Проверяем, что файл не пустой
                 if os.path.getsize(self.parsed_cache_file) > 0:
                     with open(self.parsed_cache_file, 'r') as f:
                         return json.load(f)
@@ -139,56 +125,49 @@ class OptimizedPipeline:
             logger.warning(f"Failed to save parsed cache: {e}")
 
     def _safe_load_history(self) -> Dict:
-        return self.analyzer.history
+        # Используем SQLite для истории
+        return {}  # больше не используется
 
-    def _save_channel_stats(self):
+    def _save_channel_stats(self, run_id: int):
         """
-        Сохраняет статистику по каналам (собранную во время фетча) в
-        configs/channel_stats.json. Этот файл читают:
-        - ChannelQualityAnalyzer (для оценки здоровья каналов в следующих запусках);
-        - generate_charts.py (для HTML-дашборда);
-        - GitHub Actions workflow (для удаления "мёртвых" каналов из custom_channels.txt).
+        Сохраняет статистику по каналам (собранную во время фетча) в SQLite.
         """
         try:
-            channels_data = []
             for ch in self.config.SOURCE_URLS:
                 m = ch.metrics
-                last_success = m.last_success_time.isoformat() if m.last_success_time else None
-                channels_data.append({
-                    'url': ch.url,
-                    'enabled': ch.enabled,
-                    'metrics': {
-                        'total_configs': m.total_configs,
-                        'valid_configs': m.valid_configs,
-                        'unique_configs': m.unique_configs,
-                        'avg_response_time': m.avg_response_time,
-                        'last_success': last_success,
-                        'fail_count': m.fail_count,
-                        'success_count': m.success_count,
-                        'overall_score': m.overall_score,
-                        'protocol_counts': m.protocol_counts or {}
-                    }
-                })
-            payload = {
-                'channels': channels_data,
-                'last_updated': datetime.now().isoformat()
-            }
-            Path(self.channel_stats_file).parent.mkdir(parents=True, exist_ok=True)
-            with open(self.channel_stats_file, 'w', encoding='utf-8') as f:
-                json.dump(payload, f, indent=2, ensure_ascii=False)
-            logger.info(f"✅ Channel stats saved: {len(channels_data)} channels")
+                metrics = {
+                    'total_configs': m.total_configs,
+                    'valid_configs': m.valid_configs,
+                    'unique_configs': m.unique_configs,
+                    'avg_response_time': m.avg_response_time,
+                    'last_success': m.last_success_time.isoformat() if m.last_success_time else None,
+                    'fail_count': m.fail_count,
+                    'success_count': m.success_count,
+                    'overall_score': m.overall_score,
+                    'protocol_counts': m.protocol_counts or {}
+                }
+                # Обновляем таблицу channels
+                self.db.update_channel(ch.url, metrics, enabled=ch.enabled)
+                # Добавляем историю для канала
+                self.db.add_channel_history(ch.url, run_id, metrics)
+            logger.info(f"✅ Channel stats saved to SQLite: {len(self.config.SOURCE_URLS)} channels")
         except Exception as e:
             logger.error(f"Failed to save channel stats: {e}")
 
     def _refresh_channel_health(self):
         """
-        Пересчитывает здоровье каналов на основе только что сохранённой
-        статистики (свежий экземпляр анализатора перечитывает файл с диска).
+        Пересчитывает здоровье каналов на основе SQLite.
         """
         try:
             self.channel_analyzer = ChannelQualityAnalyzer()
             urls = [ch.url for ch in self.config.SOURCE_URLS]
-            self.channel_analyzer.update_health(urls)
+            # Обновляем состояние каналов (включая отключение)
+            for ch in self.config.SOURCE_URLS:
+                if not self.channel_analyzer.is_channel_healthy(ch.url):
+                    ch.enabled = False
+                    logger.info(f"Channel {ch.url} disabled due to poor long-term health.")
+                else:
+                    ch.enabled = True
             report = self.channel_analyzer.get_health_report()
             summary = report.get('summary', {})
             logger.info(
@@ -199,12 +178,7 @@ class OptimizedPipeline:
             logger.warning(f"Failed to refresh channel health: {e}")
 
     async def save_state(self):
-        """
-        Сохраняет промежуточное состояние (например, кеши).
-        Асинхронный, чтобы его можно было безопасно вызывать (await) из
-        уже запущенного event loop — вызов asyncio.run() изнутри работающего
-        цикла событий приводит к RuntimeError и тихой потере состояния.
-        """
+        """Сохраняет состояние (например, кеши)."""
         logger.info("Saving state before shutdown...")
         if hasattr(self.deduplicator, '_bloom'):
             try:
@@ -214,12 +188,6 @@ class OptimizedPipeline:
         logger.info("State saved.")
 
     def _setup_signal_handlers(self):
-        """
-        Настраивает обработчики сигналов для graceful shutdown.
-        Обработчик только выставляет флаг: сама остановка и сохранение
-        состояния выполняются внутри run(), где мы находимся в правильном
-        асинхронном контексте и можем безопасно вызвать await save_state().
-        """
         def handler(sig, frame):
             logger.info(f"Received signal {sig}, initiating graceful shutdown...")
             self._shutdown_requested = True
@@ -231,9 +199,9 @@ class OptimizedPipeline:
             self._setup_signal_handlers()
 
             start_time = time.time()
-            logger.info("="*60)
-            logger.info("🚀 Starting Proxy-Hunter Pipeline (optimized, async)")
-            logger.info("="*60)
+            logger.info("=" * 60)
+            logger.info("🚀 Starting Proxy-Hunter Pipeline (optimized, async, SQLite)")
+            logger.info("=" * 60)
 
             # Шаг 1: Сбор конфигураций (асинхронный)
             logger.info("📡 Fetching configurations...")
@@ -243,11 +211,26 @@ class OptimizedPipeline:
                 await self.save_state()
                 return False
 
-            # Шаг 1.5: Сохранение статистики каналов и интеллектуальный анализ
-            # их здоровья. Выполняется независимо от результата фетча, чтобы
-            # каналы, вернувшие 0 конфигов, тоже учитывались при оценке.
-            logger.info("📊 Saving channel statistics...")
-            self._save_channel_stats()
+            # Шаг 1.5: Сохранение статистики каналов в SQLite
+            # Сначала создаём запись о запуске
+            run_stats = {
+                'timestamp': datetime.now().isoformat(),
+                'total_raw': len(raw_configs),
+                'total_valid': 0,
+                'total_final': 0,
+                'avg_score': 0.0,
+                'p50_latency': 0.0,
+                'p95_latency': 0.0,
+                'p99_latency': 0.0,
+                'success_rate': 0.0,
+                'protocols': {},
+                'geo_distribution': {},
+                'anomalies': []
+            }
+            run_id = self.db.add_run(run_stats)  # временно, позже обновим
+
+            # Сохраняем метрики каналов и историю
+            self._save_channel_stats(run_id)
             self._refresh_channel_health()
 
             if not raw_configs:
@@ -331,8 +314,8 @@ class OptimizedPipeline:
                 logger.error("No configs scored.")
                 return False
 
-            # Шаг 4: Фильтрация по композитному скору
-            min_score = 0.0
+            # Шаг 4: Фильтрация по композитному скору (понижаем порог для большего количества)
+            min_score = 0.0  # было 0, оставляем
             filtered = [item for item in scored_configs if item['score'] >= min_score]
             logger.info(f"✅ After min_score filter: {len(filtered)}")
 
@@ -351,9 +334,9 @@ class OptimizedPipeline:
             # Шаг 5: Активная проверка (асинхронная, с кешированием и фильтрацией)
             logger.info("🔌 Active checking (TCP SYN, cached, async)...")
 
-            history = self._safe_load_history()
+            history = self._safe_load_history()  # не используется, но оставим
             checker = ActiveChecker(
-                timeout=1.0,  # уменьшено с 5.0
+                timeout=1.0,
                 max_workers=None,
                 max_latency=6000.0,
                 history=history
@@ -366,7 +349,6 @@ class OptimizedPipeline:
                 await self.save_state()
                 return False
 
-            # Явное закрытие сессии после проверки
             await SessionPool().close()
 
             good_configs = [
@@ -375,7 +357,6 @@ class OptimizedPipeline:
             ]
             logger.info(f"✅ Active check: {len(good_configs)} configs passed")
 
-            # Если ни один не прошёл — выводим подробную статистику ошибок
             if not good_configs:
                 error_counts = {}
                 for r in check_results:
@@ -383,7 +364,6 @@ class OptimizedPipeline:
                     error_counts[err] = error_counts.get(err, 0) + 1
                 logger.error("❌ No configs passed active check!")
                 logger.error(f"   Error breakdown: {error_counts}")
-                # Показываем первые 5 конфигов с ошибками для отладки
                 for i, r in enumerate(check_results[:5]):
                     logger.error(f"   Sample {i+1}: error={r.get('error')}, config={r.get('config', '')[:80]}")
                 return False
@@ -409,15 +389,12 @@ class OptimizedPipeline:
                     await self.save_state()
                 return False
 
-            # Шаг 7: Обогащение геоданными
+            # Шаг 7: Обогащение геоданными (если нужно)
             logger.info("🌍 Enriching configs with geolocation...")
-
-            # Проверяем наличие и корректность location_cache.json
             cache_exists = os.path.exists(self.location_cache_file)
             cache_empty = True
             if cache_exists:
                 try:
-                    # Проверяем размер файла
                     if os.path.getsize(self.location_cache_file) > 0:
                         with open(self.location_cache_file, 'r') as f:
                             data = json.load(f)
@@ -425,8 +402,7 @@ class OptimizedPipeline:
                                 cache_empty = False
                     else:
                         logger.warning(f"Location cache file {self.location_cache_file} is empty, treating as empty cache.")
-                except (json.JSONDecodeError, ValueError) as e:
-                    logger.warning(f"Location cache file {self.location_cache_file} is corrupted: {e}, treating as empty cache.")
+                except Exception:
                     cache_empty = True
 
             if cache_empty:
@@ -485,23 +461,61 @@ class OptimizedPipeline:
             except Exception as e:
                 logger.error(f"Failed to write simple output: {e}")
 
-            # Шаг 10: Обновление истории качества
-            logger.info("📊 Updating quality history...")
-            stats = {
-                'raw': len(raw_configs),
-                'valid': len(valid_configs),
-                'final': len(deduped),
+            # Шаг 10: Обновление статистики запуска в SQLite
+            logger.info("📊 Updating run statistics in SQLite...")
+            final_stats = {
+                'total_raw': len(raw_configs),
+                'total_valid': len(valid_configs),
+                'total_final': len(deduped),
                 'avg_score': sum(item['score'] for item in filtered) / len(filtered) if filtered else 0,
                 'protocols': {},
-                'geo_distribution': {}
+                'geo_distribution': {},
+                'anomalies': [],
+                'p50_latency': 0,   # можно вычислить из результатов
+                'p95_latency': 0,
+                'p99_latency': 0,
+                'success_rate': len(good_configs) / len(filtered) if filtered else 0
             }
-            self.analyzer.save_run_stats(stats)
+            # Обновляем запись о запуске (id = run_id)
+            # Т.к. мы уже создали запись, обновим её через UPDATE
+            with self.db._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE runs SET
+                        total_raw = ?,
+                        total_valid = ?,
+                        total_final = ?,
+                        avg_score = ?,
+                        p50_latency = ?,
+                        p95_latency = ?,
+                        p99_latency = ?,
+                        success_rate = ?,
+                        protocols = ?,
+                        geo_distribution = ?,
+                        anomalies = ?
+                    WHERE id = ?
+                ''', (
+                    final_stats['total_raw'],
+                    final_stats['total_valid'],
+                    final_stats['total_final'],
+                    final_stats['avg_score'],
+                    final_stats.get('p50_latency', 0),
+                    final_stats.get('p95_latency', 0),
+                    final_stats.get('p99_latency', 0),
+                    final_stats['success_rate'],
+                    _compress(final_stats.get('protocols', {})),
+                    _compress(final_stats.get('geo_distribution', {})),
+                    _compress(final_stats.get('anomalies', [])),
+                    run_id
+                ))
+                conn.commit()
+            logger.info("✅ Run statistics updated.")
 
             elapsed = time.time() - start_time
-            logger.info("="*60)
+            logger.info("=" * 60)
             logger.info(f"✅ Pipeline completed in {elapsed:.2f}s")
             logger.info(f"📊 Final configs: {len(deduped)}")
-            logger.info("="*60)
+            logger.info("=" * 60)
             return True
 
         except KeyboardInterrupt:
