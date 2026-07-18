@@ -103,8 +103,8 @@ _ENABLED_PROTOCOLS_RAW = {
     "wireguard://": os.getenv('PROXY_HUNTER_ENABLE_WIREGUARD', 'False'),
     "hysteria2://": os.getenv('PROXY_HUNTER_ENABLE_HYSTERIA2', 'True'),
     "vless://": os.getenv('PROXY_HUNTER_ENABLE_VLESS', 'True'),
-    "vmess://": os.getenv('PROXY_HUNTER_ENABLE_VMESS', 'True'),      # изменено
-    "ss://": os.getenv('PROXY_HUNTER_ENABLE_SS', 'True'),            # изменено
+    "vmess://": os.getenv('PROXY_HUNTER_ENABLE_VMESS', 'True'),
+    "ss://": os.getenv('PROXY_HUNTER_ENABLE_SS', 'True'),
     "trojan://": os.getenv('PROXY_HUNTER_ENABLE_TROJAN', 'True'),
     "tuic://": os.getenv('PROXY_HUNTER_ENABLE_TUIC', 'False'),
 }
@@ -124,7 +124,7 @@ GEO_ASN_CACHE_PATH = None
 # --------------------- Именование конфигураций ---------------------
 
 # Изменённый формат: флаг + код страны + протокол|транспорт|security
-NAMING_FORMAT = "{flag}{country_code}-{protocol_info}"
+NAMING_FORMAT = "{protocol_info}"
 NAMING_SEPARATOR = "-"
 
 SHOW_DC_TAG = True
