@@ -158,15 +158,12 @@ class ChannelQualityAnalyzer:
         Рекурсивно преобразует все numpy-типы и другие несериализуемые объекты
         в стандартные Python-типы для JSON.
         """
-        # Обрабатываем numpy-скаляры (включая np.bool_, np.float64 и т.д.)
         if isinstance(obj, np.generic):
             return obj.item()
-        # Рекурсивно обрабатываем словари и списки
         if isinstance(obj, dict):
             return {k: self._convert_to_serializable(v) for k, v in obj.items()}
         if isinstance(obj, list):
             return [self._convert_to_serializable(v) for v in obj]
-        # Остальные типы возвращаем как есть (предполагается, что они уже сериализуемы)
         return obj
 
     def _save_health(self):
@@ -185,7 +182,6 @@ class ChannelQualityAnalyzer:
         channels = self.history.get('channels', [])
         for ch in channels:
             if ch.get('url') == channel_url:
-                # Возвращаем список записей (пока только одна запись, но можно расширить)
                 return [ch.get('metrics', {})]
         return []
 
@@ -195,7 +191,6 @@ class ChannelQualityAnalyzer:
         for ch in channels:
             if ch.get('url') == channel_url:
                 metrics = ch.get('metrics', {})
-                # Добавляем производные метрики, если они уже вычислены
                 return metrics
         return {}
 
@@ -204,27 +199,22 @@ class ChannelQualityAnalyzer:
         if not history:
             return {}
 
-        # Собираем временные ряды
         scores = [h.get('overall_score', 0) for h in history if h.get('overall_score') is not None]
         configs = [h.get('total_configs', 0) for h in history if h.get('total_configs') is not None]
         valids = [h.get('valid_configs', 0) for h in history if h.get('valid_configs') is not None]
         latencies = [h.get('avg_response_time', 0) for h in history if h.get('avg_response_time', 0) > 0]
 
-        # Вычисляем тренды
         score_trend = ChannelMetricsV2.calculate_trend(scores) if scores else 0.0
         config_trend = ChannelMetricsV2.calculate_trend(configs) if configs else 0.0
         valid_trend = ChannelMetricsV2.calculate_trend(valids) if valids else 0.0
         latency_trend = ChannelMetricsV2.calculate_trend(latencies) if latencies else 0.0
 
-        # Волатильность
         score_vol = ChannelMetricsV2.calculate_volatility(scores) if scores else 0.0
         config_vol = ChannelMetricsV2.calculate_volatility(configs) if configs else 0.0
 
-        # Прогнозы (простая экстраполяция)
         expected_score = scores[-1] + score_trend if scores else 50.0
         expected_configs = configs[-1] + config_trend if configs else 0.0
 
-        # Протокольное качество (заглушка, можно улучшить)
         protocol_quality = 0.5
 
         return {
@@ -251,16 +241,10 @@ class ChannelQualityAnalyzer:
         if not metrics:
             return 50.0 if self._is_first_run else 25.0
 
-        # Получаем историю
         history = self._get_channel_history(channel_url)
-
-        # Вычисляем производные метрики
         derived = self._calculate_derived_metrics(history)
-
-        # Объединяем с текущими
         current_metrics = {**metrics, **derived}
 
-        # Вычисляем базовый скор (fallback)
         total = metrics.get('total_configs', 0)
         valid = metrics.get('valid_configs', 0)
         overall_score = metrics.get('overall_score', 0)
@@ -270,28 +254,23 @@ class ChannelQualityAnalyzer:
 
         score = 0.0
 
-        # 1. Конфигурации (макс 30)
         min_cfg = self.adaptive_thresholds.get_thresholds().get('min_configs', CHANNEL_MIN_CONFIGS)
         config_score = min(30, (total / min_cfg) * 30 if min_cfg > 0 else 0)
         score += config_score
 
-        # 2. Валидные (макс 30)
         if total > 0:
             ratio = valid / total
             min_ratio = self.adaptive_thresholds.get_thresholds().get('min_valid_rate', CHANNEL_MIN_VALID_RATIO)
             ratio_score = min(30, (ratio / min_ratio) * 30 if min_ratio > 0 else 0)
             score += ratio_score
 
-        # 3. Протоколы (макс 20)
         min_protos = CHANNEL_MIN_PROTOCOLS
         proto_score = min(20, (unique_protocols / min_protos) * 20 if min_protos > 0 else 0)
         score += proto_score
 
-        # 4. Общий скор (макс 20)
         score_score = min(20, (overall_score / 50) * 20 if overall_score > 0 else 0)
         score += score_score
 
-        # 5. Бонус за свежесть
         if last_success:
             try:
                 last_time = datetime.fromisoformat(last_success)
@@ -305,25 +284,21 @@ class ChannelQualityAnalyzer:
         else:
             score -= 10
 
-        # Применяем трендовые корректировки
         score_trend = derived.get('score_trend', 0)
         if score_trend < -0.3:
             score -= 10
         elif score_trend > 0.3:
             score += 5
 
-        # Волатильность
         config_vol = derived.get('config_volatility', 0)
         if config_vol > 0.8:
             score -= 10
         elif config_vol > 0.5:
             score -= 5
 
-        # Ограничиваем
         return max(0, min(100, score))
 
     def is_channel_healthy(self, channel_url: str) -> bool:
-        """Определяет, здоров ли канал."""
         if channel_url in self._whitelist:
             return True
         if self._is_first_run:
@@ -334,7 +309,6 @@ class ChannelQualityAnalyzer:
         return score >= threshold
 
     def get_unhealthy_channels(self, channel_urls: List[str]) -> List[str]:
-        """Возвращает список нездоровых каналов."""
         unhealthy = []
         for url in channel_urls:
             if not self.is_channel_healthy(url):
@@ -351,7 +325,6 @@ class ChannelQualityAnalyzer:
         else:
             self.history = self._load_history()
 
-        # Собираем данные для кластеризации и адаптивных порогов
         all_channel_data = []
         for url in channel_urls:
             metrics = self._extract_current_metrics(url)
@@ -360,32 +333,22 @@ class ChannelQualityAnalyzer:
             combined['url'] = url
             all_channel_data.append(combined)
 
-        # Обновляем адаптивные пороги
         self.adaptive_thresholds.update(all_channel_data)
 
-        # Обучаем кластеризацию
-        # Избегаем предупреждения о недостатке уникальных точек
+        # Обучаем кластеризацию только если данных достаточно
         if len(all_channel_data) > 1:
-            # Если уникальных точек меньше, чем запрошено кластеров, уменьшаем число кластеров
-            unique_count = len({tuple(sorted(d.items())) for d in all_channel_data})  # грубая оценка уникальности
-            # В реальном кластеризаторе есть своя логика, но мы передаём данные как есть
             self.clustering.fit(all_channel_data)
         else:
             logger.debug("Skipping clustering: not enough data")
 
-        # Для каждого канала вычисляем здоровье и кластер
         for url in channel_urls:
             metrics = self._extract_current_metrics(url)
             derived = self._calculate_derived_metrics(self._get_channel_history(url))
             current_metrics = {**metrics, **derived}
 
-            # Кластер
             cluster_id = self.clustering.predict(current_metrics)
-
-            # Health score (упрощённый, без ансамбля для совместимости)
             score = self.calculate_health_score(url)
 
-            # Сохраняем
             self.health_data['channels'][url] = {
                 'health_score': score,
                 'last_checked': datetime.now().isoformat(),
@@ -409,14 +372,12 @@ class ChannelQualityAnalyzer:
         healthy = sum(1 for c in channels.values() if c.get('is_healthy', False))
         unhealthy = total - healthy
 
-        # Распределение по кластерам
         cluster_dist = defaultdict(int)
         for c in channels.values():
             cluster_id = c.get('cluster', -1)
             if cluster_id != -1:
                 cluster_dist[cluster_id] += 1
 
-        # Список каналов под наблюдением
         watch_list = []
         if self.graceful_removal:
             watch_list = list(self.graceful_removal.watch_list.keys())
@@ -442,7 +403,6 @@ class ChannelQualityAnalyzer:
         if self._is_first_run:
             return channel_urls
 
-        # Получаем текущие данные о здоровье
         healthy_urls = []
         watch_urls = []
 
@@ -458,24 +418,16 @@ class ChannelQualityAnalyzer:
             if is_healthy or health_score >= 50:
                 healthy_urls.append(url)
             elif health_score >= 30:
-                # Пограничный
                 if self.graceful_removal:
                     if self.graceful_removal.process(url, {'health_score': health_score, 'recommendation': 'watch'}):
                         watch_urls.append(url)
-                    # иначе удаляем
                 else:
-                    # Без мягкого удаления — оставляем на всякий случай
                     watch_urls.append(url)
-            # иначе удаляем
 
-        # AB-тестирование: пробуем включить некоторые отключённые каналы
         disabled = [u for u in channel_urls if u not in healthy_urls and u not in watch_urls]
         if self.ab_test:
             test_candidates = self.ab_test.get_test_channels(disabled)
             if test_candidates:
-                # В реальном пайплайне здесь нужно было бы проверить эти каналы
-                # и обновить их здоровье. Пока просто возвращаем их как потенциально живые
                 healthy_urls.extend(test_candidates)
 
-        # Возвращаем уникальный список
         return list(set(healthy_urls + watch_urls))
