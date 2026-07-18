@@ -11,7 +11,7 @@ from typing import List, Dict, Optional, Set
 import asyncio
 import aiohttp
 from aiohttp import ClientTimeout, ClientConnectorError, ClientResponseError
-from bs4 import BeautifulSoup
+from lxml import html  # Замена BeautifulSoup
 from config import ProxyConfig, ChannelConfig
 from config_validator import ConfigValidator
 from parse_fallback import FallbackParser
@@ -20,6 +20,7 @@ from retry_utils import retry_with_backoff, is_retryable
 from session_pool import SessionPool
 from protocol_registry import registry
 from channel_metrics_v2 import ChannelMetricsV2
+from adaptive_concurrency import AdaptiveConcurrency  # Новый модуль
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,9 @@ class AsyncConfigFetcher:
         self._connector_per_host = min(50, num_channels * 5)
 
         self._rate_limiter = RateLimiter(calls_per_second=1.5)
+
+        # Адаптивный параллелизм
+        self._adaptive_concurrency = AdaptiveConcurrency(min_concurrent=20, max_concurrent=100, initial=50)
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
         pool = SessionPool()
@@ -117,8 +121,17 @@ class AsyncConfigFetcher:
         return self.validator.split_configs(text)
 
     async def fetch_channel(self, channel: ChannelConfig) -> List[str]:
-        async with self._semaphore:
-            return await self._fetch_channel_internal(channel)
+        # Используем адаптивный семафор
+        async with self._adaptive_concurrency:
+            start_time = time.time()
+            success = False
+            try:
+                result = await self._fetch_channel_internal(channel)
+                success = True
+                return result
+            finally:
+                elapsed = time.time() - start_time
+                self._adaptive_concurrency.record(success, elapsed)
 
     async def _fetch_channel_internal(self, channel: ChannelConfig) -> List[str]:
         configs = []
@@ -151,20 +164,29 @@ class AsyncConfigFetcher:
         self.channel_response_times.setdefault(channel.url, []).append(response_time)
 
         if channel.is_telegram:
-            soup = BeautifulSoup(text, 'html.parser')
-            messages = soup.find_all('div', class_='tgme_widget_message_text')
-            sorted_messages = sorted(
-                messages,
-                key=lambda m: self.extract_date_from_message(m) or datetime.min.replace(tzinfo=timezone.utc),
-                reverse=True
-            )
-            for message in sorted_messages:
-                if not message or not message.text:
+            # Используем lxml вместо BeautifulSoup
+            tree = html.fromstring(text)
+            # Ищем все div с классом tgme_widget_message_text
+            messages = tree.xpath('//div[@class="tgme_widget_message_text"]')
+            # Сортировка по дате (если есть)
+            # Для каждого сообщения извлекаем текст и дату
+            for msg_elem in messages:
+                # Получаем дату из родительского элемента
+                parent = msg_elem.getparent()
+                while parent is not None and parent.tag != 'div':
+                    parent = parent.getparent()
+                if parent is None:
                     continue
-                message_date = self.extract_date_from_message(message)
-                if not self.is_config_valid(message.text, message_date):
+                time_elem = parent.xpath('.//time/@datetime')
+                msg_date = None
+                if time_elem:
+                    try:
+                        msg_date = datetime.fromisoformat(time_elem[0].replace('Z', '+00:00'))
+                    except:
+                        pass
+                msg_text = msg_elem.text_content()
+                if not self.is_config_valid(msg_text, msg_date):
                     continue
-                msg_text = message.text
                 parts = msg_text.split()
                 for part in parts:
                     part = part.strip()
@@ -226,8 +248,6 @@ class AsyncConfigFetcher:
             channel.metrics.response_time_std = 0.0  # будет вычислено позже
             channel.metrics.response_time_p50 = 0.0
             channel.metrics.response_time_p95 = 0.0
-            # Частота обновлений: приблизительно 1 / интервал между успешными сборами
-            # (будет вычислено в анализаторе)
 
         if len(processed) >= self.config.MIN_CONFIGS_PER_CHANNEL:
             self.config.update_channel_stats(channel, True, response_time)
@@ -268,12 +288,7 @@ class AsyncConfigFetcher:
         return text
 
     def extract_date_from_message(self, message) -> Optional[datetime]:
-        try:
-            time_element = message.find_parent('div', class_='tgme_widget_message').find('time')
-            if time_element and 'datetime' in time_element.attrs:
-                return datetime.fromisoformat(time_element['datetime'].replace('Z', '+00:00'))
-        except Exception:
-            pass
+        # Этот метод больше не используется, оставлен для совместимости
         return None
 
     def is_config_valid(self, config_text: str, date: Optional[datetime]) -> bool:
@@ -315,13 +330,16 @@ class AsyncConfigFetcher:
             logger.warning("No enabled channels found.")
             return []
 
-        tasks = [self.fetch_channel(ch) for ch in enabled]
+        # Сортировка каналов по приоритету (health_score по убыванию)
+        enabled_sorted = sorted(enabled, key=lambda ch: getattr(ch, 'health_score', 50.0), reverse=True)
+
+        tasks = [self.fetch_channel(ch) for ch in enabled_sorted]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         all_configs = []
         for idx, result in enumerate(results):
             if isinstance(result, Exception):
-                logger.error(f"Channel {enabled[idx].url} failed: {result}")
+                logger.error(f"Channel {enabled_sorted[idx].url} failed: {result}")
             else:
                 all_configs.extend(result)
 
