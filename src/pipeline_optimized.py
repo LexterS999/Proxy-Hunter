@@ -5,6 +5,7 @@
 Добавлены: graceful shutdown (сигналы), инъекция зависимости для history,
 проверка зависимостей, закрытие сессий, интеллектуальный анализ каналов,
 адаптивные пороги, кластеризация и ансамблевая модель здоровья.
+Дополнительно: асинхронная запись, предварительная фильтрация, использование xxhash.
 """
 
 import sys
@@ -19,6 +20,8 @@ import hashlib
 import asyncio
 import shutil
 import signal
+import queue
+import threading
 from pathlib import Path
 from typing import List, Dict
 from datetime import datetime
@@ -70,6 +73,49 @@ stream_handler = logging.StreamHandler(sys.stdout)
 stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 root_logger.addHandler(stream_handler)
 
+# Очередь для асинхронной записи файлов
+write_queue = queue.Queue()
+write_thread = None
+_write_stop_event = threading.Event()
+
+def _write_worker():
+    """Фоновый поток для записи файлов."""
+    while not _write_stop_event.is_set():
+        try:
+            item = write_queue.get(timeout=1.0)
+            if item is None:
+                break
+            filepath, content, mode = item
+            # Используем буферизированную запись с большим буфером
+            with open(filepath, mode, encoding='utf-8', buffering=1024*1024) as f:
+                f.write(content)
+        except queue.Empty:
+            continue
+        except Exception as e:
+            logger.error(f"Write worker error: {e}")
+
+def start_write_thread():
+    global write_thread, _write_stop_event
+    if write_thread is None or not write_thread.is_alive():
+        _write_stop_event.clear()
+        write_thread = threading.Thread(target=_write_worker, daemon=True)
+        write_thread.start()
+
+def stop_write_thread():
+    global _write_stop_event
+    _write_stop_event.set()
+    if write_thread is not None:
+        write_queue.put(None)
+        write_thread.join(timeout=5.0)
+
+def async_write(filepath: str, content: str, mode: str = 'w'):
+    """Ставит запись в очередь."""
+    write_queue.put((filepath, content, mode))
+
+# Регистрируем завершение
+import atexit
+atexit.register(stop_write_thread)
+
 
 class OptimizedPipeline:
     def __init__(self):
@@ -91,6 +137,7 @@ class OptimizedPipeline:
         self._state = {}
 
         self._check_dependencies()
+        start_write_thread()
 
     def _check_dependencies(self):
         missing = []
@@ -99,9 +146,9 @@ class OptimizedPipeline:
         except ImportError:
             missing.append("aiohttp")
         try:
-            import bs4
+            import lxml
         except ImportError:
-            missing.append("beautifulsoup4")
+            missing.append("lxml")
         try:
             import maxminddb
         except ImportError:
@@ -118,7 +165,6 @@ class OptimizedPipeline:
             import tqdm
         except ImportError:
             missing.append("tqdm")
-        # Новые зависимости для ML-компонентов (опционально)
         try:
             import sklearn
         except ImportError:
@@ -159,13 +205,13 @@ class OptimizedPipeline:
         return self.analyzer.history
 
     def _save_channel_stats(self):
-        """Сохраняет статистику каналов с расширенными метриками."""
+        """Сохраняет статистику каналов с расширенными метриками, но с сокращённым объёмом."""
         try:
             channels_data = []
             for ch in self.config.SOURCE_URLS:
                 m = ch.metrics
                 last_success = m.last_success_time.isoformat() if m.last_success_time else None
-                # Добавляем новые поля, если они есть
+                # Сохраняем только основные поля
                 channels_data.append({
                     'url': ch.url,
                     'enabled': ch.enabled,
@@ -175,27 +221,11 @@ class OptimizedPipeline:
                         'unique_configs': m.unique_configs,
                         'avg_response_time': m.avg_response_time,
                         'last_success': last_success,
-                        'fail_count': m.fail_count,
-                        'success_count': m.success_count,
                         'overall_score': m.overall_score,
                         'protocol_counts': m.protocol_counts or {},
-                        # Расширенные поля (могут быть не у всех)
-                        'total_parsed': getattr(m, 'total_parsed', 0),
-                        'parse_success_rate': getattr(m, 'parse_success_rate', 0.0),
-                        'protocol_diversity': getattr(m, 'protocol_diversity', 0.0),
-                        'response_time_std': getattr(m, 'response_time_std', 0.0),
-                        'response_time_p50': getattr(m, 'response_time_p50', 0.0),
-                        'response_time_p95': getattr(m, 'response_time_p95', 0.0),
-                        'config_age_avg': getattr(m, 'config_age_avg', 0.0),
-                        'update_frequency': getattr(m, 'update_frequency', 0.0),
-                        'first_seen': getattr(m, 'first_seen', None),
-                        'last_parsed': getattr(m, 'last_parsed', None),
-                        'consecutive_failures': getattr(m, 'consecutive_failures', 0),
+                        # Сокращаем: убираем детальные временные ряды
                     },
-                    # Поля для расширенного анализа
                     'health_score': getattr(ch, 'health_score', 50.0),
-                    'health_confidence': getattr(ch, 'health_confidence', 0.0),
-                    'days_left': getattr(ch, 'days_left', None),
                     'cluster': getattr(ch, 'cluster', -1),
                 })
             payload = {
@@ -203,22 +233,18 @@ class OptimizedPipeline:
                 'last_updated': datetime.now().isoformat()
             }
             Path(self.channel_stats_file).parent.mkdir(parents=True, exist_ok=True)
-            with open(self.channel_stats_file, 'w', encoding='utf-8') as f:
-                json.dump(payload, f, indent=2, ensure_ascii=False)
-            logger.info(f"✅ Channel stats saved: {len(channels_data)} channels")
+            content = json.dumps(payload, indent=2, ensure_ascii=False)
+            # Асинхронная запись
+            async_write(self.channel_stats_file, content, 'w')
+            logger.info(f"✅ Channel stats saved (async): {len(channels_data)} channels")
         except Exception as e:
             logger.error(f"Failed to save channel stats: {e}")
 
     def _refresh_channel_health(self, history_data: Dict):
         """Обновляет здоровье каналов, используя новые компоненты."""
         try:
-            # Получаем список URL
             urls = [ch.url for ch in self.config.SOURCE_URLS]
-
-            # Обновляем здоровье через анализатор (использует новые компоненты внутри)
             self.channel_analyzer.update_health(urls, history_data=history_data)
-
-            # Получаем отчёт
             report = self.channel_analyzer.get_health_report()
             summary = report.get('summary', {})
             logger.info(
@@ -228,12 +254,10 @@ class OptimizedPipeline:
             if summary.get('watch_list'):
                 logger.info(f"   Watch list: {len(summary['watch_list'])} channels")
 
-            # Обновляем пороги
             if hasattr(self.channel_analyzer, 'adaptive_thresholds'):
                 thresholds = self.channel_analyzer.adaptive_thresholds.get_thresholds()
                 logger.info(f"📊 Adaptive thresholds: {thresholds}")
 
-            # Логируем кластеры
             if hasattr(self.channel_analyzer, 'clustering'):
                 profiles = self.channel_analyzer.clustering.cluster_profiles
                 for cluster_id, profile in profiles.items():
@@ -278,7 +302,6 @@ class OptimizedPipeline:
             # Шаг 1.5: Сохранение статистики каналов и интеллектуальный анализ
             logger.info("📊 Saving channel statistics...")
             self._save_channel_stats()
-            # Загружаем свежую историю для анализа
             with open(self.channel_stats_file, 'r') as f:
                 history_data = json.load(f)
             self._refresh_channel_health(history_data)
@@ -349,7 +372,8 @@ class OptimizedPipeline:
                                 'lifetime': score_info['lifetime'],
                                 'is_datacenter': score_info['is_datacenter'],
                                 'server_type': score_info['server_type'],
-                                'parsed': parsed
+                                'parsed': parsed,
+                                'age': 0  # будет вычислено позже
                             })
                     except Exception as e:
                         logger.error(f"Scoring error for config {idx}: {e}")
@@ -365,9 +389,8 @@ class OptimizedPipeline:
                 return False
 
             # Шаг 4: Фильтрация по композитному скору (используем адаптивный порог)
-            # Получаем адаптивный порог из анализатора
             thresholds = self.channel_analyzer.adaptive_thresholds.get_thresholds()
-            min_score = thresholds.get('base_health', 0.0) * 0.7  # масштабируем для конфигов
+            min_score = thresholds.get('base_health', 0.0) * 0.7
             filtered = [item for item in scored_configs if item['score'] >= min_score]
             logger.info(f"✅ After min_score filter ({min_score:.1f}): {len(filtered)}")
 
@@ -383,6 +406,43 @@ class OptimizedPipeline:
             if not filtered:
                 return False
 
+            # Шаг 4.5: Предварительная фильтрация перед активной проверкой
+            logger.info("🔎 Pre-filtering configs before active check...")
+            # Отсеиваем старые (по возрасту) и оставляем лучший на сервер
+            now = time.time()
+            filtered_by_age = []
+            server_best = {}  # server:port -> best config
+            for item in filtered:
+                # Возраст (приблизительно) – используем last_seen из истории
+                config = item['config']
+                parsed = item['parsed']
+                key = self.scorer.get_profile_key(config, parsed)
+                profile = self.history.get('profiles', {}).get(key, {})
+                last_seen = profile.get('last_seen')
+                age = 999999
+                if last_seen:
+                    try:
+                        last_time = datetime.fromisoformat(last_seen).timestamp()
+                        age = now - last_time
+                    except:
+                        pass
+                # Если возраст > MAX_CONFIG_AGE_DAYS * 86400, пропускаем
+                max_age = self.config.MAX_CONFIG_AGE_DAYS * 86400
+                if age < max_age:
+                    # Оставляем лучший по скору для каждого сервера:порт
+                    server = parsed.get('address') or parsed.get('add') or parsed.get('host')
+                    port = parsed.get('port')
+                    if server and port:
+                        key2 = f"{server}:{port}"
+                        if key2 not in server_best or item['score'] > server_best[key2]['score']:
+                            server_best[key2] = item
+            filtered_best = list(server_best.values())
+            logger.info(f"✅ After pre-filter: {len(filtered_best)} configs (from {len(filtered)})")
+
+            if not filtered_best:
+                logger.warning("No configs left after pre-filter, falling back to all")
+                filtered_best = filtered
+
             # Шаг 5: Активная проверка (асинхронная, с кешированием и фильтрацией)
             logger.info("🔌 Active checking (TCP SYN, cached, async)...")
 
@@ -394,7 +454,7 @@ class OptimizedPipeline:
                 history=history
             )
 
-            configs_to_check = [item['config'] for item in filtered]
+            configs_to_check = [item['config'] for item in filtered_best]
             check_results = await checker.check_batch(configs_to_check)
 
             if self._shutdown_requested:
@@ -425,14 +485,14 @@ class OptimizedPipeline:
                 if result.get('valid', False) and result.get('latency', -1) > 0:
                     latency_ms = result['latency']
                     latency_bonus = max(0, min(20, 20 * (1 - latency_ms / 3000)))
-                    for item in filtered:
+                    for item in filtered_best:
                         if item['config'] == result['config']:
                             item['score'] = min(100, item['score'] + latency_bonus)
                             break
 
             # Шаг 6: Дедупликация
             logger.info("🧹 Deep deduplication...")
-            quality_scores = {item['config']: item['score'] for item in filtered if item['config'] in good_configs}
+            quality_scores = {item['config']: item['score'] for item in filtered_best if item['config'] in good_configs}
             deduped = await self.deduplicator.deduplicate_configs_async(good_configs, quality_scores)
             logger.info(f"✅ After dedup: {len(deduped)}")
 
@@ -491,7 +551,7 @@ class OptimizedPipeline:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
 
-            # Шаг 9: Сохранение упрощённого списка
+            # Шаг 9: Сохранение упрощённого списка (асинхронно)
             logger.info("📄 Saving simple output...")
             simple_file = 'configs/output_simple.txt'
             try:
@@ -507,13 +567,9 @@ class OptimizedPipeline:
                 if line.startswith('//') or not line:
                     continue
                 simple_configs.append(line)
-            try:
-                with open(simple_file, 'w', encoding='utf-8') as f:
-                    for cfg in simple_configs:
-                        f.write(cfg + '\n')
-                logger.info(f"✅ Simple output saved: {len(simple_configs)} configs")
-            except Exception as e:
-                logger.error(f"Failed to write simple output: {e}")
+            content = '\n'.join(simple_configs)
+            async_write(simple_file, content, 'w')
+            logger.info(f"✅ Simple output saved (async): {len(simple_configs)} configs")
 
             # Шаг 10: Обновление истории качества
             logger.info("📊 Updating quality history...")
@@ -521,7 +577,7 @@ class OptimizedPipeline:
                 'raw': len(raw_configs),
                 'valid': len(valid_configs),
                 'final': len(deduped),
-                'avg_score': sum(item['score'] for item in filtered) / len(filtered) if filtered else 0,
+                'avg_score': sum(item['score'] for item in filtered_best) / len(filtered_best) if filtered_best else 0,
                 'protocols': {},
                 'geo_distribution': {}
             }
