@@ -138,7 +138,6 @@ def flush_write_queue(timeout: float = 10.0):
 import atexit
 atexit.register(stop_write_thread)
 
-
 class OptimizedPipeline:
     def __init__(self):
         self.config = ProxyConfig()
@@ -157,6 +156,7 @@ class OptimizedPipeline:
         self.health_model = EnsembleHealthModel()
         self._shutdown_requested = False
         self._state = {}
+        self.history = {}  # Будет заполнено в run()
 
         self._check_dependencies()
         start_write_thread()
@@ -312,6 +312,10 @@ class OptimizedPipeline:
             logger.info("="*60)
             logger.info("🚀 Starting Proxy-Hunter Pipeline (optimized, async)")
             logger.info("="*60)
+
+            # Загружаем историю один раз и сохраняем в self.history
+            self.history = self._safe_load_history()
+            logger.info(f"Loaded history with {len(self.history.get('profiles', {}))} profiles")
 
             # Шаг 1: Сбор конфигураций (асинхронный)
             logger.info("📡 Fetching configurations...")
@@ -475,12 +479,12 @@ class OptimizedPipeline:
             # Шаг 5: Активная проверка (асинхронная, с кешированием и фильтрацией)
             logger.info("🔌 Active checking (TCP SYN, cached, async)...")
 
-            history = self._safe_load_history()
+            # Используем self.history, который уже загружен
             checker = ActiveChecker(
                 timeout=1.0,
                 max_workers=None,
                 max_latency=6000.0,
-                history=history
+                history=self.history
             )
 
             configs_to_check = [item['config'] for item in filtered_best]
@@ -636,12 +640,10 @@ class OptimizedPipeline:
             # Останавливаем поток записи
             stop_write_thread()
 
-
 def main():
     pipeline = OptimizedPipeline()
     success = asyncio.run(pipeline.run())
     sys.exit(0 if success else 1)
-
 
 if __name__ == '__main__':
     main()
