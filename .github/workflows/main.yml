@@ -29,7 +29,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libmaxminddb-dev
+          sudo apt-get install -y libmaxminddb-dev build-essential python3-dev
 
       - name: Install Python dependencies
         run: |
@@ -97,7 +97,7 @@ jobs:
                   return f\"{parsed.scheme}://{netloc}{path}\"
               return url
 
-          # Загружаем статистику
+          # Загружаем статистику каналов (channel_stats.json)
           try:
               with open('configs/channel_stats.json', 'r') as f:
                   stats = json.load(f)
@@ -105,13 +105,26 @@ jobs:
               print('channel_stats.json not found, skipping')
               exit(0)
 
-          # Собираем неактивные URL
+          # Загружаем здоровье каналов (channel_health.json) для более точной фильтрации
+          try:
+              with open('configs/channel_health.json', 'r') as f:
+                  health = json.load(f)
+          except FileNotFoundError:
+              health = {}
+
+          # Собираем URL, которые следует удалить (enabled=False или is_healthy=False)
           inactive_urls = set()
           for ch in stats.get('channels', []):
+              url = ch.get('url', '')
+              if not url:
+                  continue
+              # Если канал отключен в статистике
               if not ch.get('enabled', True):
-                  url = ch.get('url', '')
-                  if url:
-                      inactive_urls.add(normalize_url(url))
+                  inactive_urls.add(normalize_url(url))
+              # Если в health-файле помечен как нездоровый
+              health_info = health.get('channels', {}).get(url, {})
+              if not health_info.get('is_healthy', True):
+                  inactive_urls.add(normalize_url(url))
 
           if not inactive_urls:
               print('No inactive channels found')
@@ -203,6 +216,31 @@ jobs:
           else
             echo "report_exists=false" >> $GITHUB_OUTPUT
           fi
+
+      - name: Show extended health summary
+        if: steps.check_output.outputs.health_exists == 'true'
+        run: |
+          echo "📊 Channel Health Summary:"
+          python -c "
+          import json
+          try:
+              with open('configs/channel_health.json') as f:
+                  data = json.load(f)
+              channels = data.get('channels', {})
+              total = len(channels)
+              healthy = sum(1 for c in channels.values() if c.get('is_healthy', False))
+              print(f'  Total channels: {total}')
+              print(f'  Healthy: {healthy}')
+              print(f'  Unhealthy: {total - healthy}')
+              # Покажем несколько нездоровых
+              unhealthy_urls = [url for url, info in channels.items() if not info.get('is_healthy', False)]
+              if unhealthy_urls:
+                  print('  Sample unhealthy channels:')
+                  for url in unhealthy_urls[:5]:
+                      print(f'    {url}')
+          except Exception as e:
+              print(f'  ⚠️  Could not read health: {e}')
+          "
 
       - name: Validate output configs
         if: steps.check_output.outputs.output_exists == 'true'
