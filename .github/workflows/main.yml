@@ -2,7 +2,7 @@ name: Proxy-Hunter
 
 on:
   schedule:
-    - cron: '0 */10 * * *'   # каждые 10 часов
+    - cron: '0 */3 * * *'   # каждые 10 часов
   workflow_dispatch:         # ручной запуск
 
 jobs:
