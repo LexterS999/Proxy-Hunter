@@ -24,6 +24,35 @@ REPO_URL="https://github.com/YawStar/Proxy-Hunter.git"
 INSTALL_DIR="$HOME/multi-proxy-config-fetcher"
 VENV_DIR="$INSTALL_DIR/venv"
 
+# Если передан флаг --install-xray-only, устанавливаем только Xray и выходим
+if [[ "$1" == "--install-xray-only" ]]; then
+    echo "Installing Xray-core only..."
+    # Определяем архитектуру
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64)  XRAY_FILE="Xray-linux-64.zip" ;;
+        aarch64) XRAY_FILE="Xray-linux-arm64-v8a.zip" ;;
+        armv7l)  XRAY_FILE="Xray-linux-arm32-v7a.zip" ;;
+        *)       echo "Unsupported architecture: $ARCH"; exit 1 ;;
+    esac
+    # Получаем последнюю версию
+    XRAY_VERSION=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep -oP '"tag_name": "\K(.*?)(?=")')
+    if [ -z "$XRAY_VERSION" ]; then
+        echo "Failed to get latest Xray version"
+        exit 1
+    fi
+    echo "Downloading Xray $XRAY_VERSION ($XRAY_FILE)..."
+    wget -q "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/${XRAY_FILE}" -O /tmp/xray.zip
+    echo "Extracting Xray..."
+    mkdir -p /tmp/xray
+    unzip -q -o /tmp/xray.zip -d /tmp/xray
+    chmod +x /tmp/xray/xray
+    sudo mv /tmp/xray/xray /usr/local/bin/
+    rm -rf /tmp/xray /tmp/xray.zip
+    xray version 2>&1 | head -1
+    exit 0
+fi
+
 detect_platform() {
     if command -v termux-info >/dev/null 2>&1; then
         echo "termux"
@@ -201,7 +230,6 @@ install_dependencies_macos() {
     print_success "macOS dependencies installed!"
 }
 
-# 🔧 Исправленная установка Xray — распаковка во временную папку
 install_xray() {
     print_status "Installing Xray-core..."
     if command -v xray >/dev/null 2>&1; then
@@ -214,7 +242,6 @@ install_xray() {
         exit 1
     fi
 
-    # Определяем архитектуру
     ARCH=$(uname -m)
     case "$ARCH" in
         x86_64)  XRAY_FILE="Xray-linux-64.zip" ;;
@@ -223,7 +250,6 @@ install_xray() {
         *)       print_error "Unsupported architecture: $ARCH"; exit 1 ;;
     esac
 
-    # Получаем последнюю версию
     XRAY_VERSION=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep -oP '"tag_name": "\K(.*?)(?=")')
     if [ -z "$XRAY_VERSION" ]; then
         print_error "Failed to get latest Xray version"
@@ -237,7 +263,6 @@ install_xray() {
     }
 
     print_status "Extracting Xray..."
-    # 🔥 Ключевое: создаём временную папку и распаковываем туда с флагом -o
     mkdir -p /tmp/xray
     unzip -q -o /tmp/xray.zip -d /tmp/xray
     chmod +x /tmp/xray/xray
