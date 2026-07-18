@@ -77,6 +77,28 @@ jobs:
         run: |
           python src/generate_charts.py
 
+      # === НОВЫЙ ШАГ: проверка и восстановление JSON-файлов после пайплайна ===
+      - name: Verify and restore JSON files after pipeline
+        run: |
+          for file in configs/channel_stats.json configs/channel_health.json configs/quality_history.json; do
+            if [ -f "$file" ]; then
+              if ! python -c "import json; json.load(open('$file'))" 2>/dev/null; then
+                echo "⚠️ $file is corrupted or empty after pipeline, restoring from backup or recreating..."
+                # Если есть резервная копия, восстанавливаем её
+                if [ -f "$file.bak" ]; then
+                  cp "$file.bak" "$file"
+                  echo "Restored $file from backup"
+                else
+                  echo '{}' > "$file"
+                  echo "Recreated $file with empty object"
+                fi
+              fi
+            else
+              echo '{}' > "$file"
+              echo "Created missing $file"
+            fi
+          done
+
       - name: Remove inactive channels from custom_channels.txt
         run: |
           python -c "
@@ -97,19 +119,19 @@ jobs:
                   return f\"{parsed.scheme}://{netloc}{path}\"
               return url
 
-          # Загружаем статистику каналов (channel_stats.json)
+          # Загружаем статистику каналов (channel_stats.json) с проверкой
           try:
               with open('configs/channel_stats.json', 'r') as f:
                   stats = json.load(f)
-          except FileNotFoundError:
-              print('channel_stats.json not found, skipping')
+          except (FileNotFoundError, json.JSONDecodeError) as e:
+              print(f'Could not load channel_stats.json: {e}, skipping removal')
               exit(0)
 
           # Загружаем здоровье каналов (channel_health.json) для более точной фильтрации
           try:
               with open('configs/channel_health.json', 'r') as f:
                   health = json.load(f)
-          except FileNotFoundError:
+          except (FileNotFoundError, json.JSONDecodeError):
               health = {}
 
           # Собираем URL, которые следует удалить (enabled=False или is_healthy=False)
