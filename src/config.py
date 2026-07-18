@@ -16,9 +16,11 @@ from user_settings import (
     MAX_CONFIG_AGE_DAYS, CHANNEL_HEALTH_THRESHOLD
 )
 from channel_quality_analyzer import ChannelQualityAnalyzer
+from channel_metrics_v2 import ChannelMetricsV2
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class ChannelMetrics:
@@ -36,6 +38,7 @@ class ChannelMetrics:
         if self.protocol_counts is None:
             self.protocol_counts = {}
 
+
 class ChannelConfig:
     def __init__(self, url: str):
         self.url = self._validate_url(url)
@@ -44,6 +47,13 @@ class ChannelConfig:
         self.is_telegram = bool(re.match(r'^https://t\.me/s/', self.url))
         self.error_count = 0
         self.last_check_time = None
+
+        # Новые поля для расширенного анализа
+        self.health_score: float = 50.0
+        self.health_confidence: float = 0.0
+        self.days_left: Optional[float] = None
+        self.cluster: int = -1
+        self.watch_remaining: int = 0
 
     def _validate_url(self, url: str) -> str:
         if not url or not isinstance(url, str):
@@ -69,6 +79,7 @@ class ChannelConfig:
             logger.error(f"Error calculating score for {self.url}: {str(e)}")
             self.metrics.overall_score = 0.0
 
+
 class ProxyConfig:
     def __init__(self):
         self.use_maximum_power = USE_MAXIMUM_POWER
@@ -80,7 +91,7 @@ class ProxyConfig:
         self.SUPPORTED_PROTOCOLS = self._initialize_protocols()
         self._initialize_settings()
         self._set_smart_limits()
-        self._analyzer = None
+        self._analyzer = ChannelQualityAnalyzer()
 
     def _initialize_protocols(self) -> Dict:
         return {
@@ -96,7 +107,6 @@ class ProxyConfig:
     def _initialize_settings(self):
         self.CHANNEL_RETRY_LIMIT = min(10, max(1, 5))
         self.CHANNEL_ERROR_THRESHOLD = min(0.9, max(0.1, 0.7))
-        # ЕДИНЫЙ ВЫХОДНОЙ ФАЙЛ
         self.OUTPUT_FILE = 'configs/output.txt'
         self.STATS_FILE = 'configs/channel_stats.json'
         self.MAX_RETRIES = min(10, max(1, 5))
@@ -214,16 +224,21 @@ class ProxyConfig:
     def _apply_channel_health_filter(self):
         if not self.SOURCE_URLS:
             return
-        if self._analyzer is None:
-            self._analyzer = ChannelQualityAnalyzer()
         urls = [ch.url for ch in self.SOURCE_URLS]
         self._analyzer.update_health(urls)
+        # Используем новый метод prune_bad_channels для принятия решения
+        kept_urls = self._analyzer.prune_bad_channels(urls)
+        kept_set = set(kept_urls)
         for ch in self.SOURCE_URLS:
-            if not self._analyzer.is_channel_healthy(ch.url):
+            if ch.url not in kept_set:
                 ch.enabled = False
-                logger.info(f"Channel {ch.url} disabled due to poor health.")
+                logger.info(f"Channel {ch.url} disabled by intelligent pruning.")
             else:
                 ch.enabled = True
+                # Обновляем дополнительные поля
+                health_info = self._analyzer.health_data.get('channels', {}).get(ch.url, {})
+                ch.health_score = health_info.get('health_score', 50.0)
+                ch.cluster = health_info.get('cluster', -1)
 
     def update_channel_stats(self, channel: ChannelConfig, success: bool, response_time: float = 0):
         if success:
