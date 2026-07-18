@@ -20,8 +20,7 @@ echo -e "${WHITE} Designed by: ${BRIGHT_GREEN}👽 Anonymous${NC}"
 echo -e "${MAGENTA}═════════════════════════════════════════════${NC}"
 echo ""
 
-# Правильный URL репозитория (оригинальный, не форк)
-REPO_URL="https://github.com/LexterS999/Proxy-Hunter.git"
+REPO_URL="https://github.com/YawStar/Proxy-Hunter.git"
 INSTALL_DIR="$HOME/multi-proxy-config-fetcher"
 VENV_DIR="$INSTALL_DIR/venv"
 
@@ -56,13 +55,17 @@ print_error() {
 }
 
 check_command() {
-    command -v "$1" >/dev/null 2>&1
+    if command -v "$1" >/dev/null 2>&1; then
+        return 0
+    else
+        return 1
+    fi
 }
 
 check_python_version() {
     if command -v python3 &>/dev/null; then
-        if ! python3 -c "import sys; sys.exit(0 if sys.version_info >= (3,8) else 1)" 2>/dev/null; then
-            version=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+        version=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+        if [[ "$version" < "3.8" ]]; then
             print_error "Python 3.8+ required, found $version"
             exit 1
         fi
@@ -198,6 +201,7 @@ install_dependencies_macos() {
     print_success "macOS dependencies installed!"
 }
 
+# 🔧 Исправленная установка Xray — распаковка во временную папку
 install_xray() {
     print_status "Installing Xray-core..."
     if command -v xray >/dev/null 2>&1; then
@@ -210,6 +214,7 @@ install_xray() {
         exit 1
     fi
 
+    # Определяем архитектуру
     ARCH=$(uname -m)
     case "$ARCH" in
         x86_64)  XRAY_FILE="Xray-linux-64.zip" ;;
@@ -218,6 +223,7 @@ install_xray() {
         *)       print_error "Unsupported architecture: $ARCH"; exit 1 ;;
     esac
 
+    # Получаем последнюю версию
     XRAY_VERSION=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep -oP '"tag_name": "\K(.*?)(?=")')
     if [ -z "$XRAY_VERSION" ]; then
         print_error "Failed to get latest Xray version"
@@ -231,6 +237,7 @@ install_xray() {
     }
 
     print_status "Extracting Xray..."
+    # 🔥 Ключевое: создаём временную папку и распаковываем туда с флагом -o
     mkdir -p /tmp/xray
     unzip -q -o /tmp/xray.zip -d /tmp/xray
     chmod +x /tmp/xray/xray
@@ -279,8 +286,7 @@ run_step() {
     local step_name="\$1"
     local step_cmd="\$2"
     echo "➤ [\$(date +%H:%M:%S)] Running: \$step_name"
-    # Используем прямой вызов без eval, чтобы избежать инъекций
-    if \$step_cmd; then
+    if eval "\$step_cmd"; then
         echo "✓ [\$(date +%H:%M:%S)] Completed: \$step_name"
         echo ""
         return 0
