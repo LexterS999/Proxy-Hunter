@@ -2,8 +2,8 @@ name: Proxy-Hunter
 
 on:
   schedule:
-    - cron: '0 */3 * * *'   # каждые 10 часов
-  workflow_dispatch:         # ручной запуск
+    - cron: '0 */5 * * *'
+  workflow_dispatch:
 
 jobs:
   run-pipeline:
@@ -29,7 +29,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libmaxminddb-dev build-essential python3-dev
+          sudo apt-get install -y libmaxminddb-dev
 
       - name: Install Python dependencies
         run: |
@@ -45,18 +45,16 @@ jobs:
           # Текстовые файлы могут быть пустыми
           touch configs/output.txt
           touch configs/output_simple.txt
-          # JSON-файлы должны содержать корректный пустой объект
+          # JSON-файлы должны содержать корректный пустой объект или массив
           echo '{}' > configs/channel_stats.json
           echo '{}' > configs/quality_history.json
           echo '{}' > configs/location_cache.json
           echo '{}' > configs/parsed_cache.json
           echo '{}' > configs/channel_health.json
-          # CSV с заголовками
-          echo "timestamp,total_final,avg_score,p50_latency,p95_latency,p99_latency,success_rate" > configs/quality_data.csv
-          # custom_channels.txt (если отсутствует)
-          touch custom_channels.txt
+          # CSV-файл может быть пустым, но для совместимости создаём с заголовками
+          echo "timestamp,total_final,avg_score,p50_latency,p95_latency,p99_latency,success_rate" > configs/quality_data.csv || true
 
-      - name: Verify and fix JSON files (pre-run)
+      - name: Verify and fix JSON files (if corrupted)
         run: |
           for file in configs/channel_stats.json configs/quality_history.json configs/location_cache.json configs/parsed_cache.json configs/channel_health.json; do
             if [ -f "$file" ]; then
@@ -77,26 +75,6 @@ jobs:
         run: |
           python src/generate_charts.py
 
-      - name: Verify and restore JSON files after pipeline
-        run: |
-          for file in configs/channel_stats.json configs/channel_health.json configs/quality_history.json; do
-            if [ -f "$file" ]; then
-              if ! python -c "import json; json.load(open('$file'))" 2>/dev/null; then
-                echo "⚠️ $file is corrupted or empty after pipeline, restoring from backup or recreating..."
-                if [ -f "$file.bak" ]; then
-                  cp "$file.bak" "$file"
-                  echo "Restored $file from backup"
-                else
-                  echo '{}' > "$file"
-                  echo "Recreated $file with empty object"
-                fi
-              fi
-            else
-              echo '{}' > "$file"
-              echo "Created missing $file"
-            fi
-          done
-
       - name: Remove inactive channels from custom_channels.txt
         run: |
           python -c "
@@ -114,34 +92,24 @@ jobs:
               if parsed.scheme and parsed.netloc:
                   netloc = parsed.netloc.replace('www.', '')
                   path = parsed.path.rstrip('/')
-                  return f'{parsed.scheme}://{netloc}{path}'
+                  return f\"{parsed.scheme}://{netloc}{path}\"
               return url
 
-          # Загружаем статистику каналов
+          # Загружаем статистику
           try:
               with open('configs/channel_stats.json', 'r') as f:
                   stats = json.load(f)
-          except (FileNotFoundError, json.JSONDecodeError) as e:
-              print(f'Could not load channel_stats.json: {e}, skipping removal')
+          except FileNotFoundError:
+              print('channel_stats.json not found, skipping')
               exit(0)
 
-          # Загружаем здоровье каналов
-          try:
-              with open('configs/channel_health.json', 'r') as f:
-                  health = json.load(f)
-          except (FileNotFoundError, json.JSONDecodeError):
-              health = {}
-
+          # Собираем неактивные URL
           inactive_urls = set()
           for ch in stats.get('channels', []):
-              url = ch.get('url', '')
-              if not url:
-                  continue
               if not ch.get('enabled', True):
-                  inactive_urls.add(normalize_url(url))
-              health_info = health.get('channels', {}).get(url, {})
-              if not health_info.get('is_healthy', True):
-                  inactive_urls.add(normalize_url(url))
+                  url = ch.get('url', '')
+                  if url:
+                      inactive_urls.add(normalize_url(url))
 
           if not inactive_urls:
               print('No inactive channels found')
@@ -149,12 +117,14 @@ jobs:
 
           print(f'Found {len(inactive_urls)} inactive channels')
 
+          # Читаем custom_channels.txt
           try:
               with open('custom_channels.txt', 'r') as f:
                   lines = f.readlines()
           except FileNotFoundError:
               lines = []
 
+          # Фильтруем
           filtered = []
           removed_count = 0
           for line in lines:
@@ -169,6 +139,7 @@ jobs:
               else:
                   filtered.append(line)
 
+          # Записываем обратно
           with open('custom_channels.txt', 'w') as f:
               for line in filtered:
                   f.write(line + '\n' if line else '\n')
@@ -231,52 +202,6 @@ jobs:
             echo "report_exists=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Show extended health summary
-        if: steps.check_output.outputs.health_exists == 'true'
-        run: |
-          echo "📊 Channel Health Summary:"
-          python -c "
-          import json
-          try:
-              with open('configs/channel_health.json') as f:
-                  data = json.load(f)
-              channels = data.get('channels', {})
-              total = len(channels)
-              healthy = sum(1 for c in channels.values() if c.get('is_healthy', False))
-              print(f'  Total channels: {total}')
-              print(f'  Healthy: {healthy}')
-              print(f'  Unhealthy: {total - healthy}')
-              unhealthy_urls = [url for url, info in channels.items() if not info.get('is_healthy', False)]
-              if unhealthy_urls:
-                  print('  Sample unhealthy channels:')
-                  for url in unhealthy_urls[:5]:
-                      print(f'    {url}')
-          except Exception as e:
-              print(f'  ⚠️  Could not read health: {e}')
-          "
-
-      - name: Validate output configs
-        if: steps.check_output.outputs.output_exists == 'true'
-        run: |
-          echo "Validating output configs..."
-          python -c "
-          import re
-          VALID_PROTOCOLS = ['vmess://', 'vless://', 'trojan://', 'ss://', 'hysteria2://', 'hy2://', 'wireguard://', 'tuic://']
-          with open('configs/output.txt', 'r') as f:
-              lines = [l.strip() for l in f if l.strip()]
-          if not lines:
-              print('❌ output.txt is empty')
-              exit(1)
-          valid_count = 0
-          for line in lines:
-              if any(line.startswith(p) for p in VALID_PROTOCOLS):
-                  valid_count += 1
-          if valid_count == 0:
-              print('❌ No valid protocol lines found in output.txt')
-              exit(1)
-          print(f'✅ {valid_count} valid configs found')
-          "
-
       - name: Show quality summary
         if: steps.check_output.outputs.history_exists == 'true'
         run: |
@@ -307,23 +232,14 @@ jobs:
               print(f'  ⚠️  Could not read history: {e}')
           "
 
+      # Публикуем статус самого шага пайплайна отдельно и заметно в логе,
+      # чтобы при разборе падений не приходилось скроллить весь вывод.
       - name: Show pipeline step status
         run: |
           echo "Pipeline step outcome: ${{ steps.pipeline.outcome }}"
           if [ "${{ steps.pipeline.outcome }}" != "success" ]; then
             echo "⚠️ Pipeline step did NOT succeed. See 'Run optimized pipeline' step output above"
             echo "   and the 'pipeline-debug-log' artifact for details."
-          fi
-
-      # Если пайплайн упал — выводим последние строки лога для быстрой диагностики
-      - name: Dismiss last lines of debug log on failure
-        if: always() && steps.pipeline.outcome == 'failure'
-        run: |
-          echo "=== Last 50 lines of pipeline_debug.log (if exists) ==="
-          if [ -f "pipeline_debug.log" ]; then
-            tail -50 pipeline_debug.log
-          else
-            echo "pipeline_debug.log not found."
           fi
 
       - name: Upload all artifacts
