@@ -26,7 +26,6 @@ jobs:
           python-version: '3.10'
           cache: 'pip'
 
-      # Конвертируем install.sh в Unix-формат, чтобы избежать ошибок с \r
       - name: Convert scripts to LF
         run: |
           if [ -f "install.sh" ]; then
@@ -58,10 +57,27 @@ jobs:
 
       - name: Ensure required files exist
         run: |
-          touch configs/output.txt
+          touch configs/output_archive.txt
           touch configs/output_simple.txt
           echo '{}' > configs/location_cache.json
           echo '{}' > configs/parsed_cache.json
+
+      # Проверяем возраст архива и удаляем, если старше 7 дней
+      - name: Rotate archive if older than 7 days
+        run: |
+          ARCHIVE="configs/output_archive.txt"
+          if [ -f "$ARCHIVE" ]; then
+            AGE=$(($(date +%s) - $(stat -c %Y "$ARCHIVE")))
+            MAX_AGE=$((7 * 24 * 3600))
+            if [ $AGE -ge $MAX_AGE ]; then
+              echo "Archive is older than 7 days ($(($AGE/86400)) days), removing."
+              rm -f "$ARCHIVE"
+            else
+              echo "Archive is $(($AGE/3600)) hours old, keeping."
+            fi
+          else
+            echo "Archive does not exist, will be created."
+          fi
 
       - name: Install Xray-core
         run: |
@@ -153,18 +169,18 @@ jobs:
         id: check_output
         run: |
           echo "Checking output files..."
-          if [ -f "configs/output.txt" ] && [ -s "configs/output.txt" ]; then
-            echo "output_exists=true" >> $GITHUB_OUTPUT
-            echo "✅ output.txt exists! Size: $(wc -c < configs/output.txt) bytes"
+          if [ -f "configs/output_archive.txt" ] && [ -s "configs/output_archive.txt" ]; then
+            echo "archive_exists=true" >> $GITHUB_OUTPUT
+            echo "✅ output_archive.txt exists! Size: $(wc -c < configs/output_archive.txt) bytes"
           else
-            echo "output_exists=false" >> $GITHUB_OUTPUT
-            echo "❌ output.txt not found or empty!"
+            echo "archive_exists=false" >> $GITHUB_OUTPUT
+            echo "❌ output_archive.txt not found or empty!"
           fi
           if [ -f "configs/output_simple.txt" ] && [ -s "configs/output_simple.txt" ]; then
-            echo "simple_output_exists=true" >> $GITHUB_OUTPUT
+            echo "simple_exists=true" >> $GITHUB_OUTPUT
             echo "✅ output_simple.txt exists! Size: $(wc -c < configs/output_simple.txt) bytes"
           else
-            echo "simple_output_exists=false" >> $GITHUB_OUTPUT
+            echo "simple_exists=false" >> $GITHUB_OUTPUT
             echo "❌ output_simple.txt not found or empty!"
           fi
           if [ -f "configs/history.db" ]; then
@@ -239,7 +255,7 @@ jobs:
         with:
           name: proxy-output
           path: |
-            configs/output.txt
+            configs/output_archive.txt
             configs/output_simple.txt
             configs/history.db
             configs/location_cache.json
@@ -248,11 +264,11 @@ jobs:
           if-no-files-found: warn
 
       - name: Commit output to repo
-        if: steps.check_output.outputs.output_exists == 'true'
+        if: steps.check_output.outputs.archive_exists == 'true'
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add configs/output.txt configs/output_simple.txt configs/location_cache.json configs/parsed_cache.json custom_channels.txt
+          git add configs/output_archive.txt configs/output_simple.txt configs/location_cache.json configs/parsed_cache.json custom_channels.txt
           if git diff --staged --quiet; then
             echo "✅ No changes to commit"
           else
