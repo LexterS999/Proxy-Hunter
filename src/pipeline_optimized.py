@@ -7,6 +7,7 @@
 
 import sys
 import os
+from db import HistoryDB, _compress, _decompress
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import logging
