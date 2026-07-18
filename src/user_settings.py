@@ -143,3 +143,28 @@ CHANNEL_HISTORY_DAYS = get_safe_env('PROXY_HUNTER_CHANNEL_HISTORY_DAYS', '7', va
 # Белый список каналов (разделённые запятыми URL)
 _whitelist_raw = os.getenv('PROXY_HUNTER_CHANNEL_WHITELIST', '')
 CHANNEL_WHITELIST = [url.strip() for url in _whitelist_raw.split(',') if url.strip()]
+
+# === НОВЫЕ НАСТРОЙКИ ДЛЯ РАСШИРЕННОГО АНАЛИЗА ===
+# Пороги для адаптивной системы
+ADAPTIVE_THRESHOLDS_ENABLED = get_safe_env('PROXY_HUNTER_ADAPTIVE_THRESHOLDS', 'True', value_type=bool)
+HEALTH_CLASSIFIER_ENABLED = get_safe_env('PROXY_HUNTER_HEALTH_CLASSIFIER', 'True', value_type=bool)
+LIFETIME_PREDICTOR_ENABLED = get_safe_env('PROXY_HUNTER_LIFETIME_PREDICTOR', 'True', value_type=bool)
+CLUSTERING_ENABLED = get_safe_env('PROXY_HUNTER_CLUSTERING', 'True', value_type=bool)
+GRACEFUL_REMOVAL_ENABLED = get_safe_env('PROXY_HUNTER_GRACEFUL_REMOVAL', 'True', value_type=bool)
+AB_TEST_ENABLED = get_safe_env('PROXY_HUNTER_AB_TEST', 'True', value_type=bool)
+
+# Параметры моделей
+HEALTH_CLASSIFIER_FEATURES = [
+    'total_configs', 'valid_rate', 'success_rate',
+    'protocol_diversity', 'avg_response_time',
+    'update_frequency', 'consecutive_failures',
+    'score_trend', 'config_volatility'
+]
+LIFETIME_PREDICTOR_LOOKBACK = 30  # дней
+LIFETIME_PREDICTOR_FORECAST = 30  # дней
+GRACEFUL_REMOVAL_WATCH_PERIOD = 3  # циклов
+AB_TEST_INTERVAL = 5  # циклов
+
+# Пороги для кластеров
+CLUSTER_COUNT = 4
+CLUSTER_FEATURES = ['total_configs', 'overall_score', 'success_rate', 'config_volatility']
