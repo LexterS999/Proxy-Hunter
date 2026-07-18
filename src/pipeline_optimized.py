@@ -3,7 +3,8 @@
 Оптимизированный пайплайн Proxy-Hunter с улучшенной оценкой,
 активной проверкой (асинхронной), кешированием и прогресс-баром.
 Добавлены: graceful shutdown (сигналы), инъекция зависимости для history,
-проверка зависимостей, закрытие сессий, интеллектуальный анализ каналов.
+проверка зависимостей, закрытие сессий, интеллектуальный анализ каналов,
+адаптивные пороги, кластеризация и ансамблевая модель здоровья.
 """
 
 import sys
@@ -38,6 +39,11 @@ from parse_fallback import FallbackParser
 from session_pool import SessionPool
 from channel_quality_analyzer import ChannelQualityAnalyzer
 from protocol_registry import registry
+
+# Новые модули для расширенного анализа
+from adaptive_thresholds import AdaptiveThresholds
+from channel_clustering import ChannelClustering
+from channel_health_model import EnsembleHealthModel
 
 # Настройка логирования с ротацией
 from logging.handlers import RotatingFileHandler
@@ -77,7 +83,10 @@ class OptimizedPipeline:
         self.location_cache_file = 'configs/location_cache.json'
         self.parsed_cache_file = 'configs/parsed_cache.json'
         self.channel_stats_file = 'configs/channel_stats.json'
-        self.channel_analyzer = None
+        self.channel_analyzer = ChannelQualityAnalyzer()  # Новый улучшенный анализатор
+        self.adaptive_thresholds = AdaptiveThresholds()
+        self.clustering = ChannelClustering()
+        self.health_model = EnsembleHealthModel()
         self._shutdown_requested = False
         self._state = {}
 
@@ -109,6 +118,15 @@ class OptimizedPipeline:
             import tqdm
         except ImportError:
             missing.append("tqdm")
+        # Новые зависимости для ML-компонентов (опционально)
+        try:
+            import sklearn
+        except ImportError:
+            logger.warning("scikit-learn not installed, health classifier will use fallback")
+        try:
+            import prophet
+        except ImportError:
+            logger.warning("prophet not installed, lifetime predictor will use fallback")
         if missing:
             logger.error(f"Missing required dependencies: {', '.join(missing)}")
             logger.error("Please install: pip install -r requirements.txt")
@@ -141,11 +159,13 @@ class OptimizedPipeline:
         return self.analyzer.history
 
     def _save_channel_stats(self):
+        """Сохраняет статистику каналов с расширенными метриками."""
         try:
             channels_data = []
             for ch in self.config.SOURCE_URLS:
                 m = ch.metrics
                 last_success = m.last_success_time.isoformat() if m.last_success_time else None
+                # Добавляем новые поля, если они есть
                 channels_data.append({
                     'url': ch.url,
                     'enabled': ch.enabled,
@@ -158,8 +178,25 @@ class OptimizedPipeline:
                         'fail_count': m.fail_count,
                         'success_count': m.success_count,
                         'overall_score': m.overall_score,
-                        'protocol_counts': m.protocol_counts or {}
-                    }
+                        'protocol_counts': m.protocol_counts or {},
+                        # Расширенные поля (могут быть не у всех)
+                        'total_parsed': getattr(m, 'total_parsed', 0),
+                        'parse_success_rate': getattr(m, 'parse_success_rate', 0.0),
+                        'protocol_diversity': getattr(m, 'protocol_diversity', 0.0),
+                        'response_time_std': getattr(m, 'response_time_std', 0.0),
+                        'response_time_p50': getattr(m, 'response_time_p50', 0.0),
+                        'response_time_p95': getattr(m, 'response_time_p95', 0.0),
+                        'config_age_avg': getattr(m, 'config_age_avg', 0.0),
+                        'update_frequency': getattr(m, 'update_frequency', 0.0),
+                        'first_seen': getattr(m, 'first_seen', None),
+                        'last_parsed': getattr(m, 'last_parsed', None),
+                        'consecutive_failures': getattr(m, 'consecutive_failures', 0),
+                    },
+                    # Поля для расширенного анализа
+                    'health_score': getattr(ch, 'health_score', 50.0),
+                    'health_confidence': getattr(ch, 'health_confidence', 0.0),
+                    'days_left': getattr(ch, 'days_left', None),
+                    'cluster': getattr(ch, 'cluster', -1),
                 })
             payload = {
                 'channels': channels_data,
@@ -173,17 +210,35 @@ class OptimizedPipeline:
             logger.error(f"Failed to save channel stats: {e}")
 
     def _refresh_channel_health(self, history_data: Dict):
-        """Обновляет здоровье каналов, используя переданные данные вместо повторного чтения с диска."""
+        """Обновляет здоровье каналов, используя новые компоненты."""
         try:
-            self.channel_analyzer = ChannelQualityAnalyzer()
-            # Передаём уже загруженные данные
-            self.channel_analyzer.update_health([ch.url for ch in self.config.SOURCE_URLS], history_data=history_data)
+            # Получаем список URL
+            urls = [ch.url for ch in self.config.SOURCE_URLS]
+
+            # Обновляем здоровье через анализатор (использует новые компоненты внутри)
+            self.channel_analyzer.update_health(urls, history_data=history_data)
+
+            # Получаем отчёт
             report = self.channel_analyzer.get_health_report()
             summary = report.get('summary', {})
             logger.info(
                 f"📈 Channel health: {summary.get('healthy', 0)} healthy / "
                 f"{summary.get('unhealthy', 0)} unhealthy (total {summary.get('total', 0)})"
             )
+            if summary.get('watch_list'):
+                logger.info(f"   Watch list: {len(summary['watch_list'])} channels")
+
+            # Обновляем пороги
+            if hasattr(self.channel_analyzer, 'adaptive_thresholds'):
+                thresholds = self.channel_analyzer.adaptive_thresholds.get_thresholds()
+                logger.info(f"📊 Adaptive thresholds: {thresholds}")
+
+            # Логируем кластеры
+            if hasattr(self.channel_analyzer, 'clustering'):
+                profiles = self.channel_analyzer.clustering.cluster_profiles
+                for cluster_id, profile in profiles.items():
+                    logger.info(f"   Cluster {cluster_id} ({profile.get('name', 'unknown')}): {profile.get('size', 0)} channels")
+
         except Exception as e:
             logger.warning(f"Failed to refresh channel health: {e}")
 
@@ -309,10 +364,12 @@ class OptimizedPipeline:
                 logger.error("No configs scored.")
                 return False
 
-            # Шаг 4: Фильтрация по композитному скору
-            min_score = 0.0
+            # Шаг 4: Фильтрация по композитному скору (используем адаптивный порог)
+            # Получаем адаптивный порог из анализатора
+            thresholds = self.channel_analyzer.adaptive_thresholds.get_thresholds()
+            min_score = thresholds.get('base_health', 0.0) * 0.7  # масштабируем для конфигов
             filtered = [item for item in scored_configs if item['score'] >= min_score]
-            logger.info(f"✅ After min_score filter: {len(filtered)}")
+            logger.info(f"✅ After min_score filter ({min_score:.1f}): {len(filtered)}")
 
             if not filtered:
                 logger.warning("No configs passed min_score filter, lowering threshold...")
@@ -469,6 +526,10 @@ class OptimizedPipeline:
                 'geo_distribution': {}
             }
             self.analyzer.save_run_stats(stats)
+
+            # Шаг 11: Вывод отчёта о здоровье каналов
+            report = self.channel_analyzer.get_health_report()
+            logger.info(f"📊 Channel health summary: {report['summary']}")
 
             elapsed = time.time() - start_time
             logger.info("="*60)
