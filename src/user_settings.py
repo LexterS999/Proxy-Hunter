@@ -82,7 +82,7 @@ def get_safe_env(key: str, default: str, valid_values: List[str] = None, value_t
 # Применяем валидацию ко всем переменным окружения
 USE_MAXIMUM_POWER = get_safe_env('PROXY_HUNTER_USE_MAXIMUM_POWER', 'True', value_type=bool)
 SPECIFIC_CONFIG_COUNT = get_safe_env('PROXY_HUNTER_SPECIFIC_CONFIG_COUNT', '1000', value_type=int)
-MAX_CONFIG_AGE_DAYS = get_safe_env('PROXY_HUNTER_MAX_CONFIG_AGE_DAYS', '3', value_type=int)
+MAX_CONFIG_AGE_DAYS = get_safe_env('PROXY_HUNTER_MAX_CONFIG_AGE_DAYS', '7', value_type=int)
 
 # Протоколы из переменных окружения
 _ENABLED_PROTOCOLS_RAW = {
