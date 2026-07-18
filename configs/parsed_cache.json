@@ -186,6 +186,23 @@
     "spx": "",
     "name": "kurdconfig"
   },
+  "aa008d52e66aa96579a2993c64a39644": {
+    "uuid": "0e92ca5c-d15f-48b0-adeb-9dc9fe6fc467",
+    "address": "104.25.189.214",
+    "port": 2095,
+    "flow": "",
+    "sni": "104.25.189.214",
+    "type": "httpupgrade",
+    "path": "/",
+    "host": "cdn.safev2ray.site",
+    "security": "none",
+    "alpn": "",
+    "fp": "",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "@GozargahAzad|#CloudFlare@GozargahAzad"
+  },
   "9c3269030d6a5c1ab54b6950587d9c21": {
     "uuid": "0e92ca5c-d15f-48b0-adeb-9dc9fe6fc467",
     "address": "104.25.189.214",
@@ -2668,23 +2685,6 @@
     "spx": "",
     "name": "\ud83c\uddf3\ud83c\uddf1114151 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
-  "fd54100bd7b324c69c8e428dba2cadf1": {
-    "uuid": "eeb6823c-b926-4ea2-866a-5542edd26e59",
-    "address": "104.16.72.100",
-    "port": 443,
-    "flow": "",
-    "sni": "t1s1.rittbo.kdns.fr",
-    "type": "ws",
-    "path": "/fp",
-    "host": "t1s1.rittbo.kdns.fr",
-    "security": "tls",
-    "alpn": "",
-    "fp": "",
-    "pbk": "",
-    "sid": "",
-    "spx": "",
-    "name": "@GozargahAzad|#CloudFlare@GozargahAzad"
-  },
   "307163d2149311399e0be80a31d7ce70": {
     "uuid": "eeb6823c-b926-4ea2-866a-5542edd26e59",
     "address": "104.16.72.100",
@@ -3404,20 +3404,6 @@
     "fp": "",
     "flow": "",
     "name": "\ud83c\uddfa\ud83c\uddf8114121 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
-  },
-  "e956a2db921151ee7df5bffbd27e98a9": {
-    "password": "telegram-id-directvpn",
-    "address": "35.157.4.97",
-    "port": 22222,
-    "sni": "trojan.burgerip.co.uk",
-    "alpn": "http/1.1",
-    "type": "tcp",
-    "path": "",
-    "host": "35.157.4.97",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "@GozargahAzad|\ud83c\udde9\ud83c\uddea#Germany\ud83c\udde9\ud83c\uddea@GozargahAzad"
   },
   "276d4a0aaad4d68b4376275b5f9d33ec": {
     "password": "telegram-id-directvpn",
