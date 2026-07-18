@@ -16,8 +16,8 @@ from config import ProxyConfig, ChannelConfig
 from config_validator import ConfigValidator
 from parse_fallback import FallbackParser
 from pathlib import Path
+from dateutil import parser as date_parser  # добавлен импорт
 
-# NEW: импорты для улучшений
 from retry_utils import retry_with_backoff, is_retryable
 from session_pool import SessionPool
 
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # === Rate Limiter для Telegram ===
 class RateLimiter:
     def __init__(self, calls_per_second: float = 1.5):
-        self._sem = asyncio.Semaphore(int(calls_per_second * 60))  # Запросов в минуту
+        self._sem = asyncio.Semaphore(int(calls_per_second * 60))
         self._lock = asyncio.Lock()
         self._calls_per_second = calls_per_second
 
@@ -53,18 +53,14 @@ class AsyncConfigFetcher:
         self.seen_configs: Set[str] = set()
         self.channel_protocol_counts: Dict[str, Dict[str, int]] = {}
 
-        # NEW: динамические лимиты для TCPConnector на основе числа каналов
         num_channels = len(config.SOURCE_URLS) if config.SOURCE_URLS else 1
         self._connector_limit = min(200, num_channels * 10)
         self._connector_per_host = min(50, num_channels * 5)
 
-        # Rate limiter
         self._rate_limiter = RateLimiter(calls_per_second=1.5)
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
-        """Возвращает общую сессию из SessionPool."""
         pool = SessionPool()
-        # Используем динамические лимиты
         self._session = await pool.get_session(
             connector_limit=self._connector_limit,
             per_host_limit=self._connector_per_host,
@@ -73,25 +69,19 @@ class AsyncConfigFetcher:
         )
         return self._session
 
-    # декоратор retry_with_backoff применяется к _fetch_with_retry
     @retry_with_backoff(attempts=3, base_delay=0.2, max_delay=5.0, deadline=30.0)
     async def _fetch_with_retry(self, url: str) -> Optional[str]:
-        """Выполняет один запрос с повторными попытками (реализация декоратора)."""
-        # Применяем rate limit перед каждым запросом
         await self._rate_limiter.acquire()
 
         session = await self._ensure_session()
         async with session.get(url) as response:
             if response.status == 429:
-                # Throttling — обрабатываем отдельно, даём Retry-After
                 retry_after = response.headers.get('Retry-After', '5')
                 try:
                     wait_time = int(retry_after)
                 except ValueError:
                     wait_time = 5
                 await asyncio.sleep(wait_time)
-                # Повторяем запрос — декоратор подхватит исключение, если response.status не 2xx
-                # Но мы можем просто вызвать исключение, чтобы ретрай сработал
                 raise aiohttp.ClientResponseError(
                     response.request_info,
                     response.history,
@@ -105,7 +95,12 @@ class AsyncConfigFetcher:
                     status=response.status,
                     message=response.reason
                 )
-            return await response.text()
+            text = await response.text()
+            # Ограничение размера текста (1 МБ)
+            if len(text) > 1_000_000:
+                logger.warning(f"Response from {url} too large ({len(text)} bytes), truncating to 1MB")
+                text = text[:1_000_000]
+            return text
 
     async def fetch_ssconf_configs(self, url: str) -> List[str]:
         https_url = self.validator.convert_ssconf_to_https(url)
@@ -140,7 +135,6 @@ class AsyncConfigFetcher:
                 self.config.update_channel_stats(channel, True, response_time)
             return configs
 
-        # Используем _fetch_with_retry (с декоратором)
         text = await self._fetch_with_retry(channel.url)
         if text is None:
             self.config.update_channel_stats(channel, False)
@@ -182,7 +176,6 @@ class AsyncConfigFetcher:
                 channel.metrics.total_configs += len(found)
                 configs.extend(found)
         else:
-            # Обычный текст
             parts = text.split()
             for part in parts:
                 part = part.strip()
@@ -256,9 +249,11 @@ class AsyncConfigFetcher:
         try:
             time_element = message.find_parent('div', class_='tgme_widget_message').find('time')
             if time_element and 'datetime' in time_element.attrs:
-                return datetime.fromisoformat(time_element['datetime'].replace('Z', '+00:00'))
-        except Exception:
-            pass
+                dt_str = time_element['datetime']
+                # Используем dateutil.parser для гибкого парсинга
+                return date_parser.parse(dt_str)
+        except Exception as e:
+            logger.debug(f"Date parsing failed: {e}")
         return None
 
     def is_config_valid(self, config_text: str, date: Optional[datetime]) -> bool:
@@ -315,7 +310,6 @@ class AsyncConfigFetcher:
         return all_configs
 
     async def close(self):
-        # Сессия закрывается через SessionPool глобально, но здесь можно оставить для совместимости
         pass
 
 # Для обратной совместимости
