@@ -164,51 +164,79 @@ class AsyncConfigFetcher:
         self.channel_response_times.setdefault(channel.url, []).append(response_time)
 
         if channel.is_telegram:
-            # Используем lxml вместо BeautifulSoup
+            # Используем универсальный парсинг: сначала ищем сообщения по XPath, затем fallback на весь текст
             tree = html.fromstring(text)
-            # Ищем все div с классом tgme_widget_message_text
+            # Пробуем найти сообщения по стандартному классу
             messages = tree.xpath('//div[@class="tgme_widget_message_text"]')
-            # Сортировка по дате (если есть)
-            # Для каждого сообщения извлекаем текст и дату
+            if not messages:
+                # Пробуем другие возможные классы (например, без подчеркивания)
+                messages = tree.xpath('//div[contains(@class, "tgme_widget_message_text")]')
+            if not messages:
+                # Пробуем искать любые div с классом, содержащим "message"
+                messages = tree.xpath('//div[contains(@class, "message")]')
+            if not messages:
+                # Если ничего не найдено, используем весь текст страницы как одно "сообщение"
+                logger.warning(f"No message elements found for {channel.url}, using full page text")
+                messages = [tree]  # передаём корневой элемент
+
+            logger.debug(f"Found {len(messages)} message elements for {channel.url}")
+
+            # Собираем весь текст из всех сообщений
+            full_text = ""
             for msg_elem in messages:
-                # Получаем дату из родительского элемента
-                parent = msg_elem.getparent()
-                while parent is not None and parent.tag != 'div':
-                    parent = parent.getparent()
-                if parent is None:
-                    continue
-                time_elem = parent.xpath('.//time/@datetime')
-                msg_date = None
-                if time_elem:
-                    try:
-                        msg_date = datetime.fromisoformat(time_elem[0].replace('Z', '+00:00'))
-                    except:
-                        pass
                 msg_text = msg_elem.text_content()
-                if not self.is_config_valid(msg_text, msg_date):
-                    continue
-                parts = msg_text.split()
-                for part in parts:
-                    part = part.strip()
-                    if not part:
-                        continue
-                    if part.startswith('ssconf://'):
-                        ssconf_configs = await self.fetch_ssconf_configs(part)
-                        configs.extend(ssconf_configs)
-                        channel.metrics.total_configs += len(ssconf_configs)
-                        parsed_count += len(ssconf_configs)
-                    else:
-                        decoded_part = self.check_and_decode_base64(part)
-                        if decoded_part != part:
-                            found = self.validator.split_configs(decoded_part)
-                            channel.metrics.total_configs += len(found)
-                            parsed_count += len(found)
-                            configs.extend(found)
-                found = self.validator.split_configs(msg_text)
+                if msg_text:
+                    full_text += msg_text + "\n"
+
+            # Если мы не нашли сообщения через XPath, но есть текст, используем его
+            if not full_text:
+                full_text = text
+
+            # Теперь извлекаем конфиги из собранного текста
+            # Сначала пробуем split_configs (он ищет протоколы)
+            found = self.validator.split_configs(full_text)
+            if found:
+                configs.extend(found)
                 channel.metrics.total_configs += len(found)
                 parsed_count += len(found)
-                configs.extend(found)
+            else:
+                # Если split_configs не дал результатов, попробуем разбить по строкам и искать вручную
+                for line in full_text.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    # Проверяем, не содержит ли строка протокол
+                    if self.validator.is_valid_config(line):
+                        configs.append(line)
+                        channel.metrics.total_configs += 1
+                        parsed_count += 1
+                    else:
+                        # Пробуем декодировать Base64
+                        decoded = self.check_and_decode_base64(line)
+                        if decoded and decoded != line:
+                            sub_configs = self.validator.split_configs(decoded)
+                            if sub_configs:
+                                configs.extend(sub_configs)
+                                channel.metrics.total_configs += len(sub_configs)
+                                parsed_count += len(sub_configs)
+
+            # Дополнительно: если всё ещё нет конфигов, пробуем найти ссылки с протоколами через regex
+            if not configs:
+                # Ищем все строки, начинающиеся с протоколов
+                proto_pattern = re.compile(
+                    r'(vmess://|vless://|trojan://|ss://|hysteria2://|hy2://|wireguard://|tuic://|ssconf://)[^\s]+',
+                    re.IGNORECASE
+                )
+                matches = proto_pattern.findall(full_text)
+                if matches:
+                    for match in matches:
+                        cfg = match.strip()
+                        if self.validator.is_valid_config(cfg):
+                            configs.append(cfg)
+                            channel.metrics.total_configs += 1
+                            parsed_count += 1
         else:
+            # Не-Telegram каналы: обрабатываем как есть
             parts = text.split()
             for part in parts:
                 part = part.strip()
