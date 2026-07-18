@@ -24,6 +24,8 @@ vless://58ae6add-aa32-4a69-ba8d-5a68b29b9ec8@31.77.156.185:2087?mode=auto&path=%
 
 vless://6202b230-417c-4d8e-b624-0f71afa9c75d@185.148.107.40:8880?path=%2F%3Fed%3D2560&security=none&encryption=none&host=vms.lifetime55.workers.dev&type=ws#VLESS|WS|NONE
 
+vless://701ea834-7c31-4544-95d6-f0a4dfe40b36@45.196.182.49:443?security=reality&encryption=none&pbk=KYlgK96xPZJq10GbhF-BaCXRxXc9XzxzfICdooYvMlg&headerType=none&type=tcp&flow=xtls-rprx-vision&sni=storage.yandex.net&sid=d020b987f84eb78a#VLESS|TCP|REALITY
+
 vless://701ea834-7c31-4544-95d6-f0a4dfe40b36@66.234.150.145:443?security=reality&encryption=none&pbk=KYlgK96xPZJq10GbhF-BaCXRxXc9XzxzfICdooYvMlg&headerType=none&fp=firefox&type=tcp&flow=xtls-rprx-vision&sni=storage.yandex.net&sid=d020b987f84eb78a#VLESS|TCP|REALITY
 
 vless://7e544a9d-7667-413b-bbb0-b3bb1aac6d77@www.speedtest.org:443?path=%2Frsedgws&security=tls&encryption=none&insecure=0&host=shegeftihaaa.net&fp=firefox&type=ws&allowInsecure=0&sni=shegeftihaaa.net#VLESS|WS|TLS
