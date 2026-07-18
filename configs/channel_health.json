@@ -2,7 +2,7 @@
   "channels": {
     "https://t.me/s/wangcai2": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.766821",
+      "last_checked": "2026-07-18T04:03:47.491424",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -15,7 +15,7 @@
     },
     "https://t.me/s/nebulavpnx": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.767094",
+      "last_checked": "2026-07-18T04:03:47.491707",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -28,7 +28,7 @@
     },
     "https://t.me/s/marambashi_marambashi_marambashi": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.767397",
+      "last_checked": "2026-07-18T04:03:47.491962",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -41,20 +41,20 @@
     },
     "https://t.me/s/gozargahazad": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.767680",
+      "last_checked": "2026-07-18T04:03:47.492227",
       "is_healthy": true,
       "cluster": 1,
       "metrics_summary": {
-        "total_configs": 11,
-        "valid_configs": 2,
-        "overall_score": 75.75,
+        "total_configs": 8,
+        "valid_configs": 3,
+        "overall_score": 80.61,
         "score_trend": 0.0,
         "config_volatility": 0.0
       }
     },
     "https://t.me/s/marisa_kristi": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.767938",
+      "last_checked": "2026-07-18T04:03:47.492527",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -67,7 +67,7 @@
     },
     "https://t.me/s/alauk": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.768188",
+      "last_checked": "2026-07-18T04:03:47.492782",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -80,7 +80,7 @@
     },
     "https://t.me/s/badangellll": {
       "health_score": 26.0,
-      "last_checked": "2026-07-18T03:58:41.768478",
+      "last_checked": "2026-07-18T04:03:47.493047",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -93,85 +93,85 @@
     },
     "https://t.me/s/freakconfig": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.768742",
+      "last_checked": "2026-07-18T04:03:47.493307",
       "is_healthy": true,
       "cluster": 2,
       "metrics_summary": {
         "total_configs": 104,
         "valid_configs": 81,
-        "overall_score": 86.77,
+        "overall_score": 86.41,
         "score_trend": 0.0,
         "config_volatility": 0.0
       }
     },
     "https://t.me/s/v2rayng_fast": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.769013",
+      "last_checked": "2026-07-18T04:03:47.493599",
       "is_healthy": true,
       "cluster": 2,
       "metrics_summary": {
         "total_configs": 75,
         "valid_configs": 57,
-        "overall_score": 85.32,
+        "overall_score": 85.02,
         "score_trend": 0.0,
         "config_volatility": 0.0
       }
     },
     "https://t.me/s/tanhanet": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.769305",
+      "last_checked": "2026-07-18T04:03:47.493853",
       "is_healthy": true,
       "cluster": 1,
       "metrics_summary": {
         "total_configs": 23,
         "valid_configs": 8,
-        "overall_score": 74.08,
+        "overall_score": 73.8,
         "score_trend": 0.0,
         "config_volatility": 0.0
       }
     },
     "https://t.me/s/kafing_2": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.769577",
+      "last_checked": "2026-07-18T04:03:47.494104",
       "is_healthy": true,
       "cluster": 2,
       "metrics_summary": {
         "total_configs": 86,
         "valid_configs": 64,
-        "overall_score": 79.03,
+        "overall_score": 78.82,
         "score_trend": 0.0,
         "config_volatility": 0.0
       }
     },
     "https://t.me/s/surfboardv2ray": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.769852",
+      "last_checked": "2026-07-18T04:03:47.494354",
       "is_healthy": true,
       "cluster": 1,
       "metrics_summary": {
         "total_configs": 32,
         "valid_configs": 22,
-        "overall_score": 80.5,
+        "overall_score": 80.27,
         "score_trend": 0.0,
         "config_volatility": 0.0
       }
     },
     "https://t.me/s/vpnine1": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.770110",
+      "last_checked": "2026-07-18T04:03:47.494660",
       "is_healthy": true,
       "cluster": 2,
       "metrics_summary": {
         "total_configs": 109,
         "valid_configs": 32,
-        "overall_score": 69.68,
+        "overall_score": 69.42,
         "score_trend": 0.0,
         "config_volatility": 0.0
       }
     },
     "https://t.me/s/cd4ul9u4hlil": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.770402",
+      "last_checked": "2026-07-18T04:03:47.494903",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -184,20 +184,20 @@
     },
     "https://t.me/s/arshiavpn12": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.770675",
+      "last_checked": "2026-07-18T04:03:47.495157",
       "is_healthy": true,
       "cluster": 1,
       "metrics_summary": {
         "total_configs": 28,
         "valid_configs": 17,
-        "overall_score": 75.54,
+        "overall_score": 75.32,
         "score_trend": 0.0,
         "config_volatility": 0.0
       }
     },
     "https://t.me/s/leecher56": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.770934",
+      "last_checked": "2026-07-18T04:03:47.495430",
       "is_healthy": true,
       "cluster": 1,
       "metrics_summary": {
@@ -210,7 +210,7 @@
     },
     "https://t.me/s/netshot1": {
       "health_score": 26.0,
-      "last_checked": "2026-07-18T03:58:41.771190",
+      "last_checked": "2026-07-18T04:03:47.495690",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -223,7 +223,7 @@
     },
     "https://t.me/s/w570w": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.771503",
+      "last_checked": "2026-07-18T04:03:47.495941",
       "is_healthy": true,
       "cluster": 1,
       "metrics_summary": {
@@ -236,7 +236,7 @@
     },
     "https://t.me/s/daily_configs": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.771764",
+      "last_checked": "2026-07-18T04:03:47.496196",
       "is_healthy": true,
       "cluster": 2,
       "metrics_summary": {
@@ -249,7 +249,7 @@
     },
     "https://t.me/s/marambashi": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.772023",
+      "last_checked": "2026-07-18T04:03:47.496493",
       "is_healthy": true,
       "cluster": 2,
       "metrics_summary": {
@@ -262,7 +262,7 @@
     },
     "https://t.me/s/v2vodka_a": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.772280",
+      "last_checked": "2026-07-18T04:03:47.496756",
       "is_healthy": true,
       "cluster": 1,
       "metrics_summary": {
@@ -275,7 +275,7 @@
     },
     "https://t.me/s/freeonlinevpn": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.772567",
+      "last_checked": "2026-07-18T04:03:47.497012",
       "is_healthy": true,
       "cluster": 2,
       "metrics_summary": {
@@ -288,7 +288,7 @@
     },
     "https://t.me/s/expressvpn_420": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.772822",
+      "last_checked": "2026-07-18T04:03:47.497266",
       "is_healthy": true,
       "cluster": 1,
       "metrics_summary": {
@@ -301,7 +301,7 @@
     },
     "https://t.me/s/proxy_se7en": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.773076",
+      "last_checked": "2026-07-18T04:03:47.497551",
       "is_healthy": true,
       "cluster": 3,
       "metrics_summary": {
@@ -314,7 +314,7 @@
     },
     "https://t.me/s/b2vasl": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.773374",
+      "last_checked": "2026-07-18T04:03:47.497811",
       "is_healthy": true,
       "cluster": 1,
       "metrics_summary": {
@@ -327,7 +327,7 @@
     },
     "https://t.me/s/farazv2ray": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.773645",
+      "last_checked": "2026-07-18T04:03:47.498082",
       "is_healthy": true,
       "cluster": 2,
       "metrics_summary": {
@@ -340,7 +340,7 @@
     },
     "https://t.me/s/v2raysaman": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.773903",
+      "last_checked": "2026-07-18T04:03:47.498343",
       "is_healthy": true,
       "cluster": 1,
       "metrics_summary": {
@@ -353,7 +353,7 @@
     },
     "https://t.me/s/proxymtalpha": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.774161",
+      "last_checked": "2026-07-18T04:03:47.498660",
       "is_healthy": true,
       "cluster": 2,
       "metrics_summary": {
@@ -366,7 +366,7 @@
     },
     "https://t.me/s/atlas_v2vpn": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.774451",
+      "last_checked": "2026-07-18T04:03:47.498921",
       "is_healthy": true,
       "cluster": 1,
       "metrics_summary": {
@@ -379,7 +379,7 @@
     },
     "https://t.me/s/ln2ray": {
       "health_score": 11.0,
-      "last_checked": "2026-07-18T03:58:41.774708",
+      "last_checked": "2026-07-18T04:03:47.499168",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -392,7 +392,7 @@
     },
     "https://t.me/s/mooon_proxy": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.774966",
+      "last_checked": "2026-07-18T04:03:47.499449",
       "is_healthy": true,
       "cluster": 1,
       "metrics_summary": {
@@ -405,7 +405,7 @@
     },
     "https://t.me/s/begoo_vpn": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.775223",
+      "last_checked": "2026-07-18T04:03:47.499711",
       "is_healthy": true,
       "cluster": 1,
       "metrics_summary": {
@@ -418,7 +418,7 @@
     },
     "https://t.me/s/subgift": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.775507",
+      "last_checked": "2026-07-18T04:03:47.499965",
       "is_healthy": true,
       "cluster": 1,
       "metrics_summary": {
@@ -431,7 +431,7 @@
     },
     "https://t.me/s/selinc": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.775768",
+      "last_checked": "2026-07-18T04:03:47.500219",
       "is_healthy": true,
       "cluster": 2,
       "metrics_summary": {
@@ -444,7 +444,7 @@
     },
     "https://t.me/s/spdnet": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.776025",
+      "last_checked": "2026-07-18T04:03:47.500499",
       "is_healthy": true,
       "cluster": 1,
       "metrics_summary": {
@@ -457,7 +457,7 @@
     },
     "https://t.me/s/srcvpn": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.776302",
+      "last_checked": "2026-07-18T04:03:47.500754",
       "is_healthy": true,
       "cluster": 1,
       "metrics_summary": {
@@ -470,7 +470,7 @@
     },
     "https://t.me/s/configv2rayforfree": {
       "health_score": 6.0,
-      "last_checked": "2026-07-18T03:58:41.776570",
+      "last_checked": "2026-07-18T04:03:47.501003",
       "is_healthy": false,
       "cluster": 0,
       "metrics_summary": {
@@ -483,7 +483,7 @@
     },
     "https://t.me/s/evay_vpn": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.776828",
+      "last_checked": "2026-07-18T04:03:47.501258",
       "is_healthy": true,
       "cluster": 1,
       "metrics_summary": {
@@ -496,7 +496,7 @@
     },
     "https://t.me/s/fear_config": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.777083",
+      "last_checked": "2026-07-18T04:03:47.501545",
       "is_healthy": true,
       "cluster": 1,
       "metrics_summary": {
@@ -509,7 +509,7 @@
     },
     "https://t.me/s/netmellianti": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.777364",
+      "last_checked": "2026-07-18T04:03:47.501798",
       "is_healthy": true,
       "cluster": 1,
       "metrics_summary": {
@@ -522,7 +522,7 @@
     },
     "https://t.me/s/maconnectt_netherlands": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.777612",
+      "last_checked": "2026-07-18T04:03:47.502037",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -535,7 +535,7 @@
     },
     "https://t.me/s/alfred_config": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.777870",
+      "last_checked": "2026-07-18T04:03:47.502292",
       "is_healthy": true,
       "cluster": 1,
       "metrics_summary": {
@@ -548,7 +548,7 @@
     },
     "https://t.me/s/proxy": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.778112",
+      "last_checked": "2026-07-18T04:03:47.502561",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -561,7 +561,7 @@
     },
     "https://t.me/s/gozargahvpn": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.778398",
+      "last_checked": "2026-07-18T04:03:47.502819",
       "is_healthy": true,
       "cluster": 1,
       "metrics_summary": {
@@ -574,7 +574,7 @@
     },
     "https://t.me/s/maconnectt": {
       "health_score": 100.0,
-      "last_checked": "2026-07-18T03:58:41.778659",
+      "last_checked": "2026-07-18T04:03:47.503075",
       "is_healthy": true,
       "cluster": 1,
       "metrics_summary": {
@@ -587,7 +587,7 @@
     },
     "https://t.me/s/namedzadim": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.778914",
+      "last_checked": "2026-07-18T04:03:47.503319",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -600,7 +600,7 @@
     },
     "https://t.me/s/raynettun": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.779159",
+      "last_checked": "2026-07-18T04:03:47.503596",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -613,7 +613,7 @@
     },
     "https://t.me/s/grizzlyvpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.779435",
+      "last_checked": "2026-07-18T04:03:47.503844",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -626,7 +626,7 @@
     },
     "https://t.me/s/iran_v2ray1": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.779684",
+      "last_checked": "2026-07-18T04:03:47.504088",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -639,7 +639,7 @@
     },
     "https://t.me/s/netlivpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.779929",
+      "last_checked": "2026-07-18T04:03:47.504352",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -652,7 +652,7 @@
     },
     "https://t.me/s/net2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.780172",
+      "last_checked": "2026-07-18T04:03:47.504643",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -665,7 +665,7 @@
     },
     "https://t.me/s/v2rayalpha": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.780448",
+      "last_checked": "2026-07-18T04:03:47.504890",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -678,7 +678,7 @@
     },
     "https://t.me/s/v2all": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.780693",
+      "last_checked": "2026-07-18T04:03:47.505133",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -691,7 +691,7 @@
     },
     "https://t.me/s/cxrolvpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.780937",
+      "last_checked": "2026-07-18T04:03:47.505372",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -704,7 +704,7 @@
     },
     "https://t.me/s/namiraconfigs": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.781180",
+      "last_checked": "2026-07-18T04:03:47.505644",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -717,7 +717,7 @@
     },
     "https://t.me/s/mtpv2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.781455",
+      "last_checked": "2026-07-18T04:03:47.505888",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -730,7 +730,7 @@
     },
     "https://t.me/s/r3mrcg00129437x": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.781701",
+      "last_checked": "2026-07-18T04:03:47.506138",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -743,7 +743,7 @@
     },
     "https://t.me/s/v2wray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.781946",
+      "last_checked": "2026-07-18T04:03:47.506401",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -756,7 +756,7 @@
     },
     "https://t.me/s/v2raynplus": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.782191",
+      "last_checked": "2026-07-18T04:03:47.506655",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -769,7 +769,7 @@
     },
     "https://t.me/s/unlimiteddev": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.782466",
+      "last_checked": "2026-07-18T04:03:47.506895",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -782,7 +782,7 @@
     },
     "https://t.me/s/parsashonam": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.782713",
+      "last_checked": "2026-07-18T04:03:47.507135",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -795,7 +795,7 @@
     },
     "https://t.me/s/msv2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.782957",
+      "last_checked": "2026-07-18T04:03:47.507503",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -808,7 +808,7 @@
     },
     "https://t.me/s/vpncustomize": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.783202",
+      "last_checked": "2026-07-18T04:03:47.507752",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -821,7 +821,7 @@
     },
     "https://t.me/s/ipv2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.783478",
+      "last_checked": "2026-07-18T04:03:47.507996",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -834,7 +834,7 @@
     },
     "https://t.me/s/v2rayfast_7": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.783727",
+      "last_checked": "2026-07-18T04:03:47.508241",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -847,7 +847,7 @@
     },
     "https://t.me/s/vpn_king_v2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.783973",
+      "last_checked": "2026-07-18T04:03:47.508515",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -860,7 +860,7 @@
     },
     "https://t.me/s/shh_proxy": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.784218",
+      "last_checked": "2026-07-18T04:03:47.508762",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -873,7 +873,7 @@
     },
     "https://t.me/s/raydikalx": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.784491",
+      "last_checked": "2026-07-18T04:03:47.509006",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -886,7 +886,7 @@
     },
     "https://t.me/s/legendery_servers": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.784738",
+      "last_checked": "2026-07-18T04:03:47.509248",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -899,7 +899,7 @@
     },
     "https://t.me/s/sweet": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.784984",
+      "last_checked": "2026-07-18T04:03:47.509521",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -912,7 +912,7 @@
     },
     "https://t.me/s/netifyvpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.785229",
+      "last_checked": "2026-07-18T04:03:47.509773",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -925,7 +925,7 @@
     },
     "https://t.me/s/everyday_vpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.785507",
+      "last_checked": "2026-07-18T04:03:47.510024",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -938,7 +938,7 @@
     },
     "https://t.me/s/configforvpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.785766",
+      "last_checked": "2026-07-18T04:03:47.510270",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -951,7 +951,7 @@
     },
     "https://t.me/s/nufilter": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.786014",
+      "last_checked": "2026-07-18T04:03:47.510543",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -964,7 +964,7 @@
     },
     "https://t.me/s/france": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.786262",
+      "last_checked": "2026-07-18T04:03:47.510789",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -977,7 +977,7 @@
     },
     "https://t.me/s/france2": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.786540",
+      "last_checked": "2026-07-18T04:03:47.511033",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -990,7 +990,7 @@
     },
     "https://t.me/s/switzerland": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.786791",
+      "last_checked": "2026-07-18T04:03:47.511276",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1003,7 +1003,7 @@
     },
     "https://t.me/s/v2rayargon": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.787042",
+      "last_checked": "2026-07-18T04:03:47.511554",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1016,7 +1016,7 @@
     },
     "https://t.me/s/ip_cf": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.787313",
+      "last_checked": "2026-07-18T04:03:47.511801",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1029,7 +1029,7 @@
     },
     "https://t.me/s/binextify": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.787574",
+      "last_checked": "2026-07-18T04:03:47.512045",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1042,7 +1042,7 @@
     },
     "https://t.me/s/helix_servers": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.787825",
+      "last_checked": "2026-07-18T04:03:47.512288",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1055,7 +1055,7 @@
     },
     "https://t.me/s/customvpnserver": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.788076",
+      "last_checked": "2026-07-18T04:03:47.512566",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1068,7 +1068,7 @@
     },
     "https://t.me/s/rayan_config": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.788352",
+      "last_checked": "2026-07-18T04:03:47.512826",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1081,7 +1081,7 @@
     },
     "https://t.me/s/raiv2mmr": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.788614",
+      "last_checked": "2026-07-18T04:03:47.513077",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1094,7 +1094,7 @@
     },
     "https://t.me/s/v2ray_rolly": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.788876",
+      "last_checked": "2026-07-18T04:03:47.513324",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1107,7 +1107,7 @@
     },
     "https://t.me/s/jokerrvpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.789128",
+      "last_checked": "2026-07-18T04:03:47.513599",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1120,7 +1120,7 @@
     },
     "https://t.me/s/amsterdam1": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.789409",
+      "last_checked": "2026-07-18T04:03:47.513850",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1133,7 +1133,7 @@
     },
     "https://t.me/s/outline_vpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.789667",
+      "last_checked": "2026-07-18T04:03:47.514096",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1146,7 +1146,7 @@
     },
     "https://t.me/s/vip_security": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.789919",
+      "last_checked": "2026-07-18T04:03:47.514341",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1159,7 +1159,7 @@
     },
     "https://t.me/s/obedient": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.790172",
+      "last_checked": "2026-07-18T04:03:47.514617",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1172,7 +1172,7 @@
     },
     "https://t.me/s/linkvws": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.790456",
+      "last_checked": "2026-07-18T04:03:47.514865",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1185,7 +1185,7 @@
     },
     "https://t.me/s/v2ray_alpha": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.790712",
+      "last_checked": "2026-07-18T04:03:47.515112",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1198,7 +1198,7 @@
     },
     "https://t.me/s/lockey_vpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.790969",
+      "last_checked": "2026-07-18T04:03:47.515370",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1211,7 +1211,7 @@
     },
     "https://t.me/s/v2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.791223",
+      "last_checked": "2026-07-18T04:03:47.515666",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1224,7 +1224,7 @@
     },
     "https://t.me/s/bewildered": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.791506",
+      "last_checked": "2026-07-18T04:03:47.515918",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1237,7 +1237,7 @@
     },
     "https://t.me/s/xvproxy": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.791769",
+      "last_checked": "2026-07-18T04:03:47.516177",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1250,7 +1250,7 @@
     },
     "https://t.me/s/opeta_v2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.792020",
+      "last_checked": "2026-07-18T04:03:47.516455",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1263,7 +1263,7 @@
     },
     "https://t.me/s/awlix_ir": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.792274",
+      "last_checked": "2026-07-18T04:03:47.516710",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1276,7 +1276,7 @@
     },
     "https://t.me/s/beloved": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.792558",
+      "last_checked": "2026-07-18T04:03:47.516963",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1289,7 +1289,7 @@
     },
     "https://t.me/s/switzerlandscloudnig": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.792812",
+      "last_checked": "2026-07-18T04:03:47.517215",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1302,7 +1302,7 @@
     },
     "https://t.me/s/charming": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.793067",
+      "last_checked": "2026-07-18T04:03:47.517493",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1315,7 +1315,7 @@
     },
     "https://t.me/s/speedtest": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.793345",
+      "last_checked": "2026-07-18T04:03:47.517746",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1328,7 +1328,7 @@
     },
     "https://t.me/s/hopeful": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.793604",
+      "last_checked": "2026-07-18T04:03:47.517996",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1341,7 +1341,7 @@
     },
     "https://t.me/s/sffrddo5rybf": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.793857",
+      "last_checked": "2026-07-18T04:03:47.518245",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1354,7 +1354,7 @@
     },
     "https://t.me/s/wvjtyz99v0zo": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.794120",
+      "last_checked": "2026-07-18T04:03:47.518535",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1367,7 +1367,7 @@
     },
     "https://t.me/s/fvfefb6ssifr": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.794401",
+      "last_checked": "2026-07-18T04:03:47.518838",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1380,7 +1380,7 @@
     },
     "https://t.me/s/gtrhlntyi0p5": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.794656",
+      "last_checked": "2026-07-18T04:03:47.519093",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1393,7 +1393,7 @@
     },
     "https://t.me/s/brilliant": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.794910",
+      "last_checked": "2026-07-18T04:03:47.519340",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1406,7 +1406,7 @@
     },
     "https://t.me/s/v2raycollectordonate": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.795163",
+      "last_checked": "2026-07-18T04:03:47.519619",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1419,7 +1419,7 @@
     },
     "https://t.me/s/uvay_vpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.795451",
+      "last_checked": "2026-07-18T04:03:47.519868",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1432,7 +1432,7 @@
     },
     "https://t.me/s/ppotbfff": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.795713",
+      "last_checked": "2026-07-18T04:03:47.520118",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1445,7 +1445,7 @@
     },
     "https://t.me/s/grounded": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.795971",
+      "last_checked": "2026-07-18T04:03:47.520397",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1458,7 +1458,7 @@
     },
     "https://t.me/s/lookivpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.796227",
+      "last_checked": "2026-07-18T04:03:47.520672",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1471,7 +1471,7 @@
     },
     "https://t.me/s/netherlands": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.796512",
+      "last_checked": "2026-07-18T04:03:47.520924",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1484,7 +1484,7 @@
     },
     "https://t.me/s/sadaf": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.796767",
+      "last_checked": "2026-07-18T04:03:47.521174",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1497,7 +1497,7 @@
     },
     "https://t.me/s/mehrdad_zargar": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.797023",
+      "last_checked": "2026-07-18T04:03:47.521450",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1510,7 +1510,7 @@
     },
     "https://t.me/s/servernett": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.797316",
+      "last_checked": "2026-07-18T04:03:47.521707",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1523,7 +1523,7 @@
     },
     "https://t.me/s/informed": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.797587",
+      "last_checked": "2026-07-18T04:03:47.521959",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1536,7 +1536,7 @@
     },
     "https://t.me/s/spain": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.797859",
+      "last_checked": "2026-07-18T04:03:47.522226",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1549,7 +1549,7 @@
     },
     "https://t.me/s/marambashi_marambashi": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.798119",
+      "last_checked": "2026-07-18T04:03:47.522523",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1562,7 +1562,7 @@
     },
     "https://t.me/s/servermomotelegramjoin": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.798407",
+      "last_checked": "2026-07-18T04:03:47.522780",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1575,7 +1575,7 @@
     },
     "https://t.me/s/eliv2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.798668",
+      "last_checked": "2026-07-18T04:03:47.523035",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1588,7 +1588,7 @@
     },
     "https://t.me/s/opeta_team": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.798934",
+      "last_checked": "2026-07-18T04:03:47.523286",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1601,7 +1601,7 @@
     },
     "https://t.me/s/jealous": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.799190",
+      "last_checked": "2026-07-18T04:03:47.523573",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1614,7 +1614,7 @@
     },
     "https://t.me/s/uciranir": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.799491",
+      "last_checked": "2026-07-18T04:03:47.523827",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1627,7 +1627,7 @@
     },
     "https://t.me/s/famous": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.799749",
+      "last_checked": "2026-07-18T04:03:47.524081",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1640,7 +1640,7 @@
     },
     "https://t.me/s/parspack": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.800006",
+      "last_checked": "2026-07-18T04:03:47.524334",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1653,7 +1653,7 @@
     },
     "https://t.me/s/moody": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.800258",
+      "last_checked": "2026-07-18T04:03:47.524633",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1666,7 +1666,7 @@
     },
     "https://t.me/s/config4connect": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.800542",
+      "last_checked": "2026-07-18T04:03:47.524907",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1679,7 +1679,7 @@
     },
     "https://t.me/s/javidnamaniran": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.800796",
+      "last_checked": "2026-07-18T04:03:47.525159",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1692,7 +1692,7 @@
     },
     "https://t.me/s/vpnhubmarket": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.801050",
+      "last_checked": "2026-07-18T04:03:47.525438",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1705,7 +1705,7 @@
     },
     "https://t.me/s/vpn_mikey": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.801342",
+      "last_checked": "2026-07-18T04:03:47.525701",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1718,7 +1718,7 @@
     },
     "https://t.me/s/outline_vpntelegram": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.801614",
+      "last_checked": "2026-07-18T04:03:47.525954",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1731,7 +1731,7 @@
     },
     "https://t.me/s/azarbayjab1": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.801876",
+      "last_checked": "2026-07-18T04:03:47.526215",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1744,7 +1744,7 @@
     },
     "https://t.me/s/soonteam": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.802135",
+      "last_checked": "2026-07-18T04:03:47.526498",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1757,7 +1757,7 @@
     },
     "https://t.me/s/mklydjsb": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.802444",
+      "last_checked": "2026-07-18T04:03:47.526755",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1770,7 +1770,7 @@
     },
     "https://t.me/s/helsinki1": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.802710",
+      "last_checked": "2026-07-18T04:03:47.527017",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1783,7 +1783,7 @@
     },
     "https://t.me/s/paris1": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.802969",
+      "last_checked": "2026-07-18T04:03:47.527275",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1796,7 +1796,7 @@
     },
     "https://t.me/s/grumpy": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.803229",
+      "last_checked": "2026-07-18T04:03:47.527561",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1809,7 +1809,7 @@
     },
     "https://t.me/s/fruitful": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.803554",
+      "last_checked": "2026-07-18T04:03:47.527817",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1822,7 +1822,7 @@
     },
     "https://t.me/s/external_net": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.803816",
+      "last_checked": "2026-07-18T04:03:47.528072",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1835,7 +1835,7 @@
     },
     "https://t.me/s/chatgpt": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.804074",
+      "last_checked": "2026-07-18T04:03:47.528329",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1848,7 +1848,7 @@
     },
     "https://t.me/s/confident": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.804377",
+      "last_checked": "2026-07-18T04:03:47.528615",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1861,7 +1861,7 @@
     },
     "https://t.me/s/gleeful": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.804648",
+      "last_checked": "2026-07-18T04:03:47.528872",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1874,7 +1874,7 @@
     },
     "https://t.me/s/v2configpro": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.804907",
+      "last_checked": "2026-07-18T04:03:47.529127",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1887,7 +1887,7 @@
     },
     "https://t.me/s/cloudcityy": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.805169",
+      "last_checked": "2026-07-18T04:03:47.529409",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1900,7 +1900,7 @@
     },
     "https://t.me/s/opensstpvpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.805474",
+      "last_checked": "2026-07-18T04:03:47.529686",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1913,7 +1913,7 @@
     },
     "https://t.me/s/cooonfig": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.805741",
+      "last_checked": "2026-07-18T04:03:47.529944",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1926,7 +1926,7 @@
     },
     "https://t.me/s/isvvpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.806000",
+      "last_checked": "2026-07-18T04:03:47.530198",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1939,7 +1939,7 @@
     },
     "https://t.me/s/xpnteam": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.806260",
+      "last_checked": "2026-07-18T04:03:47.530480",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1952,7 +1952,7 @@
     },
     "https://t.me/s/practical": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.806549",
+      "last_checked": "2026-07-18T04:03:47.530742",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1965,7 +1965,7 @@
     },
     "https://t.me/s/proxyforopeta": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.806810",
+      "last_checked": "2026-07-18T04:03:47.530998",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1978,7 +1978,7 @@
     },
     "https://t.me/s/digiv2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.807071",
+      "last_checked": "2026-07-18T04:03:47.531252",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -1991,7 +1991,7 @@
     },
     "https://t.me/s/lfjsdlfuewi": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.807356",
+      "last_checked": "2026-07-18T04:03:47.531564",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2004,7 +2004,7 @@
     },
     "https://t.me/s/modern": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.807625",
+      "last_checked": "2026-07-18T04:03:47.531829",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2017,7 +2017,7 @@
     },
     "https://t.me/s/fierce": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.807886",
+      "last_checked": "2026-07-18T04:03:47.532085",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2030,7 +2030,7 @@
     },
     "https://t.me/s/hqv2rayng": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.808147",
+      "last_checked": "2026-07-18T04:03:47.532339",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2043,7 +2043,7 @@
     },
     "https://t.me/s/amyraxvpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.808437",
+      "last_checked": "2026-07-18T04:03:47.532626",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2056,7 +2056,7 @@
     },
     "https://t.me/s/v2rayi5": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.808699",
+      "last_checked": "2026-07-18T04:03:47.532883",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2069,7 +2069,7 @@
     },
     "https://t.me/s/germany": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.808967",
+      "last_checked": "2026-07-18T04:03:47.533139",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2082,7 +2082,7 @@
     },
     "https://t.me/s/snapp": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.809232",
+      "last_checked": "2026-07-18T04:03:47.533417",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2095,7 +2095,7 @@
     },
     "https://t.me/s/avang": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.809525",
+      "last_checked": "2026-07-18T04:03:47.533691",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2108,7 +2108,7 @@
     },
     "https://t.me/s/cephalon_ala": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.809799",
+      "last_checked": "2026-07-18T04:03:47.533948",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2121,7 +2121,7 @@
     },
     "https://t.me/s/planb_proxy": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.810060",
+      "last_checked": "2026-07-18T04:03:47.534208",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2134,7 +2134,7 @@
     },
     "https://t.me/s/irn_vpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.810344",
+      "last_checked": "2026-07-18T04:03:47.534494",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2147,7 +2147,7 @@
     },
     "https://t.me/s/jkvpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.810614",
+      "last_checked": "2026-07-18T04:03:47.534755",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2160,7 +2160,7 @@
     },
     "https://t.me/s/khhf2853shjvs": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.810874",
+      "last_checked": "2026-07-18T04:03:47.535012",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2173,7 +2173,7 @@
     },
     "https://t.me/s/zedmodeon": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.811136",
+      "last_checked": "2026-07-18T04:03:47.535276",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2186,7 +2186,7 @@
     },
     "https://t.me/s/magical": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.811425",
+      "last_checked": "2026-07-18T04:03:47.535575",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2199,7 +2199,7 @@
     },
     "https://t.me/s/mxlshare": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.811689",
+      "last_checked": "2026-07-18T04:03:47.535845",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2212,7 +2212,7 @@
     },
     "https://t.me/s/titaniom_official": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.811950",
+      "last_checked": "2026-07-18T04:03:47.536108",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2225,7 +2225,7 @@
     },
     "https://t.me/s/finland": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.812216",
+      "last_checked": "2026-07-18T04:03:47.536373",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2238,7 +2238,7 @@
     },
     "https://t.me/s/capital_net": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.812510",
+      "last_checked": "2026-07-18T04:03:47.536663",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2251,7 +2251,7 @@
     },
     "https://t.me/s/arfilter": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.812776",
+      "last_checked": "2026-07-18T04:03:47.536921",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2264,7 +2264,7 @@
     },
     "https://t.me/s/moftconfig": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.813039",
+      "last_checked": "2026-07-18T04:03:47.537178",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2277,7 +2277,7 @@
     },
     "https://t.me/s/proxysharecn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.813320",
+      "last_checked": "2026-07-18T04:03:47.537462",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2290,7 +2290,7 @@
     },
     "https://t.me/s/qs00008": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.813594",
+      "last_checked": "2026-07-18T04:03:47.537750",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2303,7 +2303,7 @@
     },
     "https://t.me/s/farah_vpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.813860",
+      "last_checked": "2026-07-18T04:03:47.538024",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2316,7 +2316,7 @@
     },
     "https://t.me/s/mitivpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.814122",
+      "last_checked": "2026-07-18T04:03:47.538288",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2329,7 +2329,7 @@
     },
     "https://t.me/s/bugfreenet": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.814414",
+      "last_checked": "2026-07-18T04:03:47.538589",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2342,7 +2342,7 @@
     },
     "https://t.me/s/ab_841": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.814681",
+      "last_checked": "2026-07-18T04:03:47.538858",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2355,7 +2355,7 @@
     },
     "https://t.me/s/hope_net": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.814946",
+      "last_checked": "2026-07-18T04:03:47.539121",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2368,7 +2368,7 @@
     },
     "https://t.me/s/deamnet_proxy": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.815210",
+      "last_checked": "2026-07-18T04:03:47.539398",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2381,7 +2381,7 @@
     },
     "https://t.me/s/toyota_proxy": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.815503",
+      "last_checked": "2026-07-18T04:03:47.539667",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2394,7 +2394,7 @@
     },
     "https://t.me/s/rayanconf": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.815769",
+      "last_checked": "2026-07-18T04:03:47.539927",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2407,7 +2407,7 @@
     },
     "https://t.me/s/capoit": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.816033",
+      "last_checked": "2026-07-18T04:03:47.540186",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2420,7 +2420,7 @@
     },
     "https://t.me/s/m3hdio1": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.816317",
+      "last_checked": "2026-07-18T04:03:47.540484",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2433,7 +2433,7 @@
     },
     "https://t.me/s/azarakhsh_proxy": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.816591",
+      "last_checked": "2026-07-18T04:03:47.540764",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2446,7 +2446,7 @@
     },
     "https://t.me/s/solvpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.816856",
+      "last_checked": "2026-07-18T04:03:47.541027",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2459,7 +2459,7 @@
     },
     "https://t.me/s/v2ray_collector": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.817119",
+      "last_checked": "2026-07-18T04:03:47.541288",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2472,7 +2472,7 @@
     },
     "https://t.me/s/sylphnet": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.817414",
+      "last_checked": "2026-07-18T04:03:47.541599",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2485,7 +2485,7 @@
     },
     "https://t.me/s/rez1vpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.817685",
+      "last_checked": "2026-07-18T04:03:47.541864",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2498,7 +2498,7 @@
     },
     "https://t.me/s/proxy_mtm": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.817951",
+      "last_checked": "2026-07-18T04:03:47.542123",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2511,7 +2511,7 @@
     },
     "https://t.me/s/shop_gaming1011": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.818215",
+      "last_checked": "2026-07-18T04:03:47.542405",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2524,7 +2524,7 @@
     },
     "https://t.me/s/mehdio1": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.818514",
+      "last_checked": "2026-07-18T04:03:47.542680",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2537,7 +2537,7 @@
     },
     "https://t.me/s/u_confingvpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.818790",
+      "last_checked": "2026-07-18T04:03:47.542943",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2550,7 +2550,7 @@
     },
     "https://t.me/s/vmessiran": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.819061",
+      "last_checked": "2026-07-18T04:03:47.543203",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2563,7 +2563,7 @@
     },
     "https://t.me/s/v2rayng_vpnn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.819352",
+      "last_checked": "2026-07-18T04:03:47.543494",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2576,7 +2576,7 @@
     },
     "https://t.me/s/caa_v2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.819629",
+      "last_checked": "2026-07-18T04:03:47.543759",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2589,7 +2589,7 @@
     },
     "https://t.me/s/configv2rayng": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.819897",
+      "last_checked": "2026-07-18T04:03:47.544021",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2602,7 +2602,7 @@
     },
     "https://t.me/s/venom_servers": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.820164",
+      "last_checked": "2026-07-18T04:03:47.544281",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2615,7 +2615,7 @@
     },
     "https://t.me/s/gozargah_azadi": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.820463",
+      "last_checked": "2026-07-18T04:03:47.544574",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2628,7 +2628,7 @@
     },
     "https://t.me/s/21240tasiyanc": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.820732",
+      "last_checked": "2026-07-18T04:03:47.544840",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2641,7 +2641,7 @@
     },
     "https://t.me/s/v2rayn_free": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.821000",
+      "last_checked": "2026-07-18T04:03:47.545108",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2654,7 +2654,7 @@
     },
     "https://t.me/s/rk_vps": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.821267",
+      "last_checked": "2026-07-18T04:03:47.545412",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2667,7 +2667,7 @@
     },
     "https://t.me/s/tirexnet": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.821641",
+      "last_checked": "2026-07-18T04:03:47.545695",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2680,7 +2680,7 @@
     },
     "https://t.me/s/darkvpnpro": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.821920",
+      "last_checked": "2026-07-18T04:03:47.545977",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2693,7 +2693,7 @@
     },
     "https://t.me/s/v2ray_string": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.822195",
+      "last_checked": "2026-07-18T04:03:47.546253",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2706,7 +2706,7 @@
     },
     "https://t.me/s/lowik_live": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.822503",
+      "last_checked": "2026-07-18T04:03:47.546549",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2719,7 +2719,7 @@
     },
     "https://t.me/s/8707u46352173": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.822782",
+      "last_checked": "2026-07-18T04:03:47.546818",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2732,7 +2732,7 @@
     },
     "https://t.me/s/fastwayv2_bot": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.823060",
+      "last_checked": "2026-07-18T04:03:47.547088",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2745,7 +2745,7 @@
     },
     "https://t.me/s/azerb": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.823361",
+      "last_checked": "2026-07-18T04:03:47.547353",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2758,7 +2758,7 @@
     },
     "https://t.me/s/foriran": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.823644",
+      "last_checked": "2026-07-18T04:03:47.547656",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2771,7 +2771,7 @@
     },
     "https://t.me/s/franc2": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.823917",
+      "last_checked": "2026-07-18T04:03:47.547922",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2784,7 +2784,7 @@
     },
     "https://t.me/s/hkntt1": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.824192",
+      "last_checked": "2026-07-18T04:03:47.548187",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2797,7 +2797,7 @@
     },
     "https://t.me/s/jayservers": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.824497",
+      "last_checked": "2026-07-18T04:03:47.548505",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2810,7 +2810,7 @@
     },
     "https://t.me/s/malavang": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.824770",
+      "last_checked": "2026-07-18T04:03:47.548786",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2823,7 +2823,7 @@
     },
     "https://t.me/s/malavant": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.825044",
+      "last_checked": "2026-07-18T04:03:47.549056",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2836,7 +2836,7 @@
     },
     "https://t.me/s/v2range": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.825363",
+      "last_checked": "2026-07-18T04:03:47.549337",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2849,7 +2849,7 @@
     },
     "https://t.me/s/piohosting": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.825654",
+      "last_checked": "2026-07-18T04:03:47.549665",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2862,7 +2862,7 @@
     },
     "https://t.me/s/riga1": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.825927",
+      "last_checked": "2026-07-18T04:03:47.549988",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2875,7 +2875,7 @@
     },
     "https://t.me/s/nexus_v2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.826199",
+      "last_checked": "2026-07-18T04:03:47.550262",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2888,7 +2888,7 @@
     },
     "https://t.me/s/store": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.826500",
+      "last_checked": "2026-07-18T04:03:47.550586",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2901,7 +2901,7 @@
     },
     "https://t.me/s/swmmd": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.826774",
+      "last_checked": "2026-07-18T04:03:47.550895",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2914,7 +2914,7 @@
     },
     "https://t.me/s/trkcdn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.827047",
+      "last_checked": "2026-07-18T04:03:47.551170",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2927,7 +2927,7 @@
     },
     "https://t.me/s/appu46352173": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.827347",
+      "last_checked": "2026-07-18T04:03:47.551518",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2940,7 +2940,7 @@
     },
     "https://t.me/s/cdnu46352173896": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.827632",
+      "last_checked": "2026-07-18T04:03:47.551857",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2953,7 +2953,7 @@
     },
     "https://t.me/s/moftconfigunited": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.827909",
+      "last_checked": "2026-07-18T04:03:47.552142",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2966,7 +2966,7 @@
     },
     "https://t.me/s/jsu46352173": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.828184",
+      "last_checked": "2026-07-18T04:03:47.552499",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2979,7 +2979,7 @@
     },
     "https://t.me/s/kiava": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.828491",
+      "last_checked": "2026-07-18T04:03:47.552781",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -2992,7 +2992,7 @@
     },
     "https://t.me/s/nodeu46352173db": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.828773",
+      "last_checked": "2026-07-18T04:03:47.553051",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3005,7 +3005,7 @@
     },
     "https://t.me/s/hedwigv2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.829048",
+      "last_checked": "2026-07-18T04:03:47.553322",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3018,7 +3018,7 @@
     },
     "https://t.me/s/moftinet": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.829361",
+      "last_checked": "2026-07-18T04:03:47.553619",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3031,7 +3031,7 @@
     },
     "https://t.me/s/thepackagecom": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.829644",
+      "last_checked": "2026-07-18T04:03:47.553885",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3044,7 +3044,7 @@
     },
     "https://t.me/s/telegram": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.829919",
+      "last_checked": "2026-07-18T04:03:47.554153",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3057,7 +3057,7 @@
     },
     "https://t.me/s/tehranargo": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.830195",
+      "last_checked": "2026-07-18T04:03:47.554445",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3070,7 +3070,7 @@
     },
     "https://t.me/s/amir_138_t": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.830503",
+      "last_checked": "2026-07-18T04:03:47.554722",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3083,7 +3083,7 @@
     },
     "https://t.me/s/lightning6": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.830782",
+      "last_checked": "2026-07-18T04:03:47.554990",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3096,7 +3096,7 @@
     },
     "https://t.me/s/vpn_room": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.831057",
+      "last_checked": "2026-07-18T04:03:47.555259",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3109,7 +3109,7 @@
     },
     "https://t.me/s/deadseectelegram": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.831355",
+      "last_checked": "2026-07-18T04:03:47.555564",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3122,7 +3122,7 @@
     },
     "https://t.me/s/arv2ry": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.831636",
+      "last_checked": "2026-07-18T04:03:47.555836",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3135,7 +3135,7 @@
     },
     "https://t.me/s/academi_vpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.831914",
+      "last_checked": "2026-07-18T04:03:47.556111",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3148,7 +3148,7 @@
     },
     "https://t.me/s/maznet": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.832189",
+      "last_checked": "2026-07-18T04:03:47.556401",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3161,7 +3161,7 @@
     },
     "https://t.me/s/abelimo": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.832497",
+      "last_checked": "2026-07-18T04:03:47.556685",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3174,7 +3174,7 @@
     },
     "https://t.me/s/shadowaplha66": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.832776",
+      "last_checked": "2026-07-18T04:03:47.556957",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3187,7 +3187,7 @@
     },
     "https://t.me/s/v2ray_god": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.833052",
+      "last_checked": "2026-07-18T04:03:47.557233",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3200,7 +3200,7 @@
     },
     "https://t.me/s/nim_vpn_ir": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.833354",
+      "last_checked": "2026-07-18T04:03:47.557542",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3213,7 +3213,7 @@
     },
     "https://t.me/s/sinabigo": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.833642",
+      "last_checked": "2026-07-18T04:03:47.557816",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3226,7 +3226,7 @@
     },
     "https://t.me/s/x2rayn_vpncdn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.833921",
+      "last_checked": "2026-07-18T04:03:47.558089",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3239,7 +3239,7 @@
     },
     "https://t.me/s/v2ray_confing33": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.834199",
+      "last_checked": "2026-07-18T04:03:47.558359",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3252,7 +3252,7 @@
     },
     "https://t.me/s/svnteam": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.834511",
+      "last_checked": "2026-07-18T04:03:47.558668",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3265,7 +3265,7 @@
     },
     "https://t.me/s/virav2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.834793",
+      "last_checked": "2026-07-18T04:03:47.558949",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3278,7 +3278,7 @@
     },
     "https://t.me/s/cpy_teel": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.835073",
+      "last_checked": "2026-07-18T04:03:47.559233",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3291,7 +3291,7 @@
     },
     "https://t.me/s/wirexnet": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.835375",
+      "last_checked": "2026-07-18T04:03:47.559535",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3304,7 +3304,7 @@
     },
     "https://t.me/s/shadowproxy66": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.835657",
+      "last_checked": "2026-07-18T04:03:47.559808",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3317,7 +3317,7 @@
     },
     "https://t.me/s/befreewithus": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.835934",
+      "last_checked": "2026-07-18T04:03:47.560081",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3330,7 +3330,7 @@
     },
     "https://t.me/s/v2rayngcloud": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.836214",
+      "last_checked": "2026-07-18T04:03:47.560353",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3343,7 +3343,7 @@
     },
     "https://t.me/s/freev2rng": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.836524",
+      "last_checked": "2026-07-18T04:03:47.560656",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3356,7 +3356,7 @@
     },
     "https://t.me/s/v2raytz": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.836804",
+      "last_checked": "2026-07-18T04:03:47.560926",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3369,7 +3369,7 @@
     },
     "https://t.me/s/mahdiserver": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.837080",
+      "last_checked": "2026-07-18T04:03:47.561197",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3382,7 +3382,7 @@
     },
     "https://t.me/s/rahin_vpn1": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.837406",
+      "last_checked": "2026-07-18T04:03:47.561523",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3395,7 +3395,7 @@
     },
     "https://t.me/s/netherlandcdn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.837697",
+      "last_checked": "2026-07-18T04:03:47.561808",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3408,7 +3408,7 @@
     },
     "https://t.me/s/englandcdn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.837979",
+      "last_checked": "2026-07-18T04:03:47.562085",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3421,7 +3421,7 @@
     },
     "https://t.me/s/zmaoz": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.838261",
+      "last_checked": "2026-07-18T04:03:47.562358",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3434,7 +3434,7 @@
     },
     "https://t.me/s/warpifree": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.838576",
+      "last_checked": "2026-07-18T04:03:47.562671",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3447,7 +3447,7 @@
     },
     "https://t.me/s/rxv2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.838867",
+      "last_checked": "2026-07-18T04:03:47.562948",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3460,7 +3460,7 @@
     },
     "https://t.me/s/pardazeshvpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.839150",
+      "last_checked": "2026-07-18T04:03:47.563221",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3473,7 +3473,7 @@
     },
     "https://t.me/s/vmessprotocol": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.839458",
+      "last_checked": "2026-07-18T04:03:47.563523",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3486,7 +3486,7 @@
     },
     "https://t.me/s/customizerobot": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.839741",
+      "last_checked": "2026-07-18T04:03:47.563797",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3499,7 +3499,7 @@
     },
     "https://t.me/s/check": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.840025",
+      "last_checked": "2026-07-18T04:03:47.564072",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3512,7 +3512,7 @@
     },
     "https://t.me/s/arv2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.840327",
+      "last_checked": "2026-07-18T04:03:47.564347",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3525,7 +3525,7 @@
     },
     "https://t.me/s/joker": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.840619",
+      "last_checked": "2026-07-18T04:03:47.564649",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3538,7 +3538,7 @@
     },
     "https://t.me/s/mtmvpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.840903",
+      "last_checked": "2026-07-18T04:03:47.564924",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3551,7 +3551,7 @@
     },
     "https://t.me/s/tech_sonic": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.841197",
+      "last_checked": "2026-07-18T04:03:47.565197",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3564,7 +3564,7 @@
     },
     "https://t.me/s/jokerrvpntelegram": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.841518",
+      "last_checked": "2026-07-18T04:03:47.565496",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3577,7 +3577,7 @@
     },
     "https://t.me/s/discord": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.841803",
+      "last_checked": "2026-07-18T04:03:47.565776",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3590,7 +3590,7 @@
     },
     "https://t.me/s/varzesh3": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.842088",
+      "last_checked": "2026-07-18T04:03:47.566065",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3603,7 +3603,7 @@
     },
     "https://t.me/s/nasav2": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.842394",
+      "last_checked": "2026-07-18T04:03:47.566363",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3616,7 +3616,7 @@
     },
     "https://t.me/s/tunizonet": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.842683",
+      "last_checked": "2026-07-18T04:03:47.566709",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3629,7 +3629,7 @@
     },
     "https://t.me/s/savteam": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.842967",
+      "last_checked": "2026-07-18T04:03:47.566989",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3642,7 +3642,7 @@
     },
     "https://t.me/s/proxystore11": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.843265",
+      "last_checked": "2026-07-18T04:03:47.567267",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3655,7 +3655,7 @@
     },
     "https://t.me/s/proxyvpn11": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.843592",
+      "last_checked": "2026-07-18T04:03:47.567574",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3668,7 +3668,7 @@
     },
     "https://t.me/s/ahbarserver": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.843877",
+      "last_checked": "2026-07-18T04:03:47.567848",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3681,7 +3681,7 @@
     },
     "https://t.me/s/azadmarz": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.844163",
+      "last_checked": "2026-07-18T04:03:47.568121",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3694,7 +3694,7 @@
     },
     "https://t.me/s/zyfxs": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.844497",
+      "last_checked": "2026-07-18T04:03:47.568419",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3707,7 +3707,7 @@
     },
     "https://t.me/s/melinet": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.844802",
+      "last_checked": "2026-07-18T04:03:47.568706",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3720,7 +3720,7 @@
     },
     "https://t.me/s/melinet2": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.845086",
+      "last_checked": "2026-07-18T04:03:47.568983",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3733,7 +3733,7 @@
     },
     "https://t.me/s/melinet3": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.845396",
+      "last_checked": "2026-07-18T04:03:47.569259",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3746,7 +3746,7 @@
     },
     "https://t.me/s/v2rayngvpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.845685",
+      "last_checked": "2026-07-18T04:03:47.569580",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3759,7 +3759,7 @@
     },
     "https://t.me/s/icv2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.845969",
+      "last_checked": "2026-07-18T04:03:47.569864",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3772,7 +3772,7 @@
     },
     "https://t.me/s/england": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.846281",
+      "last_checked": "2026-07-18T04:03:47.570204",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3785,7 +3785,7 @@
     },
     "https://t.me/s/arshiavpnred_bot": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.846597",
+      "last_checked": "2026-07-18T04:03:47.570516",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3798,7 +3798,7 @@
     },
     "https://t.me/s/lord_ul4mo": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.846883",
+      "last_checked": "2026-07-18T04:03:47.570797",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3811,7 +3811,7 @@
     },
     "https://t.me/s/v2rayngmat": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.847167",
+      "last_checked": "2026-07-18T04:03:47.571077",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3824,7 +3824,7 @@
     },
     "https://t.me/s/alixtso": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.847483",
+      "last_checked": "2026-07-18T04:03:47.571356",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3837,7 +3837,7 @@
     },
     "https://t.me/s/yamyamproxy_yamyamproxy_yamyampr": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.847771",
+      "last_checked": "2026-07-18T04:03:47.571665",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3850,7 +3850,7 @@
     },
     "https://t.me/s/shadowproxy66_shadowproxy66": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.848055",
+      "last_checked": "2026-07-18T04:03:47.571946",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3863,7 +3863,7 @@
     },
     "https://t.me/s/v2kingfree": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.848366",
+      "last_checked": "2026-07-18T04:03:47.572226",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3876,7 +3876,7 @@
     },
     "https://t.me/s/svnprobot": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.848666",
+      "last_checked": "2026-07-18T04:03:47.572554",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3889,7 +3889,7 @@
     },
     "https://t.me/s/zev2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.848965",
+      "last_checked": "2026-07-18T04:03:47.572869",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3902,7 +3902,7 @@
     },
     "https://t.me/s/eliv2": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.849250",
+      "last_checked": "2026-07-18T04:03:47.573150",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3915,7 +3915,7 @@
     },
     "https://t.me/s/savagev2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.849567",
+      "last_checked": "2026-07-18T04:03:47.573452",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3928,7 +3928,7 @@
     },
     "https://t.me/s/v2raxx": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.849852",
+      "last_checked": "2026-07-18T04:03:47.573738",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3941,7 +3941,7 @@
     },
     "https://t.me/s/cloudflare2": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.850139",
+      "last_checked": "2026-07-18T04:03:47.574021",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3954,7 +3954,7 @@
     },
     "https://t.me/s/v2ray_configs_poolstelegram": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.850518",
+      "last_checked": "2026-07-18T04:03:47.574303",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3967,7 +3967,7 @@
     },
     "https://t.me/s/hqv2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.850969",
+      "last_checked": "2026-07-18T04:03:47.574610",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3980,7 +3980,7 @@
     },
     "https://t.me/s/v2ray_spatial": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.851474",
+      "last_checked": "2026-07-18T04:03:47.574893",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -3993,7 +3993,7 @@
     },
     "https://t.me/s/r3mrcg001287h3p": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.851952",
+      "last_checked": "2026-07-18T04:03:47.575175",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4006,7 +4006,7 @@
     },
     "https://t.me/s/fast_2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.852412",
+      "last_checked": "2026-07-18T04:03:47.575484",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4019,7 +4019,7 @@
     },
     "https://t.me/s/soul737": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.852848",
+      "last_checked": "2026-07-18T04:03:47.575783",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4032,7 +4032,7 @@
     },
     "https://t.me/s/arvand_soul": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.853342",
+      "last_checked": "2026-07-18T04:03:47.576078",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4045,7 +4045,7 @@
     },
     "https://t.me/s/metivip": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.853790",
+      "last_checked": "2026-07-18T04:03:47.576362",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4058,7 +4058,7 @@
     },
     "https://t.me/s/nuremberg2": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.854239",
+      "last_checked": "2026-07-18T04:03:47.576678",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4071,7 +4071,7 @@
     },
     "https://t.me/s/mrnextv2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.854751",
+      "last_checked": "2026-07-18T04:03:47.576961",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4084,7 +4084,7 @@
     },
     "https://t.me/s/nljsjs": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.855233",
+      "last_checked": "2026-07-18T04:03:47.577244",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4097,7 +4097,7 @@
     },
     "https://t.me/s/v2ray_hub1200": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.855748",
+      "last_checked": "2026-07-18T04:03:47.577554",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4110,7 +4110,7 @@
     },
     "https://t.me/s/melinet1": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.856194",
+      "last_checked": "2026-07-18T04:03:47.577839",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4123,7 +4123,7 @@
     },
     "https://t.me/s/newsdarya": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.856674",
+      "last_checked": "2026-07-18T04:03:47.578120",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4136,7 +4136,7 @@
     },
     "https://t.me/s/v2raysup0": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.857161",
+      "last_checked": "2026-07-18T04:03:47.578422",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4149,7 +4149,7 @@
     },
     "https://t.me/s/blueberrynetwork": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.857624",
+      "last_checked": "2026-07-18T04:03:47.578714",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4162,7 +4162,7 @@
     },
     "https://t.me/s/azarakhshproxy": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.858102",
+      "last_checked": "2026-07-18T04:03:47.578996",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4175,7 +4175,7 @@
     },
     "https://t.me/s/vpn_king_v2raytel": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.858530",
+      "last_checked": "2026-07-18T04:03:47.579280",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4188,7 +4188,7 @@
     },
     "https://t.me/s/vpn_king_v2rayel": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.858965",
+      "last_checked": "2026-07-18T04:03:47.579592",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4201,7 +4201,7 @@
     },
     "https://t.me/s/gap_ip": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.859481",
+      "last_checked": "2026-07-18T04:03:47.579874",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4214,7 +4214,7 @@
     },
     "https://t.me/s/v2raybaaz": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.859871",
+      "last_checked": "2026-07-18T04:03:47.580155",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4227,7 +4227,7 @@
     },
     "https://t.me/s/alese": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.860385",
+      "last_checked": "2026-07-18T04:03:47.580462",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4240,7 +4240,7 @@
     },
     "https://t.me/s/takehost": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.860837",
+      "last_checked": "2026-07-18T04:03:47.580749",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4253,7 +4253,7 @@
     },
     "https://t.me/s/configtell": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.861152",
+      "last_checked": "2026-07-18T04:03:47.581033",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4266,7 +4266,7 @@
     },
     "https://t.me/s/turkgame": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.861674",
+      "last_checked": "2026-07-18T04:03:47.581316",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4279,7 +4279,7 @@
     },
     "https://t.me/s/document": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.862116",
+      "last_checked": "2026-07-18T04:03:47.581629",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4292,7 +4292,7 @@
     },
     "https://t.me/s/azadweb": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.862617",
+      "last_checked": "2026-07-18T04:03:47.581913",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4305,7 +4305,7 @@
     },
     "https://t.me/s/hajimamadvpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.863079",
+      "last_checked": "2026-07-18T04:03:47.582196",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4318,7 +4318,7 @@
     },
     "https://t.me/s/skypro_vpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.863551",
+      "last_checked": "2026-07-18T04:03:47.582508",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4331,7 +4331,7 @@
     },
     "https://t.me/s/falconpolv2rayng": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.864032",
+      "last_checked": "2026-07-18T04:03:47.582796",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4344,7 +4344,7 @@
     },
     "https://t.me/s/vlessconfig": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.864477",
+      "last_checked": "2026-07-18T04:03:47.583081",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4357,7 +4357,7 @@
     },
     "https://t.me/s/darkteam_vpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.864956",
+      "last_checked": "2026-07-18T04:03:47.583366",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4370,7 +4370,7 @@
     },
     "https://t.me/s/v2ngnet": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.865382",
+      "last_checked": "2026-07-18T04:03:47.583689",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4383,7 +4383,7 @@
     },
     "https://t.me/s/content": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.865872",
+      "last_checked": "2026-07-18T04:03:47.583981",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4396,7 +4396,7 @@
     },
     "https://t.me/s/configfree": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.866313",
+      "last_checked": "2026-07-18T04:03:47.584281",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4409,7 +4409,7 @@
     },
     "https://t.me/s/kingn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.866809",
+      "last_checked": "2026-07-18T04:03:47.584601",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4422,7 +4422,7 @@
     },
     "https://t.me/s/chan4u": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.867241",
+      "last_checked": "2026-07-18T04:03:47.584892",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4435,7 +4435,7 @@
     },
     "https://t.me/s/xsv2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.867735",
+      "last_checked": "2026-07-18T04:03:47.585265",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4448,7 +4448,7 @@
     },
     "https://t.me/s/mrconfig_channel": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.868217",
+      "last_checked": "2026-07-18T04:03:47.585628",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4461,7 +4461,7 @@
     },
     "https://t.me/s/nim_vpn_ir_netherlands": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.868699",
+      "last_checked": "2026-07-18T04:03:47.585919",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4474,7 +4474,7 @@
     },
     "https://t.me/s/awlix_v2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.869184",
+      "last_checked": "2026-07-18T04:03:47.586217",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4487,7 +4487,7 @@
     },
     "https://t.me/s/fnet00": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.869671",
+      "last_checked": "2026-07-18T04:03:47.586555",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4500,7 +4500,7 @@
     },
     "https://t.me/s/amwybc11f2c7ois6hvzivt": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.870153",
+      "last_checked": "2026-07-18T04:03:47.586852",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4513,7 +4513,7 @@
     },
     "https://t.me/s/asd7953fotd6b2mktnyo": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.870636",
+      "last_checked": "2026-07-18T04:03:47.587139",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4526,7 +4526,7 @@
     },
     "https://t.me/s/fast78_channel": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.871129",
+      "last_checked": "2026-07-18T04:03:47.587464",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4539,7 +4539,7 @@
     },
     "https://t.me/s/astrovpn_official": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.871597",
+      "last_checked": "2026-07-18T04:03:47.587765",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4552,7 +4552,7 @@
     },
     "https://t.me/s/nim_vpn_ir_finland": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.872098",
+      "last_checked": "2026-07-18T04:03:47.588053",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4565,7 +4565,7 @@
     },
     "https://t.me/s/nim_vpn_ir_germany": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.872575",
+      "last_checked": "2026-07-18T04:03:47.588342",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4578,7 +4578,7 @@
     },
     "https://t.me/s/hibyevpnn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.873030",
+      "last_checked": "2026-07-18T04:03:47.588683",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4591,7 +4591,7 @@
     },
     "https://t.me/s/shikavpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.873559",
+      "last_checked": "2026-07-18T04:03:47.588975",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4604,7 +4604,7 @@
     },
     "https://t.me/s/fr33c0nfig": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.874043",
+      "last_checked": "2026-07-18T04:03:47.589265",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4617,7 +4617,7 @@
     },
     "https://t.me/s/maxfree": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.874562",
+      "last_checked": "2026-07-18T04:03:47.589613",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4630,7 +4630,7 @@
     },
     "https://t.me/s/nim_vpn_ir_russia": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.874978",
+      "last_checked": "2026-07-18T04:03:47.589908",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4643,7 +4643,7 @@
     },
     "https://t.me/s/hqvrayng": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.875500",
+      "last_checked": "2026-07-18T04:03:47.590201",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4656,7 +4656,7 @@
     },
     "https://t.me/s/public504": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.875938",
+      "last_checked": "2026-07-18T04:03:47.590541",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4669,7 +4669,7 @@
     },
     "https://t.me/s/v2ngfast": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.876468",
+      "last_checked": "2026-07-18T04:03:47.590840",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4682,7 +4682,7 @@
     },
     "https://t.me/s/maramba": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.876918",
+      "last_checked": "2026-07-18T04:03:47.591133",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4695,7 +4695,7 @@
     },
     "https://t.me/s/ak111": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.877394",
+      "last_checked": "2026-07-18T04:03:47.591447",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4708,7 +4708,7 @@
     },
     "https://t.me/s/vpncstomize": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.877885",
+      "last_checked": "2026-07-18T04:03:47.591747",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4721,7 +4721,7 @@
     },
     "https://t.me/s/freakconfigs19": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.878334",
+      "last_checked": "2026-07-18T04:03:47.592042",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4734,7 +4734,7 @@
     },
     "https://t.me/s/freakconfigs28": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.878840",
+      "last_checked": "2026-07-18T04:03:47.592336",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4747,7 +4747,7 @@
     },
     "https://t.me/s/freakconfigs31": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.879253",
+      "last_checked": "2026-07-18T04:03:47.592663",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4760,7 +4760,7 @@
     },
     "https://t.me/s/freakconfigs35": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.879779",
+      "last_checked": "2026-07-18T04:03:47.592962",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4773,7 +4773,7 @@
     },
     "https://t.me/s/abmive": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.880274",
+      "last_checked": "2026-07-18T04:03:47.593256",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4786,7 +4786,7 @@
     },
     "https://t.me/s/free_httpcustom": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.880800",
+      "last_checked": "2026-07-18T04:03:47.593577",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4799,7 +4799,7 @@
     },
     "https://t.me/s/fastly1": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.881262",
+      "last_checked": "2026-07-18T04:03:47.593868",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4812,7 +4812,7 @@
     },
     "https://t.me/s/tls_v2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.881735",
+      "last_checked": "2026-07-18T04:03:47.594158",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4825,7 +4825,7 @@
     },
     "https://t.me/s/zafar": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.882223",
+      "last_checked": "2026-07-18T04:03:47.594472",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4838,7 +4838,7 @@
     },
     "https://t.me/s/vpnhttpinjectorfree": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.882742",
+      "last_checked": "2026-07-18T04:03:47.594767",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4851,7 +4851,7 @@
     },
     "https://t.me/s/free1_vpn": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.883198",
+      "last_checked": "2026-07-18T04:03:47.595060",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4864,7 +4864,7 @@
     },
     "https://t.me/s/wedbaz": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.883573",
+      "last_checked": "2026-07-18T04:03:47.595353",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4877,7 +4877,7 @@
     },
     "https://t.me/s/free2": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.883943",
+      "last_checked": "2026-07-18T04:03:47.595676",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4890,7 +4890,7 @@
     },
     "https://t.me/s/free3": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.884370",
+      "last_checked": "2026-07-18T04:03:47.595971",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4903,7 +4903,7 @@
     },
     "https://t.me/s/subthirteen": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.884870",
+      "last_checked": "2026-07-18T04:03:47.596275",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4916,7 +4916,7 @@
     },
     "https://t.me/s/sofewhite": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.885380",
+      "last_checked": "2026-07-18T04:03:47.596605",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4929,7 +4929,7 @@
     },
     "https://t.me/s/v2royc": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.885895",
+      "last_checked": "2026-07-18T04:03:47.596904",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4942,7 +4942,7 @@
     },
     "https://t.me/s/vcheat": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.886342",
+      "last_checked": "2026-07-18T04:03:47.597197",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4955,7 +4955,7 @@
     },
     "https://t.me/s/n3twrk": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.886825",
+      "last_checked": "2026-07-18T04:03:47.597515",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4968,7 +4968,7 @@
     },
     "https://t.me/s/npv_v2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.887330",
+      "last_checked": "2026-07-18T04:03:47.597810",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4981,7 +4981,7 @@
     },
     "https://t.me/s/itv2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.887797",
+      "last_checked": "2026-07-18T04:03:47.598105",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -4994,7 +4994,7 @@
     },
     "https://t.me/s/nicotine_joker": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.888252",
+      "last_checked": "2026-07-18T04:03:47.598417",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -5007,7 +5007,7 @@
     },
     "https://t.me/s/bbbhhgf": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.888744",
+      "last_checked": "2026-07-18T04:03:47.598722",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -5020,7 +5020,7 @@
     },
     "https://t.me/s/nkoihgf": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.889215",
+      "last_checked": "2026-07-18T04:03:47.599018",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -5033,7 +5033,7 @@
     },
     "https://t.me/s/pov2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.889698",
+      "last_checked": "2026-07-18T04:03:47.599316",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -5046,7 +5046,7 @@
     },
     "https://t.me/s/marisa_kristifp": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.890149",
+      "last_checked": "2026-07-18T04:03:47.599647",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -5059,7 +5059,7 @@
     },
     "https://t.me/s/sobyv2ray": {
       "health_score": 60.0,
-      "last_checked": "2026-07-18T03:58:41.890621",
+      "last_checked": "2026-07-18T04:03:47.599947",
       "is_healthy": true,
       "cluster": 0,
       "metrics_summary": {
@@ -5071,5 +5071,5 @@
       }
     }
   },
-  "last_updated": "2026-07-18T03:58:41.890630"
+  "last_updated": "2026-07-18T04:03:47.599954"
 }
