@@ -29,7 +29,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libmaxminddb-dev
+          sudo apt-get install -y libmaxminddb-dev unzip
 
       - name: Install Python dependencies
         run: |
@@ -57,6 +57,34 @@ jobs:
           echo '{}' > configs/location_cache.json
           echo '{}' > configs/parsed_cache.json
 
+      # Установка Xray-core (требуется для xray_balancer.py)
+      - name: Install Xray-core
+        run: |
+          # Если install.sh поддерживает --install-xray-only, используем его
+          if [ -f "install.sh" ]; then
+            bash install.sh --install-xray-only
+          else
+            # Иначе устанавливаем вручную
+            ARCH=$(uname -m)
+            case "$ARCH" in
+              x86_64)  XRAY_FILE="Xray-linux-64.zip" ;;
+              aarch64) XRAY_FILE="Xray-linux-arm64-v8a.zip" ;;
+              armv7l)  XRAY_FILE="Xray-linux-arm32-v7a.zip" ;;
+              *)       echo "Unsupported architecture: $ARCH"; exit 1 ;;
+            esac
+            XRAY_VERSION=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep -oP '"tag_name": "\K(.*?)(?=")')
+            if [ -z "$XRAY_VERSION" ]; then
+              echo "Failed to get latest Xray version"
+              exit 1
+            fi
+            wget -q "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/${XRAY_FILE}" -O /tmp/xray.zip
+            unzip -q -o /tmp/xray.zip -d /tmp/xray
+            chmod +x /tmp/xray/xray
+            sudo mv /tmp/xray/xray /usr/local/bin/
+            rm -rf /tmp/xray /tmp/xray.zip
+          fi
+          xray version 2>&1 | head -1
+
       - name: Run optimized pipeline
         id: pipeline
         continue-on-error: true
@@ -68,7 +96,7 @@ jobs:
         run: |
           python -c "
           import sqlite3
-          import json
+          import os
           import re
           from urllib.parse import urlparse
 
@@ -87,10 +115,21 @@ jobs:
                   return f\"{parsed.scheme}://{netloc}{path}\"
               return url
 
+          # Если базы нет — значит первый запуск, не удаляем ничего
+          if not os.path.exists(DB_PATH):
+              print('history.db not found, skipping removal (first run)')
+              exit(0)
+
           # Подключаемся к SQLite
           try:
               conn = sqlite3.connect(DB_PATH)
               cursor = conn.cursor()
+              # Проверяем, существует ли таблица channels
+              cursor.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND name='channels'\")
+              if not cursor.fetchone():
+                  print('Table channels not found, skipping removal')
+                  conn.close()
+                  exit(0)
               # Получаем неактивные каналы (enabled = 0)
               cursor.execute('SELECT url FROM channels WHERE enabled = 0')
               rows = cursor.fetchall()
@@ -184,6 +223,12 @@ jobs:
           try:
               conn = sqlite3.connect(DB_PATH)
               cursor = conn.cursor()
+              # Проверяем, есть ли таблица runs
+              cursor.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND name='runs'\")
+              if not cursor.fetchone():
+                  print('  No runs table yet (first run)')
+                  conn.close()
+                  exit(0)
               cursor.execute('SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1')
               row = cursor.fetchone()
               if row:
