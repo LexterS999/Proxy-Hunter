@@ -13,7 +13,7 @@ import config_parser as parser
 from profile_scorer import ProfileScorer
 from geo_loader import GeoLoader
 from user_settings import GEO_COUNTRY_URL, GEO_ASN_URL, NAMING_FORMAT, NAMING_SEPARATOR, SHOW_DC_TAG
-from enrich_configs import load_location_cache_safe  # Импортируем общую функцию
+from enrich_configs import load_location_cache_safe
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -31,12 +31,10 @@ class ConfigRenamer:
         self.load_location_cache(location_file)
 
     def load_location_cache(self, location_file: str):
-        """Загружает кэш с проверкой целостности."""
         self.location_cache = load_location_cache_safe(location_file)
         logger.info(f"Loaded {len(self.location_cache)} location entries")
 
     def get_location(self, address: str) -> tuple:
-        """Возвращает (флаг, код_страны) из кэша или через GeoLoader."""
         if address in self.location_cache:
             return self.location_cache[address]
         self.geo.ensure_databases()
@@ -53,17 +51,14 @@ class ConfigRenamer:
         return result
 
     def get_asn_info(self, address: str) -> tuple:
-        """Возвращает (номер_ASN, название_ASN)."""
         self.geo.ensure_databases()
         return self.geo.get_asn(address)
 
     def is_datacenter(self, address: str) -> bool:
-        """Проверяет, является ли IP хостингом/датацентром."""
         self.geo.ensure_databases()
         return self.geo.is_datacenter(address)
 
     def build_protocol_info(self, protocol_type: str, data: Dict) -> str:
-        """Строит строку Протокол|Транспорт|Security."""
         net = data.get('net') or data.get('type') or 'tcp'
         security = data.get('security') or data.get('tls') or 'none'
         net = net.upper()
@@ -117,30 +112,23 @@ class ConfigRenamer:
             if not parsed_data or not address:
                 return config
 
-            # Получаем геолокацию
             flag, country_code = self.get_location(address)
 
-            # Фильтр по стране
             if not is_country_allowed(country_code):
                 logger.debug(f"Skipping config from {country_code} (blacklisted)")
                 return None
 
-            # Получаем ASN
             asn_num, asn_name = self.get_asn_info(address)
             asn_display = asn_name if asn_name else f"AS{asn_num}" if asn_num else ""
 
-            # Проверяем датацентр
             is_dc = self.is_datacenter(address) if SHOW_DC_TAG else False
             dc_tag = " [DC]" if is_dc else ""
 
-            # Получаем оценку
             score_info = self.scorer.score_profile(config, parsed_data, success=True)
             score = score_info.get('score', 50)
 
-            # Протокол|Транспорт|Security
             proto_info = self.build_protocol_info(protocol, parsed_data)
 
-            # Формируем имя по шаблону
             name = NAMING_FORMAT.format(
                 flag=flag,
                 country_code=country_code,
@@ -151,7 +139,6 @@ class ConfigRenamer:
             )
             name = NAMING_SEPARATOR.join(name.split())
 
-            # Пересобираем URI с новым именем
             if config_lower.startswith('vmess://'):
                 parsed_data['ps'] = name
                 encoded = base64.b64encode(json.dumps(parsed_data, ensure_ascii=False).encode('utf-8')).decode('utf-8')
@@ -192,7 +179,8 @@ class ConfigRenamer:
                 renamed.append(new_cfg)
 
         try:
-            with open(output_file, 'w', encoding='utf-8') as f:
+            # Используем буферизированную запись с большим буфером
+            with open(output_file, 'w', encoding='utf-8', buffering=1024*1024) as f:
                 for h in header:
                     f.write(h + '\n')
                 if header and renamed:
