@@ -27,7 +27,6 @@ VENV_DIR="$INSTALL_DIR/venv"
 # Если передан флаг --install-xray-only, устанавливаем только Xray и выходим
 if [[ "$1" == "--install-xray-only" ]]; then
     echo "Installing Xray-core only..."
-    # Определяем архитектуру
     ARCH=$(uname -m)
     case "$ARCH" in
         x86_64)  XRAY_FILE="Xray-linux-64.zip" ;;
@@ -35,7 +34,6 @@ if [[ "$1" == "--install-xray-only" ]]; then
         armv7l)  XRAY_FILE="Xray-linux-arm32-v7a.zip" ;;
         *)       echo "Unsupported architecture: $ARCH"; exit 1 ;;
     esac
-    # Получаем последнюю версию
     XRAY_VERSION=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep -oP '"tag_name": "\K(.*?)(?=")')
     if [ -z "$XRAY_VERSION" ]; then
         echo "Failed to get latest Xray version"
