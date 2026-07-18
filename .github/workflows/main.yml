@@ -26,6 +26,14 @@ jobs:
           python-version: '3.10'
           cache: 'pip'
 
+      # Конвертируем install.sh в Unix-формат, чтобы избежать ошибок с \r
+      - name: Convert scripts to LF
+        run: |
+          if [ -f "install.sh" ]; then
+            sed -i 's/\r$//' install.sh
+            chmod +x install.sh
+          fi
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -40,7 +48,6 @@ jobs:
         run: |
           mkdir -p configs logs assets bloom_shards
 
-      # Кэшируем SQLite базу данных между запусками
       - name: Cache SQLite database
         uses: actions/cache@v4
         with:
@@ -49,7 +56,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-history-db-
 
-      # Создаём пустые JSON-файлы, которые ещё могут использоваться (location_cache, parsed_cache)
       - name: Ensure required files exist
         run: |
           touch configs/output.txt
@@ -57,33 +63,9 @@ jobs:
           echo '{}' > configs/location_cache.json
           echo '{}' > configs/parsed_cache.json
 
-      # Установка Xray-core (требуется для xray_balancer.py)
       - name: Install Xray-core
         run: |
-          # Если install.sh поддерживает --install-xray-only, используем его
-          if [ -f "install.sh" ]; then
-            bash install.sh --install-xray-only
-          else
-            # Иначе устанавливаем вручную
-            ARCH=$(uname -m)
-            case "$ARCH" in
-              x86_64)  XRAY_FILE="Xray-linux-64.zip" ;;
-              aarch64) XRAY_FILE="Xray-linux-arm64-v8a.zip" ;;
-              armv7l)  XRAY_FILE="Xray-linux-arm32-v7a.zip" ;;
-              *)       echo "Unsupported architecture: $ARCH"; exit 1 ;;
-            esac
-            XRAY_VERSION=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep -oP '"tag_name": "\K(.*?)(?=")')
-            if [ -z "$XRAY_VERSION" ]; then
-              echo "Failed to get latest Xray version"
-              exit 1
-            fi
-            wget -q "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/${XRAY_FILE}" -O /tmp/xray.zip
-            unzip -q -o /tmp/xray.zip -d /tmp/xray
-            chmod +x /tmp/xray/xray
-            sudo mv /tmp/xray/xray /usr/local/bin/
-            rm -rf /tmp/xray /tmp/xray.zip
-          fi
-          xray version 2>&1 | head -1
+          bash install.sh --install-xray-only
 
       - name: Run optimized pipeline
         id: pipeline
@@ -91,7 +73,6 @@ jobs:
         run: |
           time python src/pipeline_optimized.py
 
-      # Удаляем неактивные каналы из custom_channels.txt на основе SQLite
       - name: Remove inactive channels from custom_channels.txt
         run: |
           python -c "
@@ -115,22 +96,18 @@ jobs:
                   return f\"{parsed.scheme}://{netloc}{path}\"
               return url
 
-          # Если базы нет — значит первый запуск, не удаляем ничего
           if not os.path.exists(DB_PATH):
               print('history.db not found, skipping removal (first run)')
               exit(0)
 
-          # Подключаемся к SQLite
           try:
               conn = sqlite3.connect(DB_PATH)
               cursor = conn.cursor()
-              # Проверяем, существует ли таблица channels
               cursor.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND name='channels'\")
               if not cursor.fetchone():
                   print('Table channels not found, skipping removal')
                   conn.close()
                   exit(0)
-              # Получаем неактивные каналы (enabled = 0)
               cursor.execute('SELECT url FROM channels WHERE enabled = 0')
               rows = cursor.fetchall()
               inactive_urls = {normalize_url(row[0]) for row in rows}
@@ -145,14 +122,12 @@ jobs:
 
           print(f'Found {len(inactive_urls)} inactive channels')
 
-          # Читаем custom_channels.txt
           try:
               with open('custom_channels.txt', 'r') as f:
                   lines = f.readlines()
           except FileNotFoundError:
               lines = []
 
-          # Фильтруем
           filtered = []
           removed_count = 0
           for line in lines:
@@ -167,7 +142,6 @@ jobs:
               else:
                   filtered.append(line)
 
-          # Записываем обратно
           with open('custom_channels.txt', 'w') as f:
               for line in filtered:
                   f.write(line + '\n' if line else '\n')
@@ -223,7 +197,6 @@ jobs:
           try:
               conn = sqlite3.connect(DB_PATH)
               cursor = conn.cursor()
-              # Проверяем, есть ли таблица runs
               cursor.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND name='runs'\")
               if not cursor.fetchone():
                   print('  No runs table yet (first run)')
@@ -232,7 +205,6 @@ jobs:
               cursor.execute('SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1')
               row = cursor.fetchone()
               if row:
-                  # row: id, timestamp, total_raw, total_valid, total_final, avg_score, p50_latency, p95_latency, p99_latency, success_rate, protocols, geo_distribution, anomalies
                   cols = ['id', 'timestamp', 'total_raw', 'total_valid', 'total_final', 'avg_score', 'p50_latency', 'p95_latency', 'p99_latency', 'success_rate', 'protocols', 'geo_distribution', 'anomalies']
                   latest = dict(zip(cols, row))
                   print(f'  Latest run: {latest[\"timestamp\"]}')
@@ -241,7 +213,6 @@ jobs:
                   print(f'  P50 latency: {latest[\"p50_latency\"]:.0f}ms')
                   print(f'  P95 latency: {latest[\"p95_latency\"]:.0f}ms')
                   print(f'  P99 latency: {latest[\"p99_latency\"]:.0f}ms')
-                  # Распаковываем protocols (сжатый JSON)
                   protocols = json.loads(latest['protocols']) if latest['protocols'] else {}
                   if protocols:
                       print('  Protocols:')
