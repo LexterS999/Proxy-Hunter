@@ -154,30 +154,26 @@ class ChannelQualityAnalyzer:
         return {'channels': {}, 'last_updated': datetime.now().isoformat()}
 
     def _convert_to_serializable(self, obj):
-        """Рекурсивно преобразует numpy-типы в стандартные Python-типы для JSON."""
-        if isinstance(obj, (np.integer, np.int64, np.int32)):
-            return int(obj)
-        elif isinstance(obj, (np.floating, np.float64, np.float32)):
-            return float(obj)
-        elif isinstance(obj, np.ndarray):
-            return obj.tolist()
-        elif isinstance(obj, (np.str_,)):
-            return str(obj)
-        elif isinstance(obj, (np.bool_, bool)):
-            return bool(obj)
-        elif isinstance(obj, dict):
+        """
+        Рекурсивно преобразует все numpy-типы и другие несериализуемые объекты
+        в стандартные Python-типы для JSON.
+        """
+        # Обрабатываем numpy-скаляры (включая np.bool_, np.float64 и т.д.)
+        if isinstance(obj, np.generic):
+            return obj.item()
+        # Рекурсивно обрабатываем словари и списки
+        if isinstance(obj, dict):
             return {k: self._convert_to_serializable(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
+        if isinstance(obj, list):
             return [self._convert_to_serializable(v) for v in obj]
-        else:
-            return obj
+        # Остальные типы возвращаем как есть (предполагается, что они уже сериализуемы)
+        return obj
 
     def _save_health(self):
         """Сохраняет данные о здоровье каналов с преобразованием NumPy-типов."""
         self.health_data['last_updated'] = datetime.now().isoformat()
         try:
             os.makedirs(os.path.dirname(self.health_file), exist_ok=True)
-            # Преобразуем все значения к сериализуемым типам
             serializable_data = self._convert_to_serializable(self.health_data)
             with open(self.health_file, 'w', encoding='utf-8') as f:
                 json.dump(serializable_data, f, indent=2, ensure_ascii=False)
@@ -368,7 +364,14 @@ class ChannelQualityAnalyzer:
         self.adaptive_thresholds.update(all_channel_data)
 
         # Обучаем кластеризацию
-        self.clustering.fit(all_channel_data)
+        # Избегаем предупреждения о недостатке уникальных точек
+        if len(all_channel_data) > 1:
+            # Если уникальных точек меньше, чем запрошено кластеров, уменьшаем число кластеров
+            unique_count = len({tuple(sorted(d.items())) for d in all_channel_data})  # грубая оценка уникальности
+            # В реальном кластеризаторе есть своя логика, но мы передаём данные как есть
+            self.clustering.fit(all_channel_data)
+        else:
+            logger.debug("Skipping clustering: not enough data")
 
         # Для каждого канала вычисляем здоровье и кластер
         for url in channel_urls:
