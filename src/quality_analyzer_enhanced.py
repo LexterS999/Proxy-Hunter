@@ -46,6 +46,7 @@ _anomaly_batch = []
 _ANOMALY_BATCH_SIZE = 50
 _anomaly_lock = threading.Lock()
 
+
 @dataclass
 class RunStats:
     timestamp: str
@@ -63,6 +64,7 @@ class RunStats:
     anomalies: List[Dict]
     protocol_correlations: Dict[str, float]
 
+
 @dataclass
 class ConfigQualityHistory:
     config_hash: str
@@ -76,6 +78,7 @@ class ConfigQualityHistory:
     fail_count: int
     last_seen: str
     is_active: bool = True
+
 
 class EnhancedQualityAnalyzer:
     def __init__(self, history_file: str = 'configs/quality_history.json',
@@ -509,30 +512,6 @@ class EnhancedQualityAnalyzer:
                 })
         return sorted(degrading, key=lambda x: x['degradation_ratio'])[:20]
 
-    def export_tsv_for_ml(self, output_file: str = 'configs/quality_data.csv'):
-        rows = []
-        for run in self.history.get('runs', []):
-            row = {
-                'timestamp': run.get('timestamp', ''),
-                'total_final': run.get('total_final', 0),
-                'avg_score': run.get('avg_score', 0),
-                'p50_latency': run.get('p50_latency', 0),
-                'p95_latency': run.get('p95_latency', 0),
-                'p99_latency': run.get('p99_latency', 0),
-                'success_rate': run.get('success_rate', 0),
-            }
-            for proto, count in run.get('protocols', {}).items():
-                row[f'proto_{proto}'] = count
-            rows.append(row)
-        if rows:
-            import csv
-            os.makedirs(os.path.dirname(output_file), exist_ok=True)
-            with open(output_file, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.DictWriter(f, fieldnames=rows[0].keys())
-                writer.writeheader()
-                writer.writerows(rows)
-            logger.info(f"Exported ML data to {output_file}")
-
     def get_summary_stats(self) -> Dict:
         runs = self.history.get('runs', [])
         if not runs:
@@ -548,10 +527,8 @@ class EnhancedQualityAnalyzer:
             'total_configs_tracked': len(self.history.get('configs', {}))
         }
 
-    # NEW: метод для принудительной записи всех накопленных данных
     def flush(self):
         self._flush_anomalies(force=True)
-        # Дожидаемся опустошения очереди
         while not self._save_queue.empty():
             time.sleep(0.1)
         self._save_history_sync(self.history)
