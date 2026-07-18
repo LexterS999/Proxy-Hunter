@@ -2,30 +2,65 @@
 Единый пул aiohttp ClientSession для всего приложения.
 Предотвращает создание множества соединений и улучшает переиспользование keep-alive.
 Добавлена блокировка и корректное закрытие старых соединений.
+Добавлен кеш DNS и предварительное разрешение.
 """
 
 import aiohttp
 import asyncio
 import logging
-from typing import Optional
+import socket
+from typing import Optional, Dict, List
+import time
 
 logger = logging.getLogger(__name__)
+
 
 class SessionPool:
     """
     Синглтон для переиспользования одной aiohttp ClientSession.
     Используется в fetch_configs.py и active_checker.py.
+    Добавлен кеш DNS с предварительным разрешением.
     """
 
     _instance = None
     _session: Optional[aiohttp.ClientSession] = None
     _connector: Optional[aiohttp.TCPConnector] = None
     _lock = asyncio.Lock()
+    _dns_cache: Dict[str, List[str]] = {}  # domain -> [ip, ...]
+    _dns_cache_ttl = 300  # секунд
+    _dns_cache_time: Dict[str, float] = {}
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
+
+    async def _resolve_domain(self, domain: str) -> List[str]:
+        """Разрешает домен и кеширует результат."""
+        now = time.time()
+        if domain in self._dns_cache_time and (now - self._dns_cache_time[domain]) < self._dns_cache_ttl:
+            return self._dns_cache.get(domain, [])
+        try:
+            # Используем asyncio.get_event_loop().getaddrinfo для асинхронного резолвинга
+            loop = asyncio.get_event_loop()
+            addrinfo = await loop.getaddrinfo(domain, 443, family=socket.AF_INET, type=socket.SOCK_STREAM)
+            ips = [addr[4][0] for addr in addrinfo]
+            self._dns_cache[domain] = ips
+            self._dns_cache_time[domain] = now
+            logger.debug(f"Resolved {domain} -> {ips}")
+            return ips
+        except Exception as e:
+            logger.warning(f"DNS resolution failed for {domain}: {e}")
+            return []
+
+    async def pre_resolve_domains(self, domains: List[str]):
+        """Предварительно разрешает список доменов асинхронно."""
+        if not domains:
+            return
+        logger.info(f"Pre-resolving {len(domains)} domains...")
+        tasks = [self._resolve_domain(d) for d in domains]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Просто ждём завершения, результаты кешируются
 
     async def get_session(
         self,
@@ -43,12 +78,15 @@ class SessionPool:
                 # Закрываем старые объекты перед созданием новых
                 await self._cleanup_old()
 
+                # Создаём коннектор с разрешённым DNS-кешем
+                resolver = aiohttp.AsyncResolver()
                 self._connector = aiohttp.TCPConnector(
                     limit=connector_limit,
                     limit_per_host=per_host_limit,
                     ttl_dns_cache=300,
                     enable_cleanup_closed=True,
-                    force_close=True  # Явно закрывать соединения
+                    force_close=True,
+                    resolver=resolver
                 )
                 timeout = aiohttp.ClientTimeout(total=timeout_total)
                 default_headers = {
@@ -91,3 +129,5 @@ class SessionPool:
         """Сброс состояния (для тестов)."""
         self._session = None
         self._connector = None
+        self._dns_cache.clear()
+        self._dns_cache_time.clear()
