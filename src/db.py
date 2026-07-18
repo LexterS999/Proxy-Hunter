@@ -20,12 +20,17 @@ COMPRESS_LEVEL = 6  # уровень сжатия zlib
 
 def _compress(data: Any) -> bytes:
     """Сжимает JSON-данные в bytes."""
-    return zlib.compress(json.dumps(data).encode('utf-8'), level=COMPRESS_LEVEL)
+    if data is None:
+        return b''
+    try:
+        return zlib.compress(json.dumps(data).encode('utf-8'), level=COMPRESS_LEVEL)
+    except Exception:
+        return b''
 
 
 def _decompress(blob: bytes) -> Any:
     """Распаковывает bytes в JSON-объект."""
-    if blob is None:
+    if blob is None or not blob:
         return None
     try:
         return json.loads(zlib.decompress(blob).decode('utf-8'))
@@ -72,7 +77,7 @@ class HistoryDB:
                 CREATE TABLE IF NOT EXISTS channels (
                     url TEXT PRIMARY KEY,
                     enabled INTEGER DEFAULT 1,
-                    metrics BLOB,   -- сжатый JSON (total_configs, valid_configs, ...)
+                    metrics BLOB,   -- сжатый JSON
                     last_updated TEXT
                 )
             ''')
@@ -99,6 +104,22 @@ class HistoryDB:
                 CREATE TABLE IF NOT EXISTS metadata (
                     key TEXT PRIMARY KEY,
                     value TEXT
+                )
+            ''')
+            # Таблица истории каналов (channel_history)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS channel_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    url TEXT,
+                    run_id INTEGER,
+                    total_configs INTEGER,
+                    valid_configs INTEGER,
+                    unique_configs INTEGER,
+                    avg_response_time REAL,
+                    overall_score REAL,
+                    protocol_counts BLOB,
+                    timestamp TEXT,
+                    FOREIGN KEY(run_id) REFERENCES runs(id)
                 )
             ''')
             conn.commit()
@@ -285,43 +306,7 @@ class HistoryDB:
             ''', (key, json.dumps(value)))
             conn.commit()
 
-    # ----- Вспомогательные методы для агрегации -----
-    def get_channel_average_score(self, url: str, last_n_runs: int = 5) -> Optional[float]:
-        """Вычисляет средний скор канала за последние N запусков."""
-        # Сначала получаем историю канала из таблицы runs? Для этого нужно хранить связь канал->run.
-        # Пока упрощённо: используем метрики канала, которые обновляются каждый запуск.
-        ch = self.get_channel(url)
-        if not ch:
-            return None
-        metrics = ch.get('metrics', {})
-        # Можно использовать overall_score из метрик, но это только последний запуск.
-        # Для долгосрочной оценки нужно хранить историю скоров в отдельной таблице.
-        # Временно вернём текущий скор.
-        return metrics.get('overall_score', 0.0)
-
-    # Для долгосрочной оценки добавим таблицу channel_history
-    def init_extended_schema(self):
-        """Создаёт дополнительные таблицы для долгосрочной истории каналов."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS channel_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    url TEXT,
-                    run_id INTEGER,
-                    total_configs INTEGER,
-                    valid_configs INTEGER,
-                    unique_configs INTEGER,
-                    avg_response_time REAL,
-                    overall_score REAL,
-                    protocol_counts BLOB,
-                    timestamp TEXT,
-                    FOREIGN KEY(run_id) REFERENCES runs(id)
-                )
-            ''')
-            conn.commit()
-            logger.info("Extended channel history table created.")
-
+    # ----- Методы для истории каналов -----
     def add_channel_history(self, url: str, run_id: int, metrics: Dict):
         """Добавляет запись истории для канала."""
         with self._get_connection() as conn:
@@ -381,6 +366,5 @@ class HistoryDB:
             return sum(scores) / len(scores)
 
 
-# Инициализация расширенной схемы при первом импорте
+# Инициализация БД при первом импорте
 _db = HistoryDB()
-_db.init_extended_schema()
