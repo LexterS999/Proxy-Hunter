@@ -1,122 +1,7 @@
 {
   "channels": [
     {
-      "url": "https://t.me/s/ronaldo13",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/living",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/cloudflare",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/store",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
       "url": "https://t.me/s/wangcai2",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/generalconfiig",
       "enabled": false,
       "metrics": {
         "total_configs": 0,
@@ -162,306 +47,7 @@
       "cluster": 0
     },
     {
-      "url": "https://t.me/s/nexusmods",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/celestara",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/https",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/staticdelivery",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
       "url": "https://t.me/s/marambashi_marambashi_marambashi",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/betty",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/ronaldo15",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/digital",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/sahanwickramasinghevip",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/nodedivice",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/gbos2",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/eventloophub",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/using",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/soskeynets",
       "enabled": false,
       "metrics": {
         "total_configs": 0,
@@ -507,521 +93,15 @@
       "cluster": 0
     },
     {
-      "url": "https://t.me/s/netraidly",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/support",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/speedtestgoogleyahoobingyandexgm",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/gr113",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/sca34",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/5ktelvkeld4",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/ug02nvm1ra4",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/kinode24",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/kinode18",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/secdn13",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/kinonl5",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/serv21",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/rwebstore",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/filter",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/s95358",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/finland",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/de5fra",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/icook",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/isp04",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/libertynet",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/cache",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
-      "url": "https://t.me/s/cloud",
-      "enabled": false,
-      "metrics": {
-        "total_configs": 0,
-        "valid_configs": 0,
-        "unique_configs": 0,
-        "avg_response_time": 0,
-        "last_success": null,
-        "overall_score": 15.0,
-        "protocol_counts": {
-          "wireguard://": 0,
-          "hysteria2://": 0,
-          "vless://": 0,
-          "vmess://": 0,
-          "ss://": 0,
-          "trojan://": 0,
-          "tuic://": 0
-        }
-      },
-      "health_score": 50.0,
-      "cluster": 0
-    },
-    {
       "url": "https://t.me/s/content",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1037,14 +117,14 @@
     },
     {
       "url": "https://t.me/s/origin",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1060,14 +140,14 @@
     },
     {
       "url": "https://t.me/s/edge1",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1083,14 +163,14 @@
     },
     {
       "url": "https://t.me/s/gateway",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1106,14 +186,14 @@
     },
     {
       "url": "https://t.me/s/images",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1129,14 +209,14 @@
     },
     {
       "url": "https://t.me/s/ingest",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1152,14 +232,14 @@
     },
     {
       "url": "https://t.me/s/mirror",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1175,14 +255,14 @@
     },
     {
       "url": "https://t.me/s/static",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1198,14 +278,14 @@
     },
     {
       "url": "https://t.me/s/upload",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1221,14 +301,14 @@
     },
     {
       "url": "https://t.me/s/xnodwx",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1244,14 +324,14 @@
     },
     {
       "url": "https://t.me/s/stats",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1267,14 +347,14 @@
     },
     {
       "url": "https://t.me/s/anydesk",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1290,14 +370,14 @@
     },
     {
       "url": "https://t.me/s/marisa_kristi",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1313,14 +393,14 @@
     },
     {
       "url": "https://t.me/s/sca12",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1336,14 +416,14 @@
     },
     {
       "url": "https://t.me/s/allnets",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1359,14 +439,14 @@
     },
     {
       "url": "https://t.me/s/unitedkingdomvluding",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1382,14 +462,14 @@
     },
     {
       "url": "https://t.me/s/sca38",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1405,14 +485,14 @@
     },
     {
       "url": "https://t.me/s/sca27",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1428,14 +508,14 @@
     },
     {
       "url": "https://t.me/s/server",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1451,14 +531,14 @@
     },
     {
       "url": "https://t.me/s/falkoraz",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1474,14 +554,14 @@
     },
     {
       "url": "https://t.me/s/sca15",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1497,14 +577,14 @@
     },
     {
       "url": "https://t.me/s/alauk",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1520,14 +600,14 @@
     },
     {
       "url": "https://t.me/s/kurdconfig",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1543,14 +623,14 @@
     },
     {
       "url": "https://t.me/s/plkrep",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1566,14 +646,14 @@
     },
     {
       "url": "https://t.me/s/united",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1589,14 +669,14 @@
     },
     {
       "url": "https://t.me/s/shortline",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1612,14 +692,14 @@
     },
     {
       "url": "https://t.me/s/helixgaming",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1635,14 +715,14 @@
     },
     {
       "url": "https://t.me/s/wfjip",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1658,14 +738,14 @@
     },
     {
       "url": "https://t.me/s/britain",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1681,14 +761,14 @@
     },
     {
       "url": "https://t.me/s/mnzxc",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1704,14 +784,14 @@
     },
     {
       "url": "https://t.me/s/sca17",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1727,14 +807,14 @@
     },
     {
       "url": "https://t.me/s/polja",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1750,14 +830,14 @@
     },
     {
       "url": "https://t.me/s/turkish",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1773,14 +853,14 @@
     },
     {
       "url": "https://t.me/s/talianaccentclouding",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1796,14 +876,14 @@
     },
     {
       "url": "https://t.me/s/zephyr",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1819,14 +899,14 @@
     },
     {
       "url": "https://t.me/s/sca31",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1842,14 +922,14 @@
     },
     {
       "url": "https://t.me/s/germanclouding",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1865,14 +945,14 @@
     },
     {
       "url": "https://t.me/s/franceclouding",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1888,14 +968,14 @@
     },
     {
       "url": "https://t.me/s/luemborgclouding",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -1911,14 +991,14 @@
     },
     {
       "url": "https://t.me/s/josni",
-      "enabled": true,
+      "enabled": false,
       "metrics": {
         "total_configs": 0,
         "valid_configs": 0,
         "unique_configs": 0,
         "avg_response_time": 0,
         "last_success": null,
-        "overall_score": 0.0,
+        "overall_score": 15.0,
         "protocol_counts": {
           "wireguard://": 0,
           "hysteria2://": 0,
@@ -25117,6 +24197,29 @@
       "cluster": 0
     },
     {
+      "url": "https://t.me/s/finland",
+      "enabled": true,
+      "metrics": {
+        "total_configs": 0,
+        "valid_configs": 0,
+        "unique_configs": 0,
+        "avg_response_time": 0,
+        "last_success": null,
+        "overall_score": 0.0,
+        "protocol_counts": {
+          "wireguard://": 0,
+          "hysteria2://": 0,
+          "vless://": 0,
+          "vmess://": 0,
+          "ss://": 0,
+          "trojan://": 0,
+          "tuic://": 0
+        }
+      },
+      "health_score": 50.0,
+      "cluster": 0
+    },
+    {
       "url": "https://t.me/s/capital_net",
       "enabled": true,
       "metrics": {
@@ -29718,6 +28821,29 @@
     },
     {
       "url": "https://t.me/s/nexus_v2ray",
+      "enabled": true,
+      "metrics": {
+        "total_configs": 0,
+        "valid_configs": 0,
+        "unique_configs": 0,
+        "avg_response_time": 0,
+        "last_success": null,
+        "overall_score": 0.0,
+        "protocol_counts": {
+          "wireguard://": 0,
+          "hysteria2://": 0,
+          "vless://": 0,
+          "vmess://": 0,
+          "ss://": 0,
+          "trojan://": 0,
+          "tuic://": 0
+        }
+      },
+      "health_score": 50.0,
+      "cluster": 0
+    },
+    {
+      "url": "https://t.me/s/store",
       "enabled": true,
       "metrics": {
         "total_configs": 0,
@@ -59893,5 +59019,5 @@
       "cluster": 0
     }
   ],
-  "last_updated": "2026-07-18T02:40:04.575506"
+  "last_updated": "2026-07-18T02:45:01.190531"
 }
