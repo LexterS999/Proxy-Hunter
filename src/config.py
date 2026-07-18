@@ -117,7 +117,8 @@ class ProxyConfig:
             self._set_specific_count_mode()
 
     def _set_maximum_power_mode(self):
-        max_configs = 10000
+        # Увеличиваем максимальное количество конфигураций для сбора
+        max_configs = 20000  # было 10000
         for protocol in self.SUPPORTED_PROTOCOLS:
             self.SUPPORTED_PROTOCOLS[protocol].update({
                 "min_configs": 1,
