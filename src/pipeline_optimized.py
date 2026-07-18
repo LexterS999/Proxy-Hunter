@@ -31,7 +31,7 @@ from deep_deduplicate import DeepDeduplicator
 from config_quality import ConfigQualityChecker
 from quality_analyzer_enhanced import EnhancedQualityAnalyzer
 from profile_scorer import ProfileScorer
-from rename_configs import ConfigRenamer          # <-- НОВЫЙ ИМПОРТ
+from rename_configs import ConfigRenamer
 from enrich_configs import ConfigEnricher
 from active_checker import ActiveChecker
 from parse_fallback import FallbackParser
@@ -416,8 +416,8 @@ class OptimizedPipeline:
                             item['score'] = min(100, item['score'] + latency_bonus)
                             break
 
-            # Шаг 6: Дедупликация
-            logger.info("🧹 Deep deduplication...")
+            # Шаг 6: Дедупликация (только для новых конфигов)
+            logger.info("🧹 Deep deduplication (new configs)...")
             quality_scores = {item['config']: item['score'] for item in filtered if item['config'] in good_configs}
             deduped = await self.deduplicator.deduplicate_configs_async(good_configs, quality_scores)
             logger.info(f"✅ After dedup: {len(deduped)}")
@@ -426,21 +426,6 @@ class OptimizedPipeline:
                 if self._shutdown_requested:
                     await self.save_state()
                 return False
-
-            # ============= НОВЫЙ БЛОК: Применяем нейминг =============
-            logger.info("🏷️ Applying naming to configs...")
-            renamer = ConfigRenamer(self.location_cache_file)
-            renamed_new = []
-            for idx, cfg in enumerate(deduped, 1):
-                new_cfg = renamer.rename_config(cfg, idx)
-                if new_cfg:
-                    renamed_new.append(new_cfg)
-            logger.info(f"✅ Renamed {len(renamed_new)} configs")
-            deduped = renamed_new  # заменяем для дальнейшего использования
-            if not deduped:
-                logger.warning("All configs were filtered out by naming (blacklist or error).")
-                return False
-            # =======================================================
 
             # Шаг 7: Обогащение геоданными (если нужно)
             logger.info("🌍 Enriching configs with geolocation...")
@@ -475,35 +460,53 @@ class OptimizedPipeline:
             else:
                 logger.info("Location cache found, skipping enrich_configs.")
 
-            # Шаг 8: Объединение с архивом и сохранение результата
-            logger.info("💾 Merging with archive and saving...")
-
-            # Объединяем с архивом (если он не старше 7 дней)
+            # Шаг 8: Объединение с архивом (без нейминга)
+            logger.info("💾 Merging with archive...")
             merged_configs = self._merge_with_archive(deduped)
 
-            # Записываем объединённый список в output_archive.txt
+            # Шаг 9: Применяем нейминг ко ВСЕМ конфигам (и старым, и новым)
+            logger.info("🏷️ Applying naming to ALL configs (archive + new)...")
+            renamer = ConfigRenamer(self.location_cache_file)
+            renamed_all = []
+            for idx, cfg in enumerate(merged_configs, 1):
+                new_cfg = renamer.rename_config(cfg, idx)
+                if new_cfg:
+                    renamed_all.append(new_cfg)
+            logger.info(f"✅ Renamed {len(renamed_all)} configs (out of {len(merged_configs)})")
+
+            # Финальная дедупликация по строке (после переименования)
+            seen = set()
+            final_unique = []
+            for cfg in renamed_all:
+                if cfg not in seen:
+                    seen.add(cfg)
+                    final_unique.append(cfg)
+            logger.info(f"✅ Final unique after renaming: {len(final_unique)}")
+
+            if not final_unique:
+                logger.warning("All configs were filtered out by naming or dedup.")
+                return False
+
+            # Шаг 10: Сохранение результатов
+            logger.info("💾 Saving final outputs...")
             try:
                 with open(self.output_file, 'w', encoding='utf-8') as f:
-                    for cfg in merged_configs:
+                    for cfg in final_unique:
                         f.write(cfg + '\n')
-                logger.info(f"✅ Archive saved: {len(merged_configs)} configs in {self.output_file}")
+                logger.info(f"✅ Archive saved: {len(final_unique)} configs in {self.output_file}")
             except Exception as e:
                 logger.error(f"Failed to write archive: {e}")
                 return False
 
-            # Также сохраняем простой список (текущий набор без дубликатов)
             try:
                 with open(self.simple_file, 'w', encoding='utf-8') as f:
-                    for cfg in deduped:
+                    for cfg in final_unique:
                         f.write(cfg + '\n')
-                logger.info(f"✅ Simple output saved: {len(deduped)} configs in {self.simple_file}")
+                logger.info(f"✅ Simple output saved: {len(final_unique)} configs in {self.simple_file}")
             except Exception as e:
                 logger.error(f"Failed to write simple output: {e}")
 
-            # Шаг 9: Сохранение в Xray-совместимый формат (не обязательно для архива, но оставим)
-            # Этот шаг генерирует xray_loadbalanced_config.json на основе output_archive.txt
-            # Мы можем оставить его, но он будет использовать архивный файл.
-            # Вместо этого можно использовать текущий набор, но оставим как есть.
+            # Шаг 11: Генерация Xray-конфига (опционально)
             logger.info("📦 Generating Xray balanced config...")
             try:
                 from xray_balancer import ConfigToXray
@@ -512,22 +515,21 @@ class OptimizedPipeline:
             except Exception as e:
                 logger.warning(f"Xray balancer failed: {e}")
 
-            # Шаг 10: Обновление статистики запуска в SQLite
+            # Шаг 12: Обновление статистики запуска в SQLite
             logger.info("📊 Updating run statistics in SQLite...")
             final_stats = {
                 'total_raw': len(raw_configs),
                 'total_valid': len(valid_configs),
-                'total_final': len(merged_configs),
+                'total_final': len(final_unique),
                 'avg_score': sum(item['score'] for item in filtered) / len(filtered) if filtered else 0,
                 'protocols': {},
                 'geo_distribution': {},
                 'anomalies': [],
-                'p50_latency': 0,   # можно вычислить из результатов
+                'p50_latency': 0,
                 'p95_latency': 0,
                 'p99_latency': 0,
                 'success_rate': len(good_configs) / len(filtered) if filtered else 0
             }
-            # Обновляем запись о запуске (id = run_id)
             with self.db._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
@@ -564,7 +566,7 @@ class OptimizedPipeline:
             elapsed = time.time() - start_time
             logger.info("=" * 60)
             logger.info(f"✅ Pipeline completed in {elapsed:.2f}s")
-            logger.info(f"📊 Final configs in archive: {len(merged_configs)}")
+            logger.info(f"📊 Final configs in archive: {len(final_unique)}")
             logger.info("=" * 60)
             return True
 
