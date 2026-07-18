@@ -31,7 +31,8 @@ class AdaptiveThresholds:
     def update(self, all_channels: List[Dict]) -> None:
         """
         Пересчитывает пороги на основе распределения всех каналов.
-        Ожидает список словарей с ключами: overall_score, total_configs, valid_configs, config_volatility, score_trend.
+        Ожидает список словарей с ключами: overall_score, total_configs, valid_configs,
+        config_volatility, score_trend.
         """
         if not self._enabled or len(all_channels) < 5:
             logger.debug("Adaptive thresholds disabled or insufficient data")
@@ -56,29 +57,25 @@ class AdaptiveThresholds:
 
         # Обновляем пороги, если данных достаточно
         if len(scores) >= 10:
-            # base_health = 25-й перцентиль * 0.7
-            self.thresholds['base_health'] = max(10.0, np.percentile(scores, 25) * 0.7)
+            # Явно приводим к float, чтобы избежать numpy-типов
+            self.thresholds['base_health'] = float(max(10.0, np.percentile(scores, 25) * 0.7))
 
         if len(configs) >= 10:
-            # min_configs = 10-й перцентиль, но не меньше 2
-            self.thresholds['min_configs'] = max(2, int(np.percentile(configs, 10)))
+            self.thresholds['min_configs'] = int(max(2, np.percentile(configs, 10)))
 
         if len(valid_rates) >= 10:
-            # min_valid_rate = 5-й перцентиль, но не меньше 0.02
-            self.thresholds['min_valid_rate'] = max(0.02, np.percentile(valid_rates, 5))
+            self.thresholds['min_valid_rate'] = float(max(0.02, np.percentile(valid_rates, 5)))
 
         if len(volatilities) >= 10:
-            # max_volatility = 90-й перцентиль
-            self.thresholds['max_volatility'] = min(1.0, np.percentile(volatilities, 90))
+            self.thresholds['max_volatility'] = float(min(1.0, np.percentile(volatilities, 90)))
 
         if len(trends) >= 10:
-            # trend_threshold = 10-й перцентиль (отрицательный тренд)
-            self.thresholds['trend_threshold'] = np.percentile(trends, 10)
+            self.thresholds['trend_threshold'] = float(np.percentile(trends, 10))
 
         logger.info(f"Adaptive thresholds updated: {self.thresholds}")
 
     def get_thresholds(self) -> Dict:
-        """Возвращает текущие пороги."""
+        """Возвращает текущие пороги (все значения — стандартные Python-типы)."""
         return self.thresholds.copy()
 
     def is_enabled(self) -> bool:
