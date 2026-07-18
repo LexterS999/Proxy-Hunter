@@ -118,23 +118,6 @@
     "spx": "",
     "name": "kurdconfig"
   },
-  "ca6beb68644e1b07d29fe4622e43343a": {
-    "uuid": "0e3196ab-b47e-4954-8cce-a78795fffaee",
-    "address": "soskeynets.uptalk.ir",
-    "port": 443,
-    "flow": "",
-    "sni": "www.yahoo.com",
-    "type": "tcp",
-    "path": "",
-    "host": "soskeynets.uptalk.ir",
-    "security": "reality",
-    "alpn": "",
-    "fp": "chrome",
-    "pbk": "HcudvntV0nq4XPA5-PXSCdQuc-L_r0frg-kIK8YNYnE",
-    "sid": "bf43ecce13a0",
-    "spx": "/74xGo2NNUcnJOpG",
-    "name": "\ud83c\udde9\ud83c\uddea114141 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
-  },
   "88ef37125c1217f7ed1172084c76eb08": {
     "uuid": "0e92ca5c-d15f-48b0-adeb-9dc9fe6fc467",
     "address": "104.25.189.214",
@@ -185,6 +168,23 @@
     "sid": "",
     "spx": "",
     "name": "kurdconfig@kurdconfig"
+  },
+  "fd923f73707cccd1a94c9ab7c7d040ea": {
+    "uuid": "13b55e8e-fbea-4ee1-b6b7-115fa3043182",
+    "address": "tur.srv.anti-zapret.com",
+    "port": 443,
+    "flow": "xtls-rprx-vision",
+    "sni": "tur.srv.anti-zapret.com",
+    "type": "tcp",
+    "path": "",
+    "host": "tur.srv.anti-zapret.com",
+    "security": "reality",
+    "alpn": "",
+    "fp": "firefox",
+    "pbk": "0AVsyS7udTbxKRdSyQ2rtFC63icDQOVWq8FvAhhU-WY",
+    "sid": "17faf32cb516c9cb",
+    "spx": "",
+    "name": "\ud83c\uddf9\ud83c\uddf7114327 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
   "6a0ffd8d8ac88e3935478fef3413e750": {
     "uuid": "14400b5d-a218-4ed0-b4a9-d703a3501911",
@@ -288,6 +288,23 @@
     "spx": "",
     "name": "kurdconfig@kurdconfig"
   },
+  "5191819c1ff5198e695df6fbba9fcd42": {
+    "uuid": "179ddf63-c263-40ff-98a1-f53708573059",
+    "address": "188.40.210.8",
+    "port": 1083,
+    "flow": "",
+    "sni": "188.40.210.8",
+    "type": "tcp",
+    "path": "",
+    "host": "188.40.210.8",
+    "security": "none",
+    "alpn": "",
+    "fp": "",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "\ud83c\udde9\ud83c\uddea114326 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
+  },
   "c6c13b57e4995a78ae723c58a02a6a12": {
     "uuid": "1972d7cb-00d8-423e-91db-62f01b2289a6",
     "address": "91.98.202.214",
@@ -304,6 +321,23 @@
     "sid": "",
     "spx": "",
     "name": "kurdconfig"
+  },
+  "5a38218acbdf69582dac063111914760": {
+    "uuid": "1c8536e2-3b3a-49b2-a435-91c35dc98f70",
+    "address": "172.66.211.92",
+    "port": 2053,
+    "flow": "",
+    "sni": "azus.dearhossein-taktaz.ir",
+    "type": "xhttp",
+    "path": "/",
+    "host": "azus.dearhossein-taktaz.ir",
+    "security": "tls",
+    "alpn": "h2,http/1.1",
+    "fp": "chrome",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "@GozargahAzad|#CloudFlare@GozargahAzad"
   },
   "ec729ecee6f5aac3e22f3a690f747c38": {
     "uuid": "1d483092-65d3-464c-8baa-cb1ca5236282",
@@ -356,22 +390,22 @@
     "spx": "",
     "name": "\ud83c\uddf3\ud83c\uddf1114289 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
-  "6af542942931fa6c0f58c2abd9d6993c": {
-    "uuid": "21b93e91-5bb1-4d6d-9093-1fd09ae06903",
-    "address": "172.67.152.71",
-    "port": 8880,
+  "7f23651ec6e9490e191387d5c10e0743": {
+    "uuid": "1fa6d040-dc38-4ce6-ac07-c25f12eda55e",
+    "address": "web-production-a08fd.up.railway.app",
+    "port": 443,
     "flow": "",
-    "sni": "172.67.152.71",
+    "sni": "web-production-a08fd.up.railway.app",
     "type": "ws",
-    "path": "/pyip=ProxyIP.JP.CMLiussss.net",
-    "host": "morning-silence-7b1b.222-46c.workers.dev",
-    "security": "none",
-    "alpn": "",
-    "fp": "",
+    "path": "/ws/1fa6d040-dc38-4ce6-ac07-c25f12eda55e?ed=2048",
+    "host": "web-production-a08fd.up.railway.app",
+    "security": "tls",
+    "alpn": "http/1.1",
+    "fp": "chrome",
     "pbk": "",
     "sid": "",
     "spx": "",
-    "name": "@GozargahAzad|#CloudFlare@GozargahAzad"
+    "name": "\ud83c\uddfa\ud83c\uddf8114337 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
   "288f7cf604bf47ce7841006ed902821d": {
     "uuid": "21b93e91-5bb1-4d6d-9093-1fd09ae06903",
@@ -424,22 +458,22 @@
     "spx": "",
     "name": "kurdconfig@kurdconfig"
   },
-  "456834dee78dfe79369b9cd5780e218c": {
-    "uuid": "2b8738de-1af5-4267-b101-c05707769ed4",
-    "address": "fans.liverpool.qzz.io",
-    "port": 2083,
+  "21f679fb843ab3d0a50ccc502a50f5e0": {
+    "uuid": "2b1fb18c-65c4-4154-9d66-2e0c8c7fc729",
+    "address": "38.54.84.46",
+    "port": 445,
     "flow": "",
-    "sni": "fans.liverpool.qzz.io",
-    "type": "ws",
-    "path": "/eyJqdW5rIjoiY0Y0cENQUmxsNyIsInByb3RvY29sIjoidmwiLCJtb2RlIjoicHJveHlpcCIsInBhbmVsSVBzIjpbXX0=",
-    "host": "fans.liverpool.qzz.io",
-    "security": "tls",
+    "sni": "klingenappentwicklung.com",
+    "type": "tcp",
+    "path": "",
+    "host": "38.54.84.46",
+    "security": "reality",
     "alpn": "",
     "fp": "chrome",
-    "pbk": "",
-    "sid": "",
-    "spx": "",
-    "name": "@GozargahAzad|#CloudFlare@GozargahAzad"
+    "pbk": "OigElWLoU6f5iw1SyTt06B2jCxx8-_cU5mY-RxHhejw",
+    "sid": "6a",
+    "spx": "/",
+    "name": "\ud83c\udde9\ud83c\uddea114321 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
   "781c4e7663601a309c07ea7fb977fbd2": {
     "uuid": "2b8738de-1af5-4267-b101-c05707769ed4",
@@ -492,6 +526,23 @@
     "spx": "",
     "name": "\ud83c\uddfa\ud83c\uddf8114173 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
+  "1efd895af8bd271e46da247fe3252ab6": {
+    "uuid": "319c1270-87da-4fa4-ac4f-e2d5c0353fdc",
+    "address": "206.189.49.128",
+    "port": 37779,
+    "flow": "",
+    "sni": "206.189.49.128",
+    "type": "tcp",
+    "path": "",
+    "host": "206.189.49.128",
+    "security": "none",
+    "alpn": "",
+    "fp": "",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "\ud83c\udde9\ud83c\uddea114320 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
+  },
   "84e6dd4a19e5711e556c356e850bd581": {
     "uuid": "31fb98b7-e7a1-4b56-8c6a-3f060f06393c",
     "address": "141.98.87.48",
@@ -508,6 +559,23 @@
     "sid": "8248954896",
     "spx": "",
     "name": "@Generalconfiig"
+  },
+  "af8f472f264727519e5e90b7002e7623": {
+    "uuid": "367ff772-a8f4-4895-8e99-3702a868f0c6",
+    "address": "soskeynets.ghast.sbs",
+    "port": 443,
+    "flow": "",
+    "sni": "osnl4.ghast.sbs",
+    "type": "grpc",
+    "path": "",
+    "host": "soskeynets.ghast.sbs",
+    "security": "tls",
+    "alpn": "",
+    "fp": "",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "\ud83c\udde9\ud83c\uddea114306 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
   "019c55a3e52272b5d4f29c99bfa20c9d": {
     "uuid": "370bffc1-c80b-4f03-a608-33d6c0a7214e",
@@ -577,23 +645,6 @@
     "spx": "",
     "name": "\ud83c\udde8\ud83c\udde6114286 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
-  "b5e6090c85b6fcab6abb60afa29a00be": {
-    "uuid": "3d8dbbc9-780a-8aa0-55cd-40027d0d8a9c",
-    "address": "x4g-production-3926.up.railway.app",
-    "port": 443,
-    "flow": "",
-    "sni": "x4g-production-3926.up.railway.app",
-    "type": "ws",
-    "path": "/ws/3d8dbbc9-780a-8aa0-55cd-40027d0d8a9c",
-    "host": "x4g-production-3926.up.railway.app",
-    "security": "tls",
-    "alpn": "http/1.1",
-    "fp": "chrome",
-    "pbk": "",
-    "sid": "",
-    "spx": "",
-    "name": "\ud83c\uddfa\ud83c\uddf8114140 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
-  },
   "51e0d84c0ab7a6658789c1ec2a3cc079": {
     "uuid": "3dc3b4ef-c3f6-4ef3-9e03-e0a8fd82b7be",
     "address": "43.165.186.226",
@@ -662,6 +713,23 @@
     "spx": "",
     "name": "kurdconfig"
   },
+  "4e5c5255d8a43f097e60a33f2c2948cb": {
+    "uuid": "4227f293-eb63-4b2a-892f-eec72f718cd0",
+    "address": "23.27.20.142",
+    "port": 48537,
+    "flow": "",
+    "sni": "ke859ch2gse1iery3hiz.e3q4a5mjld11kpj0zj8dq.workers.dev",
+    "type": "ws",
+    "path": "/@Marisa_kristi",
+    "host": "ke859ch2gse1iery3hiz.e3q4a5mjld11kpj0zj8dq.workers.dev",
+    "security": "tls",
+    "alpn": "",
+    "fp": "chrome",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "\ud83c\uddec\ud83c\udde7114308 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
+  },
   "2462794dfbee23addb5f555e419d4be2": {
     "uuid": "44e9daf8-cf7c-1c58-73e3-388968cc6f6d",
     "address": "tel-timazadiiiii-85.up.railway.app",
@@ -679,22 +747,124 @@
     "spx": "",
     "name": "kurdconfig"
   },
-  "8c52fa696d1ed5da0fd72e8d0ad2fa2c": {
-    "uuid": "48ff2b70-e180-582f-8866-d9a2edeed5f5",
-    "address": "15.204.97.216",
-    "port": 23576,
-    "flow": "xtls-rprx-vision",
-    "sni": "fuck.rkn",
-    "type": "tcp",
-    "path": "",
-    "host": "15.204.97.216",
+  "25d76630cdcd45628fb568ffa20163af": {
+    "uuid": "492f2fa0-92d7-48f6-90fc-000c6aea7607",
+    "address": "1.1.1.1",
+    "port": 443,
+    "flow": "",
+    "sni": "af985d4fa38e059d.mygoldiran.com",
+    "type": "ws",
+    "path": "/idea",
+    "host": "1.1.1.1",
+    "security": "tls",
+    "alpn": "",
+    "fp": "",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "\ud83c\udde6\ud83c\uddfa114313 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
+  },
+  "f8959a3981072769ef1b3aaa55f3f3d6": {
+    "uuid": "492f2fa0-92d7-48f6-90fc-000c6aea7607",
+    "address": "d.mygoldiran.com",
+    "port": 443,
+    "flow": "",
+    "sni": "de.mygoldiran.com",
+    "type": "ws",
+    "path": "/idea",
+    "host": "de.mygoldiran.com",
+    "security": "tls",
+    "alpn": "",
+    "fp": "",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "\ud83c\uddfa\ud83c\uddf8114314 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET Join: @soskeynets"
+  },
+  "19739f4c824c236dc21959762de8e4a7": {
+    "uuid": "492f2fa0-92d7-48f6-90fc-000c6aea7607",
+    "address": "d.mygoldiran.com",
+    "port": 8443,
+    "flow": "",
+    "sni": "de1.mygoldiran.com",
+    "type": "xhttp",
+    "path": "/tv/1080",
+    "host": "de1.mygoldiran.com",
+    "security": "tls",
+    "alpn": "",
+    "fp": "",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "\ud83c\uddfa\ud83c\uddf8114315 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
+  },
+  "a45ca856504b97cc0dbf9f882a943f4b": {
+    "uuid": "492f2fa0-92d7-48f6-90fc-000c6aea7607",
+    "address": "ge.mygoldiran.com",
+    "port": 5432,
+    "flow": "",
+    "sni": "www.chess.com",
+    "type": "xhttp",
+    "path": "/api",
+    "host": "ge.mygoldiran.com",
     "security": "reality",
     "alpn": "",
     "fp": "chrome",
-    "pbk": "1y5h2FGWKXTJ9xLPCqPo6Mw7RxoZzh6fGkEQKNxpZ3s",
-    "sid": "01",
+    "pbk": "_QQbh268O1EpZXPabgA33NhR77dM3Lw-VrX-GFpSiHs",
+    "sid": "935092c770a07e8a",
     "spx": "",
-    "name": "\ud83c\uddfa\ud83c\uddf8114120 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
+    "name": "\ud83c\udde9\ud83c\uddea114317 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
+  },
+  "5cee4812e6719a3a66b73e411b5bbb2f": {
+    "uuid": "492f2fa0-92d7-48f6-90fc-000c6aea7607",
+    "address": "one.lite.mygoldiran.com",
+    "port": 5432,
+    "flow": "",
+    "sni": "www.chess.com",
+    "type": "xhttp",
+    "path": "/api",
+    "host": "one.lite.mygoldiran.com",
+    "security": "reality",
+    "alpn": "",
+    "fp": "chrome",
+    "pbk": "_QQbh268O1EpZXPabgA33NhR77dM3Lw-VrX-GFpSiHs",
+    "sid": "935092c770a07e8a",
+    "spx": "",
+    "name": "\ud83c\udf0d114316 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
+  },
+  "c8bc3ed0381a0be6a32a925604478b28": {
+    "uuid": "492f2fa0-92d7-48f6-90fc-000c6aea7607",
+    "address": "tr.mygoldiran.com",
+    "port": 5432,
+    "flow": "",
+    "sni": "www.chess.com",
+    "type": "xhttp",
+    "path": "/api",
+    "host": "tr.mygoldiran.com",
+    "security": "reality",
+    "alpn": "",
+    "fp": "chrome",
+    "pbk": "_QQbh268O1EpZXPabgA33NhR77dM3Lw-VrX-GFpSiHs",
+    "sid": "c884ecceb63910d9",
+    "spx": "",
+    "name": "\ud83c\uddf9\ud83c\uddf7114318 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
+  },
+  "40edb29308f903cc4e4ad802287ba5a7": {
+    "uuid": "49c0ae46-767c-47d1-9703-8740e0c4b15a",
+    "address": "soskeynets-night-edd0.hosein9saleazhuongooyeh87.workers.dev",
+    "port": 443,
+    "flow": "",
+    "sni": "FLAT-night-EDD0.hOsEin9saLEAZhuongOoYeH87.wOrkerS.DeV",
+    "type": "ws",
+    "path": "/eyJqdW5rIjoiZU1pQlVqNTBYVmpTeDlCIiwicHJvdG9jb2wiOiJ2bCIsIm1vZGUiOiJwcmVmaXgiLCJwYW5lbElQcyI6WyJbMjYwMjpmYzU5OmIwOjY0OjpdIl19",
+    "host": "flat-night-edd0.hosein9saleazhuongooyeh87.workers.dev",
+    "security": "tls",
+    "alpn": "http/1.1",
+    "fp": "chrome",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "\ud83c\udde8\ud83c\udde6114310 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
   "17fa290bb86d7f332a475092d4b013d2": {
     "uuid": "4a1441b0-7bc8-4906-85cf-6b59c256b480",
@@ -764,23 +934,6 @@
     "spx": "",
     "name": "kurdconfig"
   },
-  "c1a2eb45aebd0d326bc09835b5a76d1f": {
-    "uuid": "5361a986-91b9-4756-a78c-103261128d83",
-    "address": "141.11.203.193",
-    "port": 2082,
-    "flow": "",
-    "sni": "141.11.203.193",
-    "type": "httpupgrade",
-    "path": "/telegram-AntiFilterCh,telegram-AntiFilterCh,telegram-AntiFilterCh,telegram-AntiFilterCh,telegram-AntiFilterCh,telegram-AntiFilterCh,telegram-AntiFilterCh,telegram-AntiFilterCh,telegram-AntiFilterCh,telegram-AntiFilterCh,telegram-AntiFilterCh,telegram-AntiFilterCh=?ed=2082",
-    "host": "latino2.EduCatION.artgallerynew.pics",
-    "security": "none",
-    "alpn": "",
-    "fp": "",
-    "pbk": "",
-    "sid": "",
-    "spx": "",
-    "name": "\ud83c\udded\ud83c\uddfa114136 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
-  },
   "67a9e903bc18e95a7ad62c6dc831932c": {
     "uuid": "54d91e99-3107-4e16-a342-37c88f294503",
     "address": "hoooossssttt1.sd.noafra.ir",
@@ -797,40 +950,6 @@
     "sid": "",
     "spx": "",
     "name": "kurdconfig"
-  },
-  "c7c0f81f04c1f3b7ebb8d24330d469b3": {
-    "uuid": "54d91e99-3107-4e16-a342-37c88f294503",
-    "address": "soskeynets.sd.noafra.ir",
-    "port": 80,
-    "flow": "",
-    "sni": "soskeynets.sd.noafra.ir",
-    "type": "tcp",
-    "path": "",
-    "host": "play.google.com",
-    "security": "none",
-    "alpn": "",
-    "fp": "",
-    "pbk": "",
-    "sid": "",
-    "spx": "",
-    "name": "\ud83c\udde9\ud83c\uddea114110 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
-  },
-  "4da323556993ac79f3f4afcc7ecdf135": {
-    "uuid": "54f6511e-5ea2-46b8-8475-7adc729ece51",
-    "address": "and-share.ir",
-    "port": 443,
-    "flow": "",
-    "sni": "zeus-panel-cxyca3.zeus-butoun.workers.dev",
-    "type": "ws",
-    "path": "/ZEUS_PANEL_BOT",
-    "host": "zeus-panel-cxyca3.zeus-butoun.workers.dev",
-    "security": "tls",
-    "alpn": "",
-    "fp": "ios",
-    "pbk": "",
-    "sid": "",
-    "spx": "",
-    "name": "\ud83c\udde8\ud83c\udde6114116 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET Join: @soskeynets"
   },
   "5feb14ccf2eaa8c69fb4517a94e6321b": {
     "uuid": "54f6511e-5ea2-46b8-8475-7adc729ece51",
@@ -882,23 +1001,6 @@
     "sid": "",
     "spx": "",
     "name": "\ud83c\udde8\ud83c\udde6114180 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
-  },
-  "6be5d25ab7aa2aacffc94a0fb296f2e3": {
-    "uuid": "574857fc-98ad-4ce4-8b63-ac3dcf9ceecc",
-    "address": "www.speedtest.net",
-    "port": 80,
-    "flow": "",
-    "sni": "www.speedtest.net",
-    "type": "ws",
-    "path": "/@Shh_Proxy----@Shh_Proxy----@Shh_Proxy----@Shh_Proxy----@Shh_Proxy----@Shh_Proxy----@Shh_Proxy----@Shh_Proxy----@Shh_Proxy----@Shh_Proxy----@Shh_Proxy----@Shh_Proxy?ed=2560",
-    "host": "shhproxy.com.www.speedtest.net.www.zula.ir.cloudflare.com.developsp.ir.",
-    "security": "none",
-    "alpn": "",
-    "fp": "",
-    "pbk": "",
-    "sid": "",
-    "spx": "",
-    "name": "\ud83c\udde8\ud83c\udde6114117 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
   "44f7f68cb87727dca81719010a8096c2": {
     "uuid": "582b50fc-1865-43ed-8152-7eaa030e3200",
@@ -1087,40 +1189,6 @@
     "spx": "",
     "name": "\ud83c\udde8\ud83c\udde6114166 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
-  "2aa996b7e0a52d0ea0ca4725163236a5": {
-    "uuid": "64a28ed6-2238-42d9-8452-b83674f741e5",
-    "address": "141.193.213.30",
-    "port": 2053,
-    "flow": "",
-    "sni": "sunny-comet-55.curiocar.com",
-    "type": "ws",
-    "path": "/?ed=2053",
-    "host": "sunny-comet-55.curiocar.com",
-    "security": "tls",
-    "alpn": "h2,http/1.1",
-    "fp": "edge",
-    "pbk": "",
-    "sid": "",
-    "spx": "",
-    "name": "\ud83c\uddfa\ud83c\uddf8114142 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
-  },
-  "78ed0160c8a6815166eec32f198e6344": {
-    "uuid": "65aed3c1-1999-46a1-a3f3-2e5eb119ec64",
-    "address": "172.67.207.26",
-    "port": 8880,
-    "flow": "",
-    "sni": "172.67.207.26",
-    "type": "ws",
-    "path": "/pyip=ProxyIP.KR.CMLiussss.net",
-    "host": "weathered-hat-76a5.380-d00.workers.dev",
-    "security": "none",
-    "alpn": "",
-    "fp": "",
-    "pbk": "",
-    "sid": "",
-    "spx": "",
-    "name": "@GozargahAzad|#CloudFlare@GozargahAzad"
-  },
   "1001c88ac64de0b2c3413ef734de2934": {
     "uuid": "65aed3c1-1999-46a1-a3f3-2e5eb119ec64",
     "address": "172.67.207.26",
@@ -1137,23 +1205,6 @@
     "sid": "",
     "spx": "",
     "name": "\ud83c\udde8\ud83c\udde6114304 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
-  },
-  "1d0ae4c7448515e8d47aa23cb87307aa": {
-    "uuid": "663cf772-829c-4bc6-893d-b7d021d42f5b",
-    "address": "108.162.198.88",
-    "port": 2096,
-    "flow": "",
-    "sni": "vp2.cc.cd",
-    "type": "ws",
-    "path": "/",
-    "host": "vp2.cc.cd",
-    "security": "tls",
-    "alpn": "",
-    "fp": "firefox",
-    "pbk": "",
-    "sid": "",
-    "spx": "",
-    "name": "\ud83c\uddfa\ud83c\uddf8114126 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
   "4afaddea7a919d246cd32f7fb746f392": {
     "uuid": "6bdb5a89-6aae-4032-83d0-425ca4c3c06d",
@@ -1308,6 +1359,23 @@
     "spx": "",
     "name": "kurdconfig"
   },
+  "fd24a5cc805d242309b4bd7221421b07": {
+    "uuid": "71cada65-d23e-418c-88e4-a06188d14689",
+    "address": "it-one.quiet-rogue.site",
+    "port": 443,
+    "flow": "xtls-rprx-vision",
+    "sni": "it-one.quiet-rogue.site",
+    "type": "tcp",
+    "path": "",
+    "host": "it-one.quiet-rogue.site",
+    "security": "reality",
+    "alpn": "",
+    "fp": "",
+    "pbk": "T7cxFOGNMLKqZiEustm2sOfwOovHyHnLcGDWfSmaU1c",
+    "sid": "",
+    "spx": "",
+    "name": "\ud83c\uddee\ud83c\uddf9114311 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
+  },
   "1166d580573df10dcee64b9b8765012f": {
     "uuid": "752a3a41-8430-4dd3-99cc-36b14d3800d6",
     "address": "172.67.212.210",
@@ -1410,22 +1478,22 @@
     "spx": "/o7FjiOktHHvJG7b",
     "name": "\ud83c\uddeb\ud83c\uddee114276 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
-  "8cd9245db75697359fcf109202109c58": {
+  "e373c4057cb8bf3d4115513cfffb8878": {
     "uuid": "7b102311-43fd-4e8f-877e-8090623c101d",
-    "address": "162.159.40.200",
+    "address": "188.164.248.143",
     "port": 2087,
     "flow": "",
-    "sni": "vp31.cc.cd",
+    "sni": "vp24.cc.cd",
     "type": "ws",
     "path": "/",
-    "host": "vp31.cc.cd",
+    "host": "vp24.cc.cd",
     "security": "tls",
     "alpn": "",
-    "fp": "chrome",
+    "fp": "firefox",
     "pbk": "",
     "sid": "",
     "spx": "",
-    "name": "\ud83c\udde8\ud83c\udde6114127 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
+    "name": "\ud83c\uddf3\ud83c\uddf1114307 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
   "9ef150636d27d216a84bd32d88e3af0d": {
     "uuid": "7b102311-43fd-4e8f-877e-8090623c101d",
@@ -1597,6 +1665,23 @@
     "spx": "",
     "name": "\ud83c\uddf3\ud83c\uddf1114259 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
+  "4ff941a224870592450fa3840a4ca656": {
+    "uuid": "86208db7-8bbc-42c2-9eb2-ffe5675502c3",
+    "address": "soskeynets.oneoneok.com",
+    "port": 443,
+    "flow": "",
+    "sni": "static.oneoneok.com",
+    "type": "grpc",
+    "path": "",
+    "host": "soskeynets.oneoneok.com",
+    "security": "reality",
+    "alpn": "",
+    "fp": "firefox",
+    "pbk": "oVbonPGBPZ_qGyhHPe-LwsyPc0oobby2YknsPE90iRo",
+    "sid": "0b46e0908285b078",
+    "spx": "",
+    "name": "\ud83c\uddf8\ud83c\uddea114312 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
+  },
   "8b096cf4c245cb69e12cdb8a364dd03f": {
     "uuid": "86208db7-8bbc-42c2-9eb2-ffe5675502c3",
     "address": "soskeynets.onetimeok.com",
@@ -1733,6 +1818,23 @@
     "spx": "",
     "name": "\ud83c\udde8\ud83c\udde6114201 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
+  "d8e7a4e78fd3bf81f476f29ff2a92094": {
+    "uuid": "8bba3194-4856-46d1-8319-075817d87eb1",
+    "address": "pl4.cyphervpn.pro",
+    "port": 2443,
+    "flow": "xtls-rprx-vision",
+    "sni": "pl4.cyphervpn.pro",
+    "type": "tcp",
+    "path": "",
+    "host": "pl4.cyphervpn.pro",
+    "security": "reality",
+    "alpn": "",
+    "fp": "",
+    "pbk": "USffNprEM08MHiuVy5bj6-kvxugxycuZcgQDFJyz2Wc",
+    "sid": "8f9d033ad6d2cebf",
+    "spx": "",
+    "name": "\ud83c\uddf5\ud83c\uddf1114309 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
+  },
   "1a88b95fbca930df2ea8968a94ee05a3": {
     "uuid": "8ca5cbd3-ec16-4728-bedc-2bc0d82f0922",
     "address": "94.242.55.42",
@@ -1766,6 +1868,23 @@
     "sid": "",
     "spx": "",
     "name": "kurdconfig@kurdconfig"
+  },
+  "63bdc9a7123775547298ccee17f81e11": {
+    "uuid": "8dc7722c-2767-4eea-a28b-2f8daacc07e3",
+    "address": "soskeynets.ip4exordir.shop",
+    "port": 8880,
+    "flow": "",
+    "sni": "soskeynets.ip4exordir.shop",
+    "type": "grpc",
+    "path": "",
+    "host": "soskeynets.ip4exordir.shop",
+    "security": "none",
+    "alpn": "",
+    "fp": "",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "\ud83c\uddfa\ud83c\uddf8114324 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
   "b7680e29ef337503745dbe1ab3766948": {
     "uuid": "8dc7722c-2767-4eea-a28b-2f8daacc07e3",
@@ -1902,6 +2021,40 @@
     "sid": "",
     "spx": "",
     "name": "kurdconfig"
+  },
+  "27afd3194caa827037b1540f1ac677ff": {
+    "uuid": "9a3e9b08-6dbb-40a6-98a0-35bab48f074f",
+    "address": "soskeynets-3311.th3team.ir",
+    "port": 43515,
+    "flow": "",
+    "sni": "soskeynets-3311.th3team.ir",
+    "type": "tcp",
+    "path": "/",
+    "host": "play.google.com",
+    "security": "none",
+    "alpn": "",
+    "fp": "",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "\ud83c\uddfa\ud83c\uddf8114338 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
+  },
+  "d73c195400c3feafb856d05d12cc7297": {
+    "uuid": "9a4516a3-fe98-4167-aa79-959cc0074b64",
+    "address": "ser.coolfrog-bot.ir",
+    "port": 8080,
+    "flow": "",
+    "sni": "ser.coolfrog-bot.ir",
+    "type": "ws",
+    "path": "/steam",
+    "host": "ser.coolfrog-bot.ir",
+    "security": "none",
+    "alpn": "",
+    "fp": "",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "\ud83c\udde8\ud83c\udde6114332 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET Join: @soskeynets"
   },
   "cd706bdc2bbd5663b7e918235513ea02": {
     "uuid": "9d66932d-9eec-47de-972a-e98dee7231c1",
@@ -2260,6 +2413,23 @@
     "spx": "",
     "name": "\ud83c\uddfa\ud83c\uddf8114223 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
+  "821ab2172d69c3720069ec7a270a385e": {
+    "uuid": "b68b7ecc-5fd6-47fe-8aa1-0d87fc588b36",
+    "address": "www.speedtest.net",
+    "port": 2082,
+    "flow": "",
+    "sni": "www.speedtest.net",
+    "type": "ws",
+    "path": "/Join--ACADEMI_VPN--Join--ACADEMI_VPN--Join--ACADEMI_VPN--Join--ACADEMI_VPN--Join--ACADEMI_VPN--Join--ACADEMI_VPN--Join--ACADEMI_VPN--Join--ACADEMI_VPN--Join--ACADEMI_VPN--Join--ACADEMI_VPN--Join--ACADEMI_VPN--Join--ACADEMI_VPN--Join--ACADEMI_VPN--?ed=1024",
+    "host": "academi-82.com.www.speedtest.net.www.zula.ir.cloudflare.com.AcademiGroup.IR.",
+    "security": "none",
+    "alpn": "",
+    "fp": "",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "\ud83c\udde8\ud83c\udde6114341 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET Join: @soskeynets"
+  },
   "0cb7468a614ddbb9ec993ccf23a9143d": {
     "uuid": "b82d817a-431e-4c4b-93b7-a924256db74e",
     "address": "al1.vipsite2.top",
@@ -2276,6 +2446,23 @@
     "sid": "",
     "spx": "",
     "name": "kurdconfig"
+  },
+  "426d4b3b00b9237037dbcf6d3d3d24ce": {
+    "uuid": "bcb02430-4f92-4b7d-b461-9de75966ccf6",
+    "address": "ser.coolfrog-bot.ir",
+    "port": 8080,
+    "flow": "",
+    "sni": "ser.coolfrog-bot.ir",
+    "type": "ws",
+    "path": "/steam",
+    "host": "ser.coolfrog-bot.ir",
+    "security": "none",
+    "alpn": "",
+    "fp": "",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "@GozargahAzad|#CloudFlare@GozargahAzad"
   },
   "28bd679bb08cf7fd739ed5dee359dd42": {
     "uuid": "c09d7f00-bac6-4b26-af83-cab341e089aa",
@@ -2310,40 +2497,6 @@
     "sid": "",
     "spx": "",
     "name": "\ud83c\uddeb\ud83c\uddee114189 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
-  },
-  "d5c0d5c6170ee08c9e5776ffe174ce7c": {
-    "uuid": "c578ddf7-ae2b-4a6f-b7f7-a2e8bb82e2bc",
-    "address": "103.160.204.239",
-    "port": 443,
-    "flow": "",
-    "sni": "site.iotdev3.workers.dev",
-    "type": "ws",
-    "path": "/",
-    "host": "site.iotdev3.workers.dev",
-    "security": "tls",
-    "alpn": "",
-    "fp": "qq",
-    "pbk": "",
-    "sid": "",
-    "spx": "",
-    "name": "\ud83c\udded\ud83c\uddf0114129 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
-  },
-  "58deb2aa77de87eaf1106b166de42c88": {
-    "uuid": "c578ddf7-ae2b-4a6f-b7f7-a2e8bb82e2bc",
-    "address": "91.193.58.201",
-    "port": 443,
-    "flow": "",
-    "sni": "site.iotdev4.workers.dev",
-    "type": "ws",
-    "path": "/",
-    "host": "site.iotdev4.workers.dev",
-    "security": "tls",
-    "alpn": "",
-    "fp": "",
-    "pbk": "",
-    "sid": "",
-    "spx": "",
-    "name": "\ud83c\uddec\ud83c\udde7114130 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
   "64cef0770a90e41ab48243fe01d184ee": {
     "uuid": "c8b5f6c9-83ff-4ca1-be9c-f997a5b2f692",
@@ -2566,23 +2719,6 @@
     "spx": "",
     "name": "\ud83c\udde8\ud83c\udde6114167 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
-  "94a9174ea96e2ab3f0a11070af19c55a": {
-    "uuid": "d7870f16-1c35-445f-9ff9-36f052895b34",
-    "address": "a2.jobwebs.ir",
-    "port": 50567,
-    "flow": "xtls-rprx-vision",
-    "sni": "play.google.com",
-    "type": "tcp",
-    "path": "",
-    "host": "a2.jobwebs.ir",
-    "security": "reality",
-    "alpn": "",
-    "fp": "firefox",
-    "pbk": "NpgXDQ6jl_HGPdHAHFeiBl5Ym7bywxmw_EYovmFjVQs",
-    "sid": "184a6838386d384e",
-    "spx": "",
-    "name": "\ud83c\udde9\ud83c\uddea114114 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
-  },
   "f205b9138478e6c7aa3bd8684d9dbea2": {
     "uuid": "d7870f16-1c35-445f-9ff9-36f052895b34",
     "address": "a2.jobwebs.ir",
@@ -2667,23 +2803,6 @@
     "sid": "3dc10c875cf37011",
     "spx": "/PuLaVPN/PuLaVPN/PuLaVPN//PuLaVPN/PuLaVPN/PuLaVPN/PuLaVPN//PuLaVPN/PuLaVPN/PuLaVPN/PuLaVPN//PuLaVPN/PuLaVPN/PuLaVPN/PuLaVPN//PuLaVPN/PuLaVPN/PuLaVPN/PuLaVPN//PuLaVPN/PuLaVPN/PuLaVPN/PuLaVPN//PuLaVPN",
     "name": "kurdconfig"
-  },
-  "6abc59e9e848c2c661f2f385ec08e992": {
-    "uuid": "e2609ee9-08f6-45b2-8eed-8889a799945f",
-    "address": "soskeynets.iranidrive.ir",
-    "port": 2092,
-    "flow": "",
-    "sni": "www.yahoo.com",
-    "type": "tcp",
-    "path": "",
-    "host": "zula.ir",
-    "security": "reality",
-    "alpn": "",
-    "fp": "chrome",
-    "pbk": "7UbUiwU9tjzhwCuEDqIXlF4zU8V7Gn-SkEcwcBqgNDU",
-    "sid": "4e",
-    "spx": "/DFm1fdkZikXIQ1r",
-    "name": "\ud83c\uddf3\ud83c\uddf1114125 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET Join: @soskeynets"
   },
   "676d7ca7eeb137a476ef2a41750c7c72": {
     "uuid": "e4514801-0d5a-42ba-869f-39bd605aef9e",
@@ -2803,6 +2922,23 @@
     "sid": "",
     "spx": "",
     "name": "\ud83c\udde8\ud83c\udde6114185 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
+  },
+  "2a2e0a3d9bc92b30f4dc7074c94a066e": {
+    "uuid": "eac1ba64-1254-4b81-9cc3-8d95b4510f50",
+    "address": "75.119.151.16",
+    "port": 80,
+    "flow": "",
+    "sni": "75.119.151.16",
+    "type": "xhttp",
+    "path": "/?ed=2048",
+    "host": "de.samanehha.io",
+    "security": "none",
+    "alpn": "",
+    "fp": "",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "\ud83c\uddeb\ud83c\uddf7114322 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
   "8398db832a144b3a02fa8d97a91a4fbf": {
     "uuid": "ecad47b0-249e-0014-adff-e3c8f02b1897",
@@ -3161,6 +3297,20 @@
     "spx": "",
     "name": "\ud83c\udde8\ud83c\udde6114253 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
+  "232fb760e327fe5640804a34e08e9c88": {
+    "password": "0cc6b4268dea0ba8",
+    "address": "5.44.249.53",
+    "port": 3306,
+    "sni": "n2.gladns.com",
+    "alpn": "",
+    "type": "ws",
+    "path": "/gateway/connect",
+    "host": "TG.WangCai_1",
+    "security": "tls",
+    "fp": "",
+    "flow": "",
+    "name": "@GozargahAzad|\ud83c\uddf8\ud83c\uddec#Singapore\ud83c\uddf8\ud83c\uddec@GozargahAzad"
+  },
   "0bdae181ea5c1c0cb8124290c43dc1b9": {
     "password": "257d8622-6701-4c98-a432-67a9696f58ae",
     "address": "172.67.218.196",
@@ -3217,6 +3367,20 @@
     "flow": "",
     "name": "\ud83c\udde9\ud83c\uddea114184 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
+  "6d3679a154f91e2a87c879929e7598d5": {
+    "password": "Htbm5NChh4",
+    "address": "136.244.101.16",
+    "port": 22328,
+    "sni": "ne.atrinshops.ir",
+    "alpn": "",
+    "type": "tcp",
+    "path": "",
+    "host": "136.244.101.16",
+    "security": "tls",
+    "fp": "",
+    "flow": "",
+    "name": "@GozargahAzad|\ud83c\uddf3\ud83c\uddf1#TheNetherlands\ud83c\uddf3\ud83c\uddf1@GozargahAzad"
+  },
   "9ef4dd3a44e56f016efd7ea836e9fa6d": {
     "password": "KV63147582",
     "address": "3.76.41.23",
@@ -3259,20 +3423,6 @@
     "flow": "",
     "name": "kurdconfig"
   },
-  "2e4d24e5a55ea2649a7ff8b7e1d97efa": {
-    "password": "MITIVPN",
-    "address": "162.159.8.101",
-    "port": 443,
-    "sni": "UsAa-bUs.App-Cloud.ir",
-    "alpn": "http/1.1",
-    "type": "ws",
-    "path": "/---@MiTiVPN/---@MiTiVPN/---@MiTiVPN/---@MiTiVPN/---@MiTiVPN=USSA",
-    "host": "my-usa-ol.App-Cloud.ir",
-    "security": "tls",
-    "fp": "chrome",
-    "flow": "",
-    "name": "\ud83c\udde8\ud83c\udde6114111 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
-  },
   "35b91b310382a2ec24f5795988399962": {
     "password": "MITIVPN",
     "address": "162.159.8.101",
@@ -3287,19 +3437,19 @@
     "flow": "",
     "name": "kurdconfig"
   },
-  "e94679bcdc05a3d8f29f0b3c8c1a82b0": {
-    "password": "MiTiVPN",
-    "address": "104.21.55.230",
+  "b3e30a70a6aa82b84445f8608ec48242": {
+    "password": "MITIVPN",
+    "address": "188.114.97.6",
     "port": 443,
-    "sni": "wbjj-bbcs-.App-Cloud.ir",
+    "sni": "9bvv292-28bv3v-3j82vvb-jkk282-8bvc2.App-ClouD.Ir",
     "alpn": "http/1.1",
     "type": "ws",
-    "path": "/---@MiTiVPN/---@MiTiVPN/---@MiTiVPN/---@MiTiVPN/---@MiTiVPN=SS-w",
-    "host": "bw--ivs-b--vvs.App-Cloud.ir",
+    "path": "/---@MiTiVPN/---@MiTiVPN/---@MiTiVPN/---@MiTiVPN/---@MiTiVPN=win---usa",
+    "host": "8jidkdj282-2ododvb-28.App-ClouD.Ir",
     "security": "tls",
     "fp": "chrome",
     "flow": "",
-    "name": "\ud83c\udde8\ud83c\udde6114112 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
+    "name": "@GozargahAzad|#CloudFlare@GozargahAzad"
   },
   "6c988639673a01d718e39079dc99d587": {
     "password": "MiTiVPN",
@@ -3343,20 +3493,6 @@
     "flow": "",
     "name": "kurdconfig"
   },
-  "0005844c41924d6d57e3d3e885116f09": {
-    "password": "MiTiVPN",
-    "address": "162.159.38.200",
-    "port": 443,
-    "sni": "fl-o--7-flla.App-Cloud.ir",
-    "alpn": "http/1.1",
-    "type": "ws",
-    "path": "/---@MiTiVPN/---@MiTiVPN/---@MiTiVPN/---@MiTiVPN/---@MiTiVPN=fLL",
-    "host": "f--ls-Fl.App-Cloud.ir",
-    "security": "tls",
-    "fp": "chrome",
-    "flow": "",
-    "name": "\ud83c\uddfa\ud83c\uddf8114109 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
-  },
   "ec8a431124845838d368ee00c13f3382": {
     "password": "MiTiVPN",
     "address": "162.159.38.200",
@@ -3384,20 +3520,6 @@
     "fp": "chrome",
     "flow": "",
     "name": "kurdconfig@kurdconfig"
-  },
-  "53413d00ae1822fd399b7ddea8e5c2b8": {
-    "password": "NQ26071394",
-    "address": "powerful-squid.rooster465.autos",
-    "port": 443,
-    "sni": "powerful-squid.rooster465.autos",
-    "alpn": "",
-    "type": "tcp",
-    "path": "",
-    "host": "powerful-squid.rooster465.autos",
-    "security": "tls",
-    "fp": "chrome",
-    "flow": "",
-    "name": "@GozargahAzad|\ud83c\uddf3\ud83c\uddf1#TheNetherlands\ud83c\uddf3\ud83c\uddf1@GozargahAzad"
   },
   "1cd2cca29f82b5b6860605c3411ba0cc": {
     "password": "NQ26071394",
@@ -3497,23 +3619,23 @@
     "flow": "",
     "name": "\ud83c\udde8\ud83c\uddf3114153 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
-  "03b5c0080602cc91e62b5030744d52fe": {
+  "943f90c37eb63d09f4d198d1e8c0b06b": {
     "password": "humanity",
-    "address": "104.17.111.8",
+    "address": "104.18.32.47",
     "port": 443,
-    "sni": "www.ignitelimit.com",
+    "sni": "www.calmlunch.com",
     "alpn": "",
     "type": "ws",
     "path": "/assignment",
-    "host": "www.ignitelimit.com",
+    "host": "104.18.32.47",
     "security": "tls",
     "fp": "chrome",
     "flow": "",
-    "name": "\ud83c\udde8\ud83c\udde6114143 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET Join: @soskeynets"
+    "name": "\ud83c\udde8\ud83c\udde6114331 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
-  "4bf05834d3ccbfc5086ddbf697b617b2": {
+  "b8bcb873c909a6c208c18bc33d8f9c51": {
     "password": "humanity",
-    "address": "162.159.38.119",
+    "address": "104.21.40.34",
     "port": 443,
     "sni": "www.gossipglove.com",
     "alpn": "",
@@ -3523,7 +3645,7 @@
     "security": "tls",
     "fp": "",
     "flow": "",
-    "name": "\ud83c\uddfa\ud83c\uddf8114139 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
+    "name": "\ud83c\udde8\ud83c\udde6114330 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
   "11ab39b5277c61a242eede74dd1f4c75": {
     "password": "humanity",
@@ -3538,6 +3660,20 @@
     "fp": "",
     "flow": "",
     "name": "kurdconfig"
+  },
+  "351527b3758c5d7e0ac52a2990995858": {
+    "password": "humanity",
+    "address": "172.64.152.23",
+    "port": 443,
+    "sni": "www.gossipglove.com",
+    "alpn": "",
+    "type": "ws",
+    "path": "/assignment",
+    "host": "www.gossipglove.com",
+    "security": "tls",
+    "fp": "chrome",
+    "flow": "",
+    "name": "\ud83c\udde8\ud83c\udde6114328 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
   "1879714a1513d4cf07b98e94eb294cd8": {
     "password": "humanity",
@@ -3609,20 +3745,6 @@
     "flow": "",
     "name": "kurdconfig"
   },
-  "a2d7c423303b2e1de6cab5d96bed90b2": {
-    "password": "telegram-id-directvpn",
-    "address": "13.60.133.253",
-    "port": 22222,
-    "sni": "trojan.burgerip.co.uk",
-    "alpn": "http/1.1",
-    "type": "tcp",
-    "path": "",
-    "host": "13.60.133.253",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "@GozargahAzad|\ud83c\uddf8\ud83c\uddea#Sweden\ud83c\uddf8\ud83c\uddea@GozargahAzad"
-  },
   "ee7c819f4c74ccd55ced5d1b5928e41e": {
     "password": "telegram-id-directvpn",
     "address": "13.60.133.253",
@@ -3636,20 +3758,6 @@
     "fp": "",
     "flow": "",
     "name": "\ud83c\uddf8\ud83c\uddea114299 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
-  },
-  "dcf32960562353ba58cca9831d65ae21": {
-    "password": "telegram-id-directvpn",
-    "address": "34.235.217.220",
-    "port": 22222,
-    "sni": "trojan.burgerip.co.uk",
-    "alpn": "",
-    "type": "tcp",
-    "path": "",
-    "host": "34.235.217.220",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "\ud83c\uddfa\ud83c\uddf8114121 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
   "276d4a0aaad4d68b4376275b5f9d33ec": {
     "password": "telegram-id-directvpn",
@@ -3665,19 +3773,19 @@
     "flow": "",
     "name": "\ud83c\udde9\ud83c\uddea114214 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
-  "18e205b289b72da6849419f9e909c81f": {
+  "2b7ade688dcf641c1e0355687828e5d5": {
     "password": "telegram-id-privatevpns",
-    "address": "35.179.199.133",
+    "address": "13.41.235.27",
     "port": 22222,
     "sni": "trojan.burgerip.co.uk",
-    "alpn": "http/1.1",
+    "alpn": "",
     "type": "tcp",
     "path": "",
-    "host": "35.179.199.133",
+    "host": "13.41.235.27",
     "security": "tls",
     "fp": "",
     "flow": "",
-    "name": "\ud83c\uddec\ud83c\udde7114137 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
+    "name": "@GozargahAzad|\ud83c\uddec\ud83c\udde7#UnitedKingdom\ud83c\uddec\ud83c\udde7@GozargahAzad"
   },
   "5898cb07e42f1b1542631c8b9a9a509b": {
     "password": "tg-dns68",
@@ -3707,6 +3815,19 @@
     "flow": "",
     "name": "\ud83c\udde8\ud83c\udde6114293 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
-  "8ebd97ac25d1bc4f5c1e674a28d235cf": null,
-  "b67916cc5b45ab6e13df5c7b62f9ff24": null
+  "d914ec88bb993e447c2e43e717b2b91c": {
+    "password": "tg-dns68",
+    "address": "162.159.153.87",
+    "port": 443,
+    "sni": "vip.putata.eu.org",
+    "alpn": "",
+    "type": "ws",
+    "path": "/?ed=2560",
+    "host": "vip.putata.eu.org",
+    "security": "tls",
+    "fp": "",
+    "flow": "",
+    "name": "@GozargahAzad|#CloudFlare@GozargahAzad"
+  },
+  "8ebd97ac25d1bc4f5c1e674a28d235cf": null
 }
