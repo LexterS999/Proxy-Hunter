@@ -145,7 +145,6 @@ _whitelist_raw = os.getenv('PROXY_HUNTER_CHANNEL_WHITELIST', '')
 CHANNEL_WHITELIST = [url.strip() for url in _whitelist_raw.split(',') if url.strip()]
 
 # === НОВЫЕ НАСТРОЙКИ ДЛЯ РАСШИРЕННОГО АНАЛИЗА ===
-# Пороги для адаптивной системы
 ADAPTIVE_THRESHOLDS_ENABLED = get_safe_env('PROXY_HUNTER_ADAPTIVE_THRESHOLDS', 'True', value_type=bool)
 HEALTH_CLASSIFIER_ENABLED = get_safe_env('PROXY_HUNTER_HEALTH_CLASSIFIER', 'True', value_type=bool)
 LIFETIME_PREDICTOR_ENABLED = get_safe_env('PROXY_HUNTER_LIFETIME_PREDICTOR', 'True', value_type=bool)
@@ -168,3 +167,13 @@ AB_TEST_INTERVAL = 5  # циклов
 # Пороги для кластеров
 CLUSTER_COUNT = 4
 CLUSTER_FEATURES = ['total_configs', 'overall_score', 'success_rate', 'config_volatility']
+
+# === Настройки для кеширования активной проверки ===
+ACTIVE_CHECK_CACHE_TTL = 900  # 15 минут
+ACTIVE_CHECK_CACHE_DB = 'active_check_cache.db'
+
+# === Настройки для Bloom-фильтра ===
+BLOOM_SAVE_THRESHOLD = 1000  # сохранять после каждых 1000 добавлений
+
+# === Настройки для асинхронной записи ===
+ASYNC_WRITE_ENABLED = get_safe_env('PROXY_HUNTER_ASYNC_WRITE', 'True', value_type=bool)
