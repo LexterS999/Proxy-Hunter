@@ -33,23 +33,29 @@ class ChannelClustering:
         Обучает модель кластеризации на исторических данных каналов.
         Ожидает список словарей с ключами, перечисленными в CLUSTER_FEATURES.
         """
-        if not self._enabled or len(channels_data) < self.n_clusters:
-            logger.debug("Clustering disabled or insufficient data")
+        if not self._enabled or len(channels_data) < 2:
+            logger.debug("Clustering disabled or insufficient data (need at least 2 samples)")
             return
 
         features = self._extract_features(channels_data)
-        if features is None or len(features) < self.n_clusters:
+        if features is None or len(features) < 2:
             logger.warning("Not enough valid data for clustering")
             return
 
+        # Определяем фактическое число кластеров, не превышающее количество образцов
+        n_samples = len(features)
+        actual_clusters = min(self.n_clusters, n_samples)
+        if actual_clusters < 1:
+            actual_clusters = 1
+
         scaled = self.scaler.fit_transform(features)
-        self.kmeans = KMeans(n_clusters=self.n_clusters, random_state=self.random_state, n_init=10)
+        self.kmeans = KMeans(n_clusters=actual_clusters, random_state=self.random_state, n_init=10)
         self.kmeans.fit(scaled)
         self._fitted = True
 
         # Строим профили кластеров
         labels = self.kmeans.labels_
-        for i in range(self.n_clusters):
+        for i in range(actual_clusters):
             mask = labels == i
             cluster_indices = [j for j, m in enumerate(mask) if m]
             if not cluster_indices:
@@ -60,7 +66,7 @@ class ChannelClustering:
             profile['name'] = self._name_cluster(profile)
             self.cluster_profiles[i] = profile
 
-        logger.info(f"Clustering completed: {len(self.cluster_profiles)} clusters")
+        logger.info(f"Clustering completed: {len(self.cluster_profiles)} clusters (requested {self.n_clusters})")
 
     def predict(self, channel_data: Dict) -> int:
         """
@@ -76,7 +82,7 @@ class ChannelClustering:
 
         scaled = self.scaler.transform(features)
         cluster_id = self.kmeans.predict(scaled)[0]
-        return cluster_id
+        return int(cluster_id)  # гарантируем int, а не numpy.int64
 
     def get_cluster_profile(self, cluster_id: int) -> Dict:
         """Возвращает профиль кластера."""
