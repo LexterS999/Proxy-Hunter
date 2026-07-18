@@ -9,6 +9,7 @@
 - Старение (упрощённое)
 - Дополнительные факторы: страна, ASN, датацентр, privacy-флаги
 - Добавлен fallback через внешний API (ipinfo.io) с кешированием
+- Теперь использует SQLite для хранения профилей (db.py)
 """
 
 import json
@@ -16,47 +17,22 @@ import os
 import logging
 import numpy as np
 import requests
+import asyncio
 from typing import Dict, Optional, Tuple, List
 from datetime import datetime, timedelta
 
 from geo_loader import GeoLoader
 from user_settings import GEO_COUNTRY_URL, GEO_ASN_URL, SCORE_WEIGHTS, DECAY_PERIOD_HOURS
+from db import HistoryDB
 
 logger = logging.getLogger(__name__)
 
 class ProfileScorer:
-    def __init__(self, history_file: str = 'configs/quality_history.json'):
-        self.history_file = history_file
-        self.history = self._load_history()
+    def __init__(self):
+        self.db = HistoryDB()  # Используем SQLite вместо JSON
         self.geo = GeoLoader(GEO_COUNTRY_URL, GEO_ASN_URL)
         self._server_type_cache = {}  # Кеш для fallback-запросов
-
-    def _load_history(self) -> Dict:
-        if os.path.exists(self.history_file):
-            try:
-                with open(self.history_file, 'r') as f:
-                    data = json.load(f)
-                    if 'profiles' not in data:
-                        data['profiles'] = {}
-                    if 'runs' not in data:
-                        data['runs'] = []
-                    if 'thresholds' not in data:
-                        data['thresholds'] = {}
-                    return data
-            except Exception as e:
-                logger.warning(f"Failed to load history, creating new: {e}")
-        return {
-            'profiles': {},
-            'runs': [],
-            'thresholds': {}
-        }
-
-    def _save_history(self):
-        try:
-            with open(self.history_file, 'w') as f:
-                json.dump(self.history, f, indent=2)
-        except Exception as e:
-            logger.error(f"Failed to save history: {e}")
+        # Загружаем существующие профили из БД при инициализации (опционально)
 
     def get_profile_key(self, config: str, parsed: Dict) -> str:
         protocol = config.split('://')[0].lower()
@@ -78,21 +54,41 @@ class ProfileScorer:
                                success: bool, latency: float = 0):
         key = self.get_profile_key(config, parsed)
         now = datetime.now().isoformat()
-        if key not in self.history['profiles']:
-            self.history['profiles'][key] = {
+
+        # Получаем существующий профиль из БД
+        profile = self.db.get_profile(key)
+        if not profile:
+            profile = {
+                'key': key,
+                'server': parsed.get('address') or parsed.get('add') or parsed.get('host'),
+                'protocol': config.split('://')[0].lower(),
                 'first_seen': now,
                 'last_seen': now,
                 'success_count': 0,
                 'fail_count': 0,
                 'latencies': [],
-                'scores': [],
                 'timestamps': [],
                 'is_active': True,
-                'server': parsed.get('address') or parsed.get('add') or parsed.get('host'),
-                'protocol': config.split('://')[0].lower()
+                'stability': 0.0,
+                'lifetime': 0.0,
+                'overall_score': 0.0
             }
-        profile = self.history['profiles'][key]
-        profile['last_seen'] = now
+        else:
+            # Преобразуем поля (latencies, timestamps) из bytes в list, если нужно
+            if isinstance(profile.get('latencies'), bytes):
+                import zlib
+                try:
+                    profile['latencies'] = json.loads(zlib.decompress(profile['latencies']).decode())
+                except:
+                    profile['latencies'] = []
+            if isinstance(profile.get('timestamps'), bytes):
+                try:
+                    profile['timestamps'] = json.loads(zlib.decompress(profile['timestamps']).decode())
+                except:
+                    profile['timestamps'] = []
+            profile['last_seen'] = now
+
+        # Обновляем счётчики
         if success:
             profile['success_count'] += 1
         else:
@@ -100,12 +96,20 @@ class ProfileScorer:
         if latency > 0:
             profile['latencies'].append(latency)
         profile['timestamps'].append(now)
+
+        # Ограничиваем историю
         max_history = 100
         if len(profile['latencies']) > max_history:
             profile['latencies'] = profile['latencies'][-max_history:]
         if len(profile['timestamps']) > max_history:
             profile['timestamps'] = profile['timestamps'][-max_history:]
-        self._save_history()
+
+        # Пересчитываем стабильность и lifetime (можно делать при каждом обновлении)
+        profile['stability'] = self.calculate_stability(profile)
+        profile['lifetime'] = self.calculate_lifetime_prediction(profile)
+
+        # Сохраняем в БД
+        self.db.update_profile(key, profile)
 
     def calculate_stability(self, profile: Dict) -> float:
         latencies = profile.get('latencies', [])
@@ -171,14 +175,16 @@ class ProfileScorer:
         return max(0, min(1, round(score, 2)))
 
     def get_server_type(self, server_ip: str) -> Tuple[bool, str]:
-        """Определяет, является ли сервер датацентром, с использованием локальной базы и fallback."""
+        """
+        Определяет, является ли сервер датацентром, с использованием локальной базы.
+        fallback к ipinfo.io теперь асинхронный (но для простоты оставим синхронный с малым таймаутом,
+        т.к. вызывается редко).
+        """
         if not server_ip:
             return False, 'UNK'
-        # Проверяем кеш
         if server_ip in self._server_type_cache:
             return self._server_type_cache[server_ip]
 
-        # 1. Пробуем локальный GeoLoader
         self.geo.ensure_databases()
         is_dc = self.geo.is_datacenter(server_ip)
         if is_dc:
@@ -186,9 +192,9 @@ class ProfileScorer:
             self._server_type_cache[server_ip] = result
             return result
 
-        # 2. Fallback: запрос к ipinfo.io (синхронный, с таймаутом)
+        # fallback: синхронный запрос к ipinfo.io с таймаутом 3 сек
         try:
-            response = requests.get(f"https://ipinfo.io/{server_ip}/json", timeout=5)
+            response = requests.get(f"https://ipinfo.io/{server_ip}/json", timeout=3)
             if response.status_code == 200:
                 data = response.json()
                 org = data.get('org', '')
@@ -204,12 +210,6 @@ class ProfileScorer:
         return result
 
     def get_reputation_score(self, server_ip: str) -> float:
-        """
-        Рассчитывает репутацию на основе:
-        - страна (предпочтение определённым странам)
-        - является ли датацентром (датацентры часто имеют более стабильные соединения)
-        - в будущем можно добавить privacy-флаги (is_vpn, is_proxy и т.д.)
-        """
         if not server_ip:
             return 0.5
 
@@ -217,23 +217,13 @@ class ProfileScorer:
         country_code, _ = self.geo.get_country(server_ip)
         is_dc, _ = self.get_server_type(server_ip)
 
-        # Базовый рейтинг
         score = 0.5
-
-        # Страны с хорошей репутацией
         good_countries = {
-            # Западная и Центральная Европа
             'US', 'DE', 'NL', 'UK', 'FR', 'CA', 'CH', 'SE', 'NO', 'DK', 'FI',
             'BE', 'AT', 'IE', 'LU', 'ES', 'IT', 'PT', 'GR',
-        
-            # Азиатско-Тихоокеанский регион
             'JP', 'SG', 'AU', 'NZ', 'KR', 'HK', 'TW', 'MY', 'TH',
             'IL', 'AE', 'QA', 'SA',
-        
-            # Восточная Европа и Прибалтика (растущие IT-хабы)
             'EE', 'LV', 'LT', 'PL', 'CZ', 'HU', 'SI', 'HR',
-        
-            # Северная и Южная Америка (кроме США и Канады)
             'CL', 'UY', 'CR', 'PA',
         }
         if country_code in good_countries:
@@ -241,18 +231,12 @@ class ProfileScorer:
         elif country_code == 'XX':
             score -= 0.1
 
-        # Датацентры часто дают более стабильные соединения
         if is_dc:
             score += 0.2
 
-        # Ограничиваем
         return max(0, min(1, score))
 
     def get_privacy_flags(self, server_ip: str) -> Dict[str, bool]:
-        """
-        Возвращает словарь с privacy-флагами.
-        Сейчас заглушка — можно расширить, подключив другую базу данных.
-        """
         is_dc, _ = self.get_server_type(server_ip)
         return {
             'is_abuser': False,
@@ -266,21 +250,20 @@ class ProfileScorer:
         }
 
     def calculate_composite_score(self, profile: Dict, parsed: Dict, server_ip: str) -> float:
-        stability = self.calculate_stability(profile)
-        lifetime = self.calculate_lifetime_prediction(profile)
-        config_quality = self.calculate_config_quality('', parsed)
-        reputation = self.get_reputation_score(server_ip)
+        stability = profile.get('stability', 0.5)
+        lifetime = profile.get('lifetime', 24.0)
 
         total = profile['success_count'] + profile['fail_count']
         success_rate = profile['success_count'] / total if total > 0 else 0.5
 
-        # Для новых профилей даём базовые значения
+        config_quality = self.calculate_config_quality('', parsed)
+        reputation = self.get_reputation_score(server_ip)
+
         if len(profile.get('timestamps', [])) < 2:
             stability = 0.7
             lifetime = 24.0
             success_rate = 0.7
 
-        # Используем веса из настроек
         w = SCORE_WEIGHTS
         score = (w['stability'] * stability +
                  w['success_rate'] * success_rate +
@@ -292,15 +275,17 @@ class ProfileScorer:
 
     def score_profile(self, config: str, parsed: Dict, success: bool = True,
                       latency: float = 0) -> Dict:
+        # Обновляем историю
         self.update_profile_history(config, parsed, success, latency)
         key = self.get_profile_key(config, parsed)
-        profile = self.history['profiles'].get(key)
+        profile = self.db.get_profile(key)
         if not profile:
             return {'score': 50, 'stability': 0.5, 'lifetime': 24, 'is_datacenter': False, 'server_type': 'UNK'}
-        server_ip = profile.get('server')
+
+        server_ip = profile.get('server', '')
         is_dc, server_type = self.get_server_type(server_ip)
-        stability = self.calculate_stability(profile)
-        lifetime = self.calculate_lifetime_prediction(profile)
+        stability = profile.get('stability', 0.5)
+        lifetime = profile.get('lifetime', 24.0)
         composite = self.calculate_composite_score(profile, parsed, server_ip)
         privacy = self.get_privacy_flags(server_ip) if server_ip else {}
 
