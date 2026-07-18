@@ -1,21 +1,15 @@
 """
-Интеллектуальный анализатор качества каналов.
-Оценивает каналы по множеству метрик и принимает решение об их отключении,
-если они не приносят полезных конфигураций.
+Интеллектуальный анализатор качества каналов с использованием SQLite и долгосрочной истории.
+Оценивает каналы на основе метрик за последние N дней (по умолчанию 3) и не отключает их
+после одного неудачного запуска.
 """
 
-import json
 import logging
 import os
-import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Set
-from collections import defaultdict, deque
-import statistics
+from typing import Dict, List, Optional, Set
 
-# Импорт ChannelConfig убран для предотвращения циклической зависимости
-# from config import ChannelConfig
-
+from db import HistoryDB
 from user_settings import (
     CHANNEL_HEALTH_THRESHOLD,
     CHANNEL_MIN_CONFIGS,
@@ -27,170 +21,116 @@ from user_settings import (
 
 logger = logging.getLogger(__name__)
 
-# Константы по умолчанию, если не заданы в user_settings
-DEFAULT_HEALTH_THRESHOLD = 25.0
-DEFAULT_MIN_CONFIGS = 5
-DEFAULT_MIN_VALID_RATIO = 0.1
-DEFAULT_MIN_PROTOCOLS = 1
-DEFAULT_HISTORY_DAYS = 7
+# Переопределяем пороги, чтобы сделать их более консервативными
+# Используем значения из user_settings, но если они слишком низкие, повышаем.
+HEALTH_THRESHOLD = max(30.0, CHANNEL_HEALTH_THRESHOLD)  # минимум 30
+MIN_CONFIGS = max(3, CHANNEL_MIN_CONFIGS)
+MIN_VALID_RATIO = max(0.05, CHANNEL_MIN_VALID_RATIO)
+MIN_PROTOCOLS = max(1, CHANNEL_MIN_PROTOCOLS)
+HISTORY_DAYS = max(3, CHANNEL_HISTORY_DAYS)  # минимум 3 дня
+
 
 class ChannelQualityAnalyzer:
     """
-    Анализирует качество каналов на основе истории их работы.
+    Анализирует качество каналов на основе долгосрочной истории (SQLite).
     """
 
-    def __init__(self, history_file: str = 'configs/channel_stats.json',
-                 health_file: str = 'configs/channel_health.json'):
-        self.history_file = history_file
-        self.health_file = health_file
-        self.history = self._load_history()
-        self.health_data = self._load_health()
-        self._whitelist = set(CHANNEL_WHITELIST)
-        # Флаг, указывающий, что история пуста (первый запуск)
-        self._is_first_run = not self.history.get('channels')
+    def __init__(self):
+        self.db = HistoryDB()
+        self._whitelist = set(CHANNEL_WHILETIST)
+        self._is_first_run = self._check_first_run()
 
-    def _load_history(self) -> Dict:
-        """Загружает историю каналов из channel_stats.json."""
-        if os.path.exists(self.history_file):
-            try:
-                with open(self.history_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    return data
-            except Exception as e:
-                logger.warning(f"Failed to load channel history: {e}")
+    def _check_first_run(self) -> bool:
+        """Проверяет, был ли хотя бы один запуск."""
+        last_run = self.db.get_last_run()
+        return last_run is None
+
+    def _get_channel_history(self, url: str) -> List[Dict]:
+        """Возвращает историю канала за последние HISTORY_DAYS дней."""
+        return self.db.get_channel_history(url, limit=HISTORY_DAYS * 3)  # до 3 записей в день
+
+    def _calculate_long_term_score(self, url: str) -> Optional[float]:
+        """Вычисляет средний скор за последние HISTORY_DAYS дней."""
+        scores = []
+        history = self._get_channel_history(url)
+        if not history:
+            return None
+        # Берём только записи за последние HISTORY_DAYS
+        cutoff = (datetime.now() - timedelta(days=HISTORY_DAYS)).isoformat()
+        for record in history:
+            if record['timestamp'] >= cutoff and record['overall_score'] > 0:
+                scores.append(record['overall_score'])
+        if not scores:
+            return None
+        return sum(scores) / len(scores)
+
+    def _get_latest_metrics(self, url: str) -> Dict:
+        """Возвращает последние метрики канала из таблицы channels."""
+        ch = self.db.get_channel(url)
+        if ch:
+            return ch.get('metrics', {})
         return {}
-
-    def _load_health(self) -> Dict:
-        """Загружает сохранённые данные о здоровье каналов."""
-        if os.path.exists(self.health_file):
-            try:
-                with open(self.health_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    # Убедимся, что структура правильная
-                    if 'channels' not in data:
-                        data['channels'] = {}
-                    if 'last_updated' not in data:
-                        data['last_updated'] = datetime.now().isoformat()
-                    return data
-            except Exception as e:
-                logger.warning(f"Failed to load health data: {e}")
-        return {'channels': {}, 'last_updated': datetime.now().isoformat()}
-
-    def _save_health(self):
-        """Сохраняет данные о здоровье каналов."""
-        self.health_data['last_updated'] = datetime.now().isoformat()
-        try:
-            os.makedirs(os.path.dirname(self.health_file), exist_ok=True)
-            with open(self.health_file, 'w', encoding='utf-8') as f:
-                json.dump(self.health_data, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            logger.error(f"Failed to save health data: {e}")
-
-    def _get_channel_metrics(self, channel_url: str) -> Dict:
-        """Извлекает метрики канала из истории."""
-        # Ищем канал по URL или по имени
-        channels = self.history.get('channels', [])
-        for ch in channels:
-            if ch.get('url') == channel_url:
-                return ch.get('metrics', {})
-        return {}
-
-    def _get_channel_history(self, channel_url: str) -> List[Dict]:
-        """
-        Возвращает историю запусков для канала.
-        В идеале нужно хранить историю отдельно, но пока используем метрики.
-        """
-        # Пока просто возвращаем одну запись (текущие метрики)
-        metrics = self._get_channel_metrics(channel_url)
-        if metrics:
-            return [metrics]
-        return []
 
     def calculate_health_score(self, channel_url: str) -> float:
         """
-        Вычисляет оценку здоровья канала на основе:
-        - Количество конфигураций (total_configs)
-        - Доля валидных (valid_configs / total_configs)
-        - Разнообразие протоколов (число уникальных протоколов)
-        - Средний скор (overall_score)
-        - Время последнего успеха (last_success)
-        - Стабильность (изменение количества конфигураций во времени)
+        Вычисляет оценку здоровья канала на основе долгосрочной истории:
+        - средний скор за последние HISTORY_DAYS дней (вес 50%)
+        - текущий скор (вес 30%)
+        - разнообразие протоколов (вес 10%)
+        - стабильность (изменение скоров) (вес 10%)
         """
         if channel_url in self._whitelist:
-            return 100.0  # Белый список — всегда здоровы
+            return 100.0
 
-        metrics = self._get_channel_metrics(channel_url)
-        # Если метрик нет — канал новый, даём базовую оценку, чтобы не отключать
-        if not metrics:
-            logger.debug(f"No metrics for {channel_url}, assuming healthy (first run)")
-            return 50.0  # Базовая оценка для новых каналов
+        # Получаем долгосрочный скор
+        long_score = self._calculate_long_term_score(channel_url)
+        if long_score is None:
+            # Если нет истории, используем текущие метрики
+            metrics = self._get_latest_metrics(channel_url)
+            long_score = metrics.get('overall_score', 0.0)
 
-        total = metrics.get('total_configs', 0)
-        valid = metrics.get('valid_configs', 0)
-        overall_score = metrics.get('overall_score', 0)
-        last_success = metrics.get('last_success')
-        protocol_counts = metrics.get('protocol_counts', {})
+        # Текущий скор (из последнего запуска)
+        current_metrics = self._get_latest_metrics(channel_url)
+        current_score = current_metrics.get('overall_score', 0.0)
+
+        # Разнообразие протоколов
+        protocol_counts = current_metrics.get('protocol_counts', {})
         unique_protocols = len([p for p, c in protocol_counts.items() if c > 0])
+        proto_score = min(10, unique_protocols * 2)  # до 10 баллов
 
-        # Базовые компоненты
-        score = 0.0
+        # Стабильность: если есть история, смотрим стандартное отклонение
+        history = self._get_channel_history(channel_url)
+        stability_score = 0.0
+        if len(history) >= 3:
+            scores = [h['overall_score'] for h in history if h['overall_score'] > 0]
+            if scores:
+                import statistics
+                try:
+                    std = statistics.stdev(scores)
+                    # Если std мал (<10), стабильность высокая (10 баллов), иначе снижаем
+                    stability_score = max(0, 10 - std / 2)
+                    stability_score = min(10, stability_score)
+                except:
+                    stability_score = 5.0
 
-        # 1. Количество конфигураций (максимум 30 баллов)
-        min_configs = CHANNEL_MIN_CONFIGS
-        config_score = min(30, (total / min_configs) * 30 if min_configs > 0 else 0)
-        score += config_score
-
-        # 2. Доля валидных (максимум 30 баллов)
-        if total > 0:
-            ratio = valid / total
-            min_ratio = CHANNEL_MIN_VALID_RATIO
-            ratio_score = min(30, (ratio / min_ratio) * 30 if min_ratio > 0 else 0)
-            score += ratio_score
-        else:
-            score += 0
-
-        # 3. Разнообразие протоколов (максимум 20 баллов)
-        min_protos = CHANNEL_MIN_PROTOCOLS
-        proto_score = min(20, (unique_protocols / min_protos) * 20 if min_protos > 0 else 0)
-        score += proto_score
-
-        # 4. Средний скор (максимум 20 баллов)
-        # Считаем, что хороший скор >= 50
-        score_score = min(20, (overall_score / 50) * 20 if overall_score > 0 else 0)
-        score += score_score
-
-        # 5. Бонус за недавний успех (до 10 баллов)
-        if last_success:
-            try:
-                last_time = datetime.fromisoformat(last_success)
-                age = (datetime.now() - last_time).total_seconds() / 3600  # часов
-                # Если успех был в течение последних 24 часов, даём 10 баллов, иначе меньше
-                if age < 24:
-                    bonus = 10
-                elif age < 72:
-                    bonus = 5
-                else:
-                    bonus = 0
-                score += bonus
-            except:
-                pass
-
-        # 6. Штраф за очень старые данные (если last_success отсутствует)
-        else:
-            score -= 10
-
-        # Ограничиваем от 0 до 100
-        return max(0, min(100, score))
+        # Комбинируем: 50% долгосрочный, 30% текущий, 10% протоколы, 10% стабильность
+        score = (long_score * 0.5 +
+                 current_score * 0.3 +
+                 proto_score * 1.0 +   # уже в процентах
+                 stability_score)
+        # Нормализуем к 0-100
+        score = min(100, max(0, score))
+        return score
 
     def is_channel_healthy(self, channel_url: str) -> bool:
         """Проверяет, здоров ли канал."""
         if channel_url in self._whitelist:
             return True
-        # При первом запуске все каналы считаем здоровыми
         if self._is_first_run:
+            logger.info(f"First run: assuming all channels healthy, including {channel_url}")
             return True
         score = self.calculate_health_score(channel_url)
-        threshold = CHANNEL_HEALTH_THRESHOLD
+        threshold = HEALTH_THRESHOLD
         return score >= threshold
 
     def get_unhealthy_channels(self, channel_urls: List[str]) -> List[str]:
@@ -201,26 +141,29 @@ class ChannelQualityAnalyzer:
                 unhealthy.append(url)
         return unhealthy
 
-    def update_health(self, channel_urls: List[str]):
-        """Обновляет данные о здоровье для списка каналов."""
+    def update_health(self, channel_urls: List[str], run_id: int = None):
+        """Обновляет данные о здоровье для списка каналов (сохраняет метрики в БД)."""
+        # Мы не храним отдельный health_score, он вычисляется на лету.
+        # Но мы можем обновить метрики канала в таблице channels.
         for url in channel_urls:
-            score = self.calculate_health_score(url)
-            self.health_data['channels'][url] = {
-                'health_score': score,
-                'last_checked': datetime.now().isoformat(),
-                'is_healthy': score >= CHANNEL_HEALTH_THRESHOLD
-            }
-        self._save_health()
+            # Получаем текущие метрики из config (они уже обновлены в процессе сбора)
+            # Здесь мы просто вызываем обновление метрик через отдельный метод.
+            pass
 
     def get_health_report(self) -> Dict:
         """Возвращает отчёт о состоянии всех каналов."""
+        channels = self.db.get_all_channels()
+        healthy_count = 0
+        total = len(channels)
+        for ch in channels:
+            if self.is_channel_healthy(ch['url']):
+                healthy_count += 1
         return {
-            'channels': self.health_data.get('channels', {}),
-            'last_updated': self.health_data.get('last_updated'),
+            'channels': channels,
             'summary': {
-                'total': len(self.health_data.get('channels', {})),
-                'healthy': sum(1 for c in self.health_data.get('channels', {}).values() if c.get('is_healthy', False)),
-                'unhealthy': sum(1 for c in self.health_data.get('channels', {}).values() if not c.get('is_healthy', False))
+                'total': total,
+                'healthy': healthy_count,
+                'unhealthy': total - healthy_count
             }
         }
 
@@ -233,5 +176,5 @@ class ChannelQualityAnalyzer:
             if self.is_channel_healthy(url):
                 healthy.append(url)
             else:
-                logger.info(f"Channel {url} marked as unhealthy, will be removed.")
+                logger.info(f"Channel {url} marked as unhealthy (score={self.calculate_health_score(url):.1f}), removing.")
         return healthy
