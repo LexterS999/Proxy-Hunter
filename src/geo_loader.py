@@ -2,6 +2,7 @@
 Модуль для загрузки и использования локальных баз данных GeoIP2/MMDB.
 Поддерживает кэширование и проверку обновлений по ETag/Last-Modified.
 Реализован как синглтон, проверяет наличие C-расширения _maxminddb.
+Добавлен LRU-кеш и режим MODE_MEMORY.
 """
 
 import os
@@ -14,6 +15,7 @@ import hashlib
 import json
 import time
 import maxminddb
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,7 @@ class GeoLoader:
     """
     Загружает и читает базы данных MaxMind DB для страны и ASN с кэшированием.
     Реализован как синглтон для предотвращения повторной загрузки.
+    Добавлен LRU-кеш для IP-адресов.
     """
 
     _instance = None
@@ -48,7 +51,6 @@ class GeoLoader:
                  cache_dir: str = 'configs/cache', cache_ttl_hours: int = 24):
         if self._initialized:
             return
-        # Используем значения по умолчанию, если не переданы
         from user_settings import GEO_COUNTRY_URL, GEO_ASN_URL
         self.country_url = country_url or GEO_COUNTRY_URL
         self.asn_url = asn_url or GEO_ASN_URL
@@ -61,6 +63,9 @@ class GeoLoader:
         self._metadata_file = self.cache_dir / 'geo_metadata.json'
         self._metadata = self._load_metadata()
         self._initialized = True
+        # LRU-кеш для страновой информации (размер 1000)
+        self._country_cache = lru_cache(maxsize=1000)(self._get_country_no_cache)
+        self._asn_cache = lru_cache(maxsize=1000)(self._get_asn_no_cache)
 
     def _load_metadata(self) -> Dict:
         if self._metadata_file.exists():
@@ -128,7 +133,8 @@ class GeoLoader:
         cache_path = self._download_if_needed(url)
         if cache_path and cache_path.exists():
             try:
-                return maxminddb.open_database(str(cache_path))
+                # Используем режим MODE_MEMORY для ускорения
+                return maxminddb.open_database(str(cache_path), maxminddb.MODE_MEMORY)
             except Exception as e:
                 logger.error(f"Failed to open database {cache_path}: {e}")
                 try:
@@ -143,7 +149,8 @@ class GeoLoader:
         if self._asn_reader is None:
             self._asn_reader = self._open_database(self.asn_url)
 
-    def get_country(self, ip: str) -> Tuple[str, str]:
+    def _get_country_no_cache(self, ip: str) -> Tuple[str, str]:
+        """Внутренняя функция для lookup без кеша."""
         if self._country_reader is None:
             return ('XX', 'Unknown')
         try:
@@ -158,7 +165,12 @@ class GeoLoader:
             logger.debug(f"Country lookup error for {ip}: {e}")
             return ('XX', 'Unknown')
 
-    def get_asn(self, ip: str) -> Tuple[Optional[str], Optional[str]]:
+    def get_country(self, ip: str) -> Tuple[str, str]:
+        """Возвращает (код_страны, название) с использованием LRU-кеша."""
+        self.ensure_databases()
+        return self._country_cache(ip)
+
+    def _get_asn_no_cache(self, ip: str) -> Tuple[Optional[str], Optional[str]]:
         if self._asn_reader is None:
             return (None, None)
         try:
@@ -172,6 +184,11 @@ class GeoLoader:
         except Exception as e:
             logger.debug(f"ASN lookup error for {ip}: {e}")
             return (None, None)
+
+    def get_asn(self, ip: str) -> Tuple[Optional[str], Optional[str]]:
+        """Возвращает (номер_ASN, название) с использованием LRU-кеша."""
+        self.ensure_databases()
+        return self._asn_cache(ip)
 
     def is_datacenter(self, ip: str) -> bool:
         asn_num, asn_name = self.get_asn(ip)
