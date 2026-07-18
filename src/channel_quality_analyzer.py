@@ -7,6 +7,7 @@
 import json
 import logging
 import os
+import numpy as np
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Set
 from collections import defaultdict, deque
@@ -152,13 +153,32 @@ class ChannelQualityAnalyzer:
                 logger.warning(f"Failed to load health data: {e}")
         return {'channels': {}, 'last_updated': datetime.now().isoformat()}
 
+    def _convert_to_serializable(self, obj):
+        """Рекурсивно преобразует numpy-типы в стандартные Python-типы для JSON."""
+        if isinstance(obj, (np.integer, np.int64, np.int32)):
+            return int(obj)
+        elif isinstance(obj, (np.floating, np.float64, np.float32)):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, (np.str_,)):
+            return str(obj)
+        elif isinstance(obj, dict):
+            return {k: self._convert_to_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._convert_to_serializable(v) for v in obj]
+        else:
+            return obj
+
     def _save_health(self):
-        """Сохраняет данные о здоровье каналов."""
+        """Сохраняет данные о здоровье каналов с преобразованием NumPy-типов."""
         self.health_data['last_updated'] = datetime.now().isoformat()
         try:
             os.makedirs(os.path.dirname(self.health_file), exist_ok=True)
+            # Преобразуем все значения к сериализуемым типам
+            serializable_data = self._convert_to_serializable(self.health_data)
             with open(self.health_file, 'w', encoding='utf-8') as f:
-                json.dump(self.health_data, f, indent=2, ensure_ascii=False)
+                json.dump(serializable_data, f, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Failed to save health data: {e}")
 
