@@ -1,6 +1,7 @@
 """
 Глубокая дедупликация с оптимизацией через Bloom filter и префиксные деревья.
 Теперь использует асинхронный Bloom фильтр (на основе pybloom_live) с шардированием.
+Заменён MD5 на xxhash, добавлено отложенное сохранение Bloom-фильтра.
 """
 
 import re
@@ -9,6 +10,7 @@ import logging
 import os
 import mmh3
 import hashlib
+import xxhash  # Новый быстрый хеш
 from typing import Dict, List, Set, Optional, Tuple
 from collections import defaultdict
 from urllib.parse import urlparse, parse_qs
@@ -75,6 +77,9 @@ class DeepDeduplicator:
         self._trie = PrefixTrie()
         self._server_cache = {}
         self._seen_in_run = set()  # для дедупликации внутри одного запуска
+        # Счётчик добавлений для отложенного сохранения
+        self._bloom_add_count = 0
+        self._bloom_save_threshold = 1000  # сохранять после каждых 1000 добавлений
 
     def generate_fingerprint(self, config: str) -> Optional[Dict]:
         try:
@@ -96,7 +101,8 @@ class DeepDeduplicator:
                 result['credential'] = data.get('id', '')
                 net = data.get('net', 'tcp')
                 path = data.get('path', '')
-                result['fingerprint'] = hashlib.md5(
+                # Используем xxhash
+                result['fingerprint'] = xxhash.xxh64(
                     f"{result['server']}:{result['port']}:{result['credential']}:{net}:{path}".encode()
                 ).hexdigest()
             elif config_lower.startswith('vless://'):
@@ -106,7 +112,7 @@ class DeepDeduplicator:
                 result['credential'] = data.get('uuid', '')
                 flow = data.get('flow', '')
                 transport = data.get('type', 'tcp')
-                result['fingerprint'] = hashlib.md5(
+                result['fingerprint'] = xxhash.xxh64(
                     f"{result['server']}:{result['port']}:{result['credential']}:{flow}:{transport}".encode()
                 ).hexdigest()
             elif config_lower.startswith('trojan://'):
@@ -114,7 +120,7 @@ class DeepDeduplicator:
                 result['server'] = data.get('address')
                 result['port'] = int(data.get('port', 0))
                 result['credential'] = data.get('password', '')
-                result['fingerprint'] = hashlib.md5(
+                result['fingerprint'] = xxhash.xxh64(
                     f"{result['server']}:{result['port']}:{result['credential']}".encode()
                 ).hexdigest()
             elif config_lower.startswith('ss://'):
@@ -122,7 +128,7 @@ class DeepDeduplicator:
                 result['server'] = data.get('address')
                 result['port'] = int(data.get('port', 0))
                 result['credential'] = f"{data.get('method', '')}:{data.get('password', '')}"
-                result['fingerprint'] = hashlib.md5(
+                result['fingerprint'] = xxhash.xxh64(
                     f"{result['server']}:{result['port']}:{result['credential']}".encode()
                 ).hexdigest()
             elif config_lower.startswith(('hysteria2://', 'hy2://')):
@@ -130,7 +136,7 @@ class DeepDeduplicator:
                 result['server'] = data.get('address')
                 result['port'] = int(data.get('port', 0))
                 result['credential'] = data.get('password', '')
-                result['fingerprint'] = hashlib.md5(
+                result['fingerprint'] = xxhash.xxh64(
                     f"{result['server']}:{result['port']}:{result['credential']}".encode()
                 ).hexdigest()
             elif config_lower.startswith('tuic://'):
@@ -138,7 +144,7 @@ class DeepDeduplicator:
                 result['server'] = data.get('address')
                 result['port'] = int(data.get('port', 0))
                 result['credential'] = f"{data.get('uuid', '')}:{data.get('password', '')}"
-                result['fingerprint'] = hashlib.md5(
+                result['fingerprint'] = xxhash.xxh64(
                     f"{result['server']}:{result['port']}:{result['credential']}".encode()
                 ).hexdigest()
             return result if result['fingerprint'] else None
@@ -187,21 +193,23 @@ class DeepDeduplicator:
         for config in configs:
             # Проверяем персистентный Bloom
             if await self._bloom.contains(config):
-                # Если конфиг уже был когда-либо обработан, пропускаем
                 continue
-            # Если уже видели в этом запуске, пропускаем
             if config in seen_in_run:
                 continue
 
             fp_data = self.generate_fingerprint(config)
             if fp_data:
-                # Добавляем в Bloom для будущих запусков
                 await self._bloom.add(config)
+                self._bloom_add_count += 1
                 groups[fp_data['fingerprint']].append(config)
                 fingerprint_data[config] = fp_data
                 seen_in_run.add(config)
 
-        await self._bloom.save()
+        # Отложенное сохранение Bloom-фильтра
+        if self._bloom_add_count >= self._bloom_save_threshold:
+            await self._bloom.save()
+            self._bloom_add_count = 0
+            logger.info(f"Saved Bloom filter after {self._bloom_save_threshold} additions")
 
         best_configs = []
         seen_fingerprints = set()
@@ -227,6 +235,11 @@ class DeepDeduplicator:
             best_configs.append(best)
             seen_fingerprints.add(fingerprint)
             seen_similar.add(best)
+
+        # Финал: сохраняем Bloom, если остались несохранённые
+        if self._bloom_add_count > 0:
+            await self._bloom.save()
+            self._bloom_add_count = 0
 
         logger.info(f"Deep deduplication: {len(configs)} → {len(best_configs)} configs")
         return best_configs
