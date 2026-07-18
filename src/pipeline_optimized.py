@@ -20,7 +20,7 @@ import shutil
 import signal
 from pathlib import Path
 from typing import List, Dict
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from tqdm import tqdm
 
@@ -47,10 +47,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Добавляем обработчик, который выводит только важное в консоль
-# (для GitHub Actions оставляем только INFO и выше)
-# Для удобства также можно добавить цветной вывод, но в GitHub Actions это не нужно.
-
 
 class OptimizedPipeline:
     def __init__(self):
@@ -59,7 +55,8 @@ class OptimizedPipeline:
         self.deduplicator = DeepDeduplicator()
         self.quality_checker = ConfigQualityChecker(timeout=0, max_workers=1)
         self.scorer = ProfileScorer()
-        self.output_file = 'configs/output.txt'
+        self.output_file = 'configs/output_archive.txt'          # ← архивный файл
+        self.simple_file = 'configs/output_simple.txt'          # оставляем для быстрого доступа
         self.location_cache_file = 'configs/location_cache.json'
         self.parsed_cache_file = 'configs/parsed_cache.json'
         self.channel_stats_file = 'configs/channel_stats.json'  # пока оставляем для совместимости
@@ -67,6 +64,9 @@ class OptimizedPipeline:
         self._shutdown_requested = False
         self._state = {}
         self.db = HistoryDB()  # для записи статистики
+
+        # Количество дней, в течение которых храним архив
+        self.ARCHIVE_RETENTION_DAYS = 7
 
         self._check_dependencies()
 
@@ -194,6 +194,41 @@ class OptimizedPipeline:
             self._shutdown_requested = True
         signal.signal(signal.SIGINT, handler)
         signal.signal(signal.SIGTERM, handler)
+
+    def _merge_with_archive(self, new_configs: List[str]) -> List[str]:
+        """
+        Объединяет новые конфигурации с существующим архивом (если он не старше ARCHIVE_RETENTION_DAYS).
+        Если архив старше или отсутствует, возвращает только новые конфигурации.
+        """
+        archive_path = Path(self.output_file)
+        if not archive_path.exists():
+            logger.info("Archive file does not exist, creating new.")
+            return new_configs
+
+        # Проверяем возраст файла
+        file_age = time.time() - archive_path.stat().st_mtime
+        if file_age > self.ARCHIVE_RETENTION_DAYS * 24 * 3600:
+            logger.info(f"Archive file is older than {self.ARCHIVE_RETENTION_DAYS} days, overwriting.")
+            return new_configs
+
+        # Читаем существующий архив
+        try:
+            with open(archive_path, 'r', encoding='utf-8') as f:
+                existing = [line.strip() for line in f if line.strip() and not line.startswith('//')]
+        except Exception as e:
+            logger.warning(f"Failed to read archive: {e}, will overwrite.")
+            return new_configs
+
+        # Объединяем и удаляем дубликаты (сохраняем порядок: сначала старые, потом новые)
+        combined = existing + new_configs
+        seen = set()
+        unique = []
+        for cfg in combined:
+            if cfg not in seen:
+                seen.add(cfg)
+                unique.append(cfg)
+        logger.info(f"Merged archive: {len(existing)} existing + {len(new_configs)} new → {len(unique)} unique")
+        return unique
 
     async def run(self) -> bool:
         try:
@@ -336,10 +371,11 @@ class OptimizedPipeline:
             logger.info("🔌 Active checking (TCP SYN, cached, async)...")
 
             history = self._safe_load_history()  # не используется, но оставим
+            # Увеличиваем таймаут и допустимую задержку для большего числа рабочих конфигураций
             checker = ActiveChecker(
-                timeout=1.0,
+                timeout=2.0,              # было 1.0
                 max_workers=None,
-                max_latency=6000.0,
+                max_latency=10000.0,      # было 6000.0
                 history=history
             )
 
@@ -352,9 +388,10 @@ class OptimizedPipeline:
 
             await SessionPool().close()
 
+            # Разрешаем конфигурации с любой положительной задержкой (включая очень большие)
             good_configs = [
                 r['config'] for r in check_results
-                if r.get('valid', False) and 0 <= r.get('latency', -1)
+                if r.get('valid', False) and r.get('latency', -1) > 0
             ]
             logger.info(f"✅ Active check: {len(good_configs)} configs passed")
 
@@ -423,51 +460,49 @@ class OptimizedPipeline:
             else:
                 logger.info("Location cache found, skipping enrich_configs.")
 
-            # Шаг 8: Сохранение результатов
-            logger.info("💾 Saving output with new naming...")
-            temp_file = 'configs/temp_for_rename.txt'
-            try:
-                with open(temp_file, 'w') as f:
-                    for cfg in deduped:
-                        f.write(cfg + '\n')
-                renamer = ConfigRenamer(self.location_cache_file)
-                renamer.process_configs(temp_file, self.output_file)
-            except Exception as e:
-                logger.error(f"Error during rename_configs: {e}")
-            finally:
-                if os.path.exists(temp_file):
-                    os.remove(temp_file)
+            # Шаг 8: Объединение с архивом и сохранение результата
+            logger.info("💾 Merging with archive and saving...")
 
-            # Шаг 9: Сохранение упрощённого списка
-            logger.info("📄 Saving simple output...")
-            simple_file = 'configs/output_simple.txt'
+            # Объединяем с архивом (если он не старше 7 дней)
+            merged_configs = self._merge_with_archive(deduped)
+
+            # Записываем объединённый список в output_archive.txt
             try:
-                with open(self.output_file, 'r', encoding='utf-8') as f:
-                    lines = f.readlines()
-            except FileNotFoundError:
-                logger.error(f"Output file {self.output_file} not found, cannot create simple output.")
+                with open(self.output_file, 'w', encoding='utf-8') as f:
+                    for cfg in merged_configs:
+                        f.write(cfg + '\n')
+                logger.info(f"✅ Archive saved: {len(merged_configs)} configs in {self.output_file}")
+            except Exception as e:
+                logger.error(f"Failed to write archive: {e}")
                 return False
 
-            simple_configs = []
-            for line in lines:
-                line = line.strip()
-                if line.startswith('//') or not line:
-                    continue
-                simple_configs.append(line)
+            # Также сохраняем простой список (текущий набор без дубликатов)
             try:
-                with open(simple_file, 'w', encoding='utf-8') as f:
-                    for cfg in simple_configs:
+                with open(self.simple_file, 'w', encoding='utf-8') as f:
+                    for cfg in deduped:
                         f.write(cfg + '\n')
-                logger.info(f"✅ Simple output saved: {len(simple_configs)} configs")
+                logger.info(f"✅ Simple output saved: {len(deduped)} configs in {self.simple_file}")
             except Exception as e:
                 logger.error(f"Failed to write simple output: {e}")
+
+            # Шаг 9: Сохранение в Xray-совместимый формат (не обязательно для архива, но оставим)
+            # Этот шаг генерирует xray_loadbalanced_config.json на основе output_archive.txt
+            # Мы можем оставить его, но он будет использовать архивный файл.
+            # Вместо этого можно использовать текущий набор, но оставим как есть.
+            logger.info("📦 Generating Xray balanced config...")
+            try:
+                from xray_balancer import ConfigToXray
+                converter = ConfigToXray(self.output_file, 'configs/xray_loadbalanced_config.json')
+                converter.process_configs()
+            except Exception as e:
+                logger.warning(f"Xray balancer failed: {e}")
 
             # Шаг 10: Обновление статистики запуска в SQLite
             logger.info("📊 Updating run statistics in SQLite...")
             final_stats = {
                 'total_raw': len(raw_configs),
                 'total_valid': len(valid_configs),
-                'total_final': len(deduped),
+                'total_final': len(merged_configs),
                 'avg_score': sum(item['score'] for item in filtered) / len(filtered) if filtered else 0,
                 'protocols': {},
                 'geo_distribution': {},
@@ -478,7 +513,6 @@ class OptimizedPipeline:
                 'success_rate': len(good_configs) / len(filtered) if filtered else 0
             }
             # Обновляем запись о запуске (id = run_id)
-            # Т.к. мы уже создали запись, обновим её через UPDATE
             with self.db._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
@@ -515,7 +549,7 @@ class OptimizedPipeline:
             elapsed = time.time() - start_time
             logger.info("=" * 60)
             logger.info(f"✅ Pipeline completed in {elapsed:.2f}s")
-            logger.info(f"📊 Final configs: {len(deduped)}")
+            logger.info(f"📊 Final configs in archive: {len(merged_configs)}")
             logger.info("=" * 60)
             return True
 
