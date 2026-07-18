@@ -112,6 +112,28 @@ def async_write(filepath: str, content: str, mode: str = 'w'):
     """Ставит запись в очередь."""
     write_queue.put((filepath, content, mode))
 
+# Функция принудительного сброса очереди записи
+def flush_write_queue(timeout: float = 10.0):
+    """Ожидает, пока все текущие записи будут обработаны."""
+    start = time.time()
+    while not write_queue.empty() and (time.time() - start) < timeout:
+        time.sleep(0.05)
+    if not write_queue.empty():
+        logger.warning(f"Write queue not empty after {timeout}s, forcing flush...")
+        # Принудительно обрабатываем оставшиеся элементы
+        while not write_queue.empty():
+            try:
+                item = write_queue.get_nowait()
+                if item is None:
+                    break
+                filepath, content, mode = item
+                with open(filepath, mode, encoding='utf-8') as f:
+                    f.write(content)
+            except queue.Empty:
+                break
+            except Exception as e:
+                logger.error(f"Force flush error: {e}")
+
 # Регистрируем завершение
 import atexit
 atexit.register(stop_write_thread)
@@ -223,7 +245,6 @@ class OptimizedPipeline:
                         'last_success': last_success,
                         'overall_score': m.overall_score,
                         'protocol_counts': m.protocol_counts or {},
-                        # Сокращаем: убираем детальные временные ряды
                     },
                     'health_score': getattr(ch, 'health_score', 50.0),
                     'cluster': getattr(ch, 'cluster', -1),
@@ -234,9 +255,10 @@ class OptimizedPipeline:
             }
             Path(self.channel_stats_file).parent.mkdir(parents=True, exist_ok=True)
             content = json.dumps(payload, indent=2, ensure_ascii=False)
-            # Асинхронная запись
-            async_write(self.channel_stats_file, content, 'w')
-            logger.info(f"✅ Channel stats saved (async): {len(channels_data)} channels")
+            # Используем синхронную запись, чтобы гарантировать наличие файла перед чтением
+            with open(self.channel_stats_file, 'w', encoding='utf-8') as f:
+                f.write(content)
+            logger.info(f"✅ Channel stats saved (sync): {len(channels_data)} channels")
         except Exception as e:
             logger.error(f"Failed to save channel stats: {e}")
 
@@ -302,8 +324,15 @@ class OptimizedPipeline:
             # Шаг 1.5: Сохранение статистики каналов и интеллектуальный анализ
             logger.info("📊 Saving channel statistics...")
             self._save_channel_stats()
-            with open(self.channel_stats_file, 'r') as f:
-                history_data = json.load(f)
+            # Принудительно сбрасываем очередь записи (если бы использовалась асинхронная)
+            # но теперь мы используем синхронную запись, так что файл уже готов
+            # Читаем сохранённый файл
+            try:
+                with open(self.channel_stats_file, 'r') as f:
+                    history_data = json.load(f)
+            except (json.JSONDecodeError, FileNotFoundError) as e:
+                logger.warning(f"Could not read channel_stats.json: {e}, using empty history")
+                history_data = {'channels': []}
             self._refresh_channel_health(history_data)
 
             if not raw_configs:
@@ -601,6 +630,11 @@ class OptimizedPipeline:
         except Exception as e:
             logger.error(f"❌ Pipeline failed: {e}\n{traceback.format_exc()}")
             return False
+        finally:
+            # Закрываем все сессии
+            await SessionPool().close()
+            # Останавливаем поток записи
+            stop_write_thread()
 
 
 def main():
