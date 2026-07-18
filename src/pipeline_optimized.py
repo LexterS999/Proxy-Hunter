@@ -19,7 +19,7 @@ import asyncio
 import shutil
 import signal
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional, Set
 from datetime import datetime, timedelta
 
 from tqdm import tqdm
@@ -39,7 +39,6 @@ from session_pool import SessionPool
 from channel_quality_analyzer import ChannelQualityAnalyzer
 from db import HistoryDB
 
-# Настройка логирования — улучшенный формат для GitHub Actions
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -55,23 +54,21 @@ class OptimizedPipeline:
         self.deduplicator = DeepDeduplicator()
         self.quality_checker = ConfigQualityChecker(timeout=0, max_workers=1)
         self.scorer = ProfileScorer()
-        self.output_file = 'configs/output_archive.txt'          # ← архивный файл
-        self.simple_file = 'configs/output_simple.txt'          # оставляем для быстрого доступа
+        self.output_file = 'configs/output_archive.txt'          # архивный файл
+        self.simple_file = 'configs/output_simple.txt'          # свежие конфиги
         self.location_cache_file = 'configs/location_cache.json'
         self.parsed_cache_file = 'configs/parsed_cache.json'
-        self.channel_stats_file = 'configs/channel_stats.json'  # пока оставляем для совместимости
+        self.name_mapping_file = 'configs/name_mapping.json'   # новый файл для маппинга имён
+        self.channel_stats_file = 'configs/channel_stats.json'
         self.channel_analyzer = None
         self._shutdown_requested = False
         self._state = {}
-        self.db = HistoryDB()  # для записи статистики
-
-        # Количество дней, в течение которых храним архив
+        self.db = HistoryDB()
         self.ARCHIVE_RETENTION_DAYS = 7
 
         self._check_dependencies()
 
     def _check_dependencies(self):
-        """Проверяет наличие критических зависимостей."""
         missing = []
         try:
             import aiohttp
@@ -125,14 +122,156 @@ class OptimizedPipeline:
         except Exception as e:
             logger.warning(f"Failed to save parsed cache: {e}")
 
+    def _load_name_mapping(self) -> Dict[str, str]:
+        """Загружает маппинг конфиг -> имя из JSON."""
+        if os.path.exists(self.name_mapping_file):
+            try:
+                with open(self.name_mapping_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.warning(f"Failed to load name mapping: {e}")
+        return {}
+
+    def _save_name_mapping(self, mapping: Dict[str, str]):
+        """Сохраняет маппинг конфиг -> имя в JSON."""
+        try:
+            Path(self.name_mapping_file).parent.mkdir(parents=True, exist_ok=True)
+            with open(self.name_mapping_file, 'w', encoding='utf-8') as f:
+                json.dump(mapping, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"Failed to save name mapping: {e}")
+
+    def _get_config_key(self, config: str) -> str:
+        """
+        Генерирует уникальный ключ для конфига на основе server:port:protocol:credential.
+        Используется для поиска в маппинге имён.
+        """
+        try:
+            data, _ = FallbackParser.parse_with_stats(config)
+            if not data:
+                return hashlib.md5(config.encode()).hexdigest()
+            protocol = config.split('://')[0].lower()
+            if protocol == 'vmess':
+                server = data.get('add', '')
+                port = data.get('port', 0)
+                credential = data.get('id', '')
+            elif protocol == 'vless':
+                server = data.get('address', '')
+                port = data.get('port', 0)
+                credential = data.get('uuid', '')
+            elif protocol == 'trojan':
+                server = data.get('address', '')
+                port = data.get('port', 0)
+                credential = data.get('password', '')
+            elif protocol == 'ss':
+                server = data.get('address', '')
+                port = data.get('port', 0)
+                credential = f"{data.get('method', '')}:{data.get('password', '')}"
+            else:
+                server = data.get('address') or data.get('add') or data.get('host') or ''
+                port = data.get('port', 0)
+                credential = ''
+            key = f"{server}:{port}:{protocol}:{credential}"
+            return hashlib.md5(key.encode()).hexdigest()
+        except Exception as e:
+            logger.debug(f"Failed to generate config key: {e}")
+            return hashlib.md5(config.encode()).hexdigest()
+
+    def _generate_name(self, config: str) -> str:
+        """
+        Генерирует имя для конфига, используя ConfigRenamer, но без обращения к GeoIP
+        (использует кеш). Возвращает только имя (без перестроения URI).
+        """
+        try:
+            # Используем существующий реймер, но только для генерации имени
+            renamer = ConfigRenamer(self.location_cache_file)
+            # Переименовываем конфиг, получаем полную строку с #имя
+            renamed = renamer.rename_config(config, 0)
+            if renamed and '#' in renamed:
+                return renamed.split('#', 1)[1]
+            return ''
+        except Exception as e:
+            logger.debug(f"Failed to generate name: {e}")
+            return ''
+
+    def _load_archive(self) -> List[str]:
+        """Загружает все конфиги из архивного файла."""
+        if not os.path.exists(self.output_file):
+            return []
+        try:
+            with open(self.output_file, 'r', encoding='utf-8') as f:
+                return [line.strip() for line in f if line.strip() and not line.startswith('//')]
+        except Exception as e:
+            logger.warning(f"Failed to load archive: {e}")
+            return []
+
+    def _save_archive_with_names(self, configs: List[str], mapping: Dict[str, str]):
+        """
+        Сохраняет архив, подставляя имена из mapping.
+        Для конфигов, которых нет в mapping, генерирует новое имя и добавляет.
+        """
+        # Убедимся, что все конфиги есть в mapping
+        for cfg in configs:
+            key = self._get_config_key(cfg)
+            if key not in mapping:
+                name = self._generate_name(cfg)
+                if name:
+                    mapping[key] = name
+                else:
+                    # Если имя не сгенерировалось, используем хеш
+                    mapping[key] = f"config-{key[:8]}"
+
+        # Строим строки для записи
+        lines = []
+        for cfg in configs:
+            key = self._get_config_key(cfg)
+            name = mapping.get(key, '')
+            if name:
+                # Вставляем имя в конфиг
+                if '#' in cfg:
+                    base = cfg.split('#')[0]
+                    lines.append(f"{base}#{name}")
+                else:
+                    lines.append(f"{cfg}#{name}")
+            else:
+                lines.append(cfg)
+
+        try:
+            Path(self.output_file).parent.mkdir(parents=True, exist_ok=True)
+            with open(self.output_file, 'w', encoding='utf-8') as f:
+                for line in lines:
+                    f.write(line + '\n')
+            # Сохраняем обновлённый mapping
+            self._save_name_mapping(mapping)
+        except Exception as e:
+            logger.error(f"Failed to save archive: {e}")
+
+    def _save_simple(self, configs: List[str], mapping: Dict[str, str]):
+        """Сохраняет только свежие конфиги (без архивации) с именами."""
+        lines = []
+        for cfg in configs:
+            key = self._get_config_key(cfg)
+            name = mapping.get(key, '')
+            if name:
+                if '#' in cfg:
+                    base = cfg.split('#')[0]
+                    lines.append(f"{base}#{name}")
+                else:
+                    lines.append(f"{cfg}#{name}")
+            else:
+                lines.append(cfg)
+        try:
+            Path(self.simple_file).parent.mkdir(parents=True, exist_ok=True)
+            with open(self.simple_file, 'w', encoding='utf-8') as f:
+                for line in lines:
+                    f.write(line + '\n')
+        except Exception as e:
+            logger.error(f"Failed to save simple output: {e}")
+
     def _safe_load_history(self) -> Dict:
-        # Используем SQLite для истории
-        return {}  # больше не используется
+        return {}
 
     def _save_channel_stats(self, run_id: int):
-        """
-        Сохраняет статистику по каналам (собранную во время фетча) в SQLite.
-        """
         try:
             for ch in self.config.SOURCE_URLS:
                 m = ch.metrics
@@ -147,22 +286,16 @@ class OptimizedPipeline:
                     'overall_score': m.overall_score,
                     'protocol_counts': m.protocol_counts or {}
                 }
-                # Обновляем таблицу channels
                 self.db.update_channel(ch.url, metrics, enabled=ch.enabled)
-                # Добавляем историю для канала
                 self.db.add_channel_history(ch.url, run_id, metrics)
             logger.info(f"✅ Channel stats saved to SQLite: {len(self.config.SOURCE_URLS)} channels")
         except Exception as e:
             logger.error(f"Failed to save channel stats: {e}")
 
     def _refresh_channel_health(self):
-        """
-        Пересчитывает здоровье каналов на основе SQLite.
-        """
         try:
             self.channel_analyzer = ChannelQualityAnalyzer()
             urls = [ch.url for ch in self.config.SOURCE_URLS]
-            # Обновляем состояние каналов (включая отключение)
             for ch in self.config.SOURCE_URLS:
                 if not self.channel_analyzer.is_channel_healthy(ch.url):
                     ch.enabled = False
@@ -179,7 +312,6 @@ class OptimizedPipeline:
             logger.warning(f"Failed to refresh channel health: {e}")
 
     async def save_state(self):
-        """Сохраняет состояние (например, кеши)."""
         logger.info("Saving state before shutdown...")
         if hasattr(self.deduplicator, '_bloom'):
             try:
@@ -195,41 +327,6 @@ class OptimizedPipeline:
         signal.signal(signal.SIGINT, handler)
         signal.signal(signal.SIGTERM, handler)
 
-    def _merge_with_archive(self, new_configs: List[str]) -> List[str]:
-        """
-        Объединяет новые конфигурации с существующим архивом (если он не старше ARCHIVE_RETENTION_DAYS).
-        Если архив старше или отсутствует, возвращает только новые конфигурации.
-        """
-        archive_path = Path(self.output_file)
-        if not archive_path.exists():
-            logger.info("Archive file does not exist, creating new.")
-            return new_configs
-
-        # Проверяем возраст файла
-        file_age = time.time() - archive_path.stat().st_mtime
-        if file_age > self.ARCHIVE_RETENTION_DAYS * 24 * 3600:
-            logger.info(f"Archive file is older than {self.ARCHIVE_RETENTION_DAYS} days, overwriting.")
-            return new_configs
-
-        # Читаем существующий архив
-        try:
-            with open(archive_path, 'r', encoding='utf-8') as f:
-                existing = [line.strip() for line in f if line.strip() and not line.startswith('//')]
-        except Exception as e:
-            logger.warning(f"Failed to read archive: {e}, will overwrite.")
-            return new_configs
-
-        # Объединяем и удаляем дубликаты (сохраняем порядок: сначала старые, потом новые)
-        combined = existing + new_configs
-        seen = set()
-        unique = []
-        for cfg in combined:
-            if cfg not in seen:
-                seen.add(cfg)
-                unique.append(cfg)
-        logger.info(f"Merged archive: {len(existing)} existing + {len(new_configs)} new → {len(unique)} unique")
-        return unique
-
     async def run(self) -> bool:
         try:
             self._setup_signal_handlers()
@@ -239,7 +336,7 @@ class OptimizedPipeline:
             logger.info("🚀 Starting Proxy-Hunter Pipeline (optimized, async, SQLite)")
             logger.info("=" * 60)
 
-            # Шаг 1: Сбор конфигураций (асинхронный)
+            # Шаг 1: Сбор конфигураций
             logger.info("📡 Fetching configurations...")
             fetcher = AsyncConfigFetcher(self.config)
             raw_configs = await fetcher.fetch_all()
@@ -248,7 +345,6 @@ class OptimizedPipeline:
                 return False
 
             # Шаг 1.5: Сохранение статистики каналов в SQLite
-            # Сначала создаём запись о запуске
             run_stats = {
                 'timestamp': datetime.now().isoformat(),
                 'total_raw': len(raw_configs),
@@ -263,9 +359,7 @@ class OptimizedPipeline:
                 'geo_distribution': {},
                 'anomalies': []
             }
-            run_id = self.db.add_run(run_stats)  # временно, позже обновим
-
-            # Сохраняем метрики каналов и историю
+            run_id = self.db.add_run(run_stats)
             self._save_channel_stats(run_id)
             self._refresh_channel_health()
 
@@ -350,8 +444,8 @@ class OptimizedPipeline:
                 logger.error("No configs scored.")
                 return False
 
-            # Шаг 4: Фильтрация по композитному скору (понижаем порог для большего количества)
-            min_score = 0.0  # было 0, оставляем
+            # Шаг 4: Фильтрация по композитному скору
+            min_score = 0.0
             filtered = [item for item in scored_configs if item['score'] >= min_score]
             logger.info(f"✅ After min_score filter: {len(filtered)}")
 
@@ -367,15 +461,13 @@ class OptimizedPipeline:
             if not filtered:
                 return False
 
-            # Шаг 5: Активная проверка (асинхронная, с кешированием и фильтрацией)
+            # Шаг 5: Активная проверка
             logger.info("🔌 Active checking (TCP SYN, cached, async)...")
-
-            history = self._safe_load_history()  # не используется, но оставим
-            # Увеличиваем таймаут и допустимую задержку для большего числа рабочих конфигураций
+            history = self._safe_load_history()
             checker = ActiveChecker(
-                timeout=2.0,              # было 1.0
+                timeout=2.0,
                 max_workers=None,
-                max_latency=10000.0,      # было 6000.0
+                max_latency=10000.0,
                 history=history
             )
 
@@ -388,7 +480,6 @@ class OptimizedPipeline:
 
             await SessionPool().close()
 
-            # Разрешаем конфигурации с любой положительной задержкой (включая очень большие)
             good_configs = [
                 r['config'] for r in check_results
                 if r.get('valid', False) and r.get('latency', -1) > 0
@@ -460,53 +551,50 @@ class OptimizedPipeline:
             else:
                 logger.info("Location cache found, skipping enrich_configs.")
 
-            # Шаг 8: Объединение с архивом (без нейминга)
-            logger.info("💾 Merging with archive...")
-            merged_configs = self._merge_with_archive(deduped)
+            # ========== НОВАЯ ЛОГИКА АРХИВАЦИИ ==========
+            logger.info("💾 Archiving logic (with name mapping)...")
 
-            # Шаг 9: Применяем нейминг ко ВСЕМ конфигам (и старым, и новым)
-            logger.info("🏷️ Applying naming to ALL configs (archive + new)...")
-            renamer = ConfigRenamer(self.location_cache_file)
-            renamed_all = []
-            for idx, cfg in enumerate(merged_configs, 1):
-                new_cfg = renamer.rename_config(cfg, idx)
-                if new_cfg:
-                    renamed_all.append(new_cfg)
-            logger.info(f"✅ Renamed {len(renamed_all)} configs (out of {len(merged_configs)})")
+            # Загружаем маппинг имён
+            name_mapping = self._load_name_mapping()
 
-            # Финальная дедупликация по строке (после переименования)
-            seen = set()
-            final_unique = []
-            for cfg in renamed_all:
-                if cfg not in seen:
-                    seen.add(cfg)
-                    final_unique.append(cfg)
-            logger.info(f"✅ Final unique after renaming: {len(final_unique)}")
+            # Для новых конфигов генерируем имена только если их нет в mapping
+            new_configs_with_names = []
+            for cfg in deduped:
+                key = self._get_config_key(cfg)
+                if key not in name_mapping:
+                    name = self._generate_name(cfg)
+                    if name:
+                        name_mapping[key] = name
+                    else:
+                        # fallback
+                        name_mapping[key] = f"config-{key[:8]}"
+                # Добавляем конфиг в список для архива (уже с именем, но мы применим его при записи)
+                new_configs_with_names.append(cfg)
 
-            if not final_unique:
-                logger.warning("All configs were filtered out by naming or dedup.")
-                return False
+            # Загружаем существующий архив (старые конфиги)
+            archive_configs = self._load_archive()
 
-            # Шаг 10: Сохранение результатов
-            logger.info("💾 Saving final outputs...")
-            try:
-                with open(self.output_file, 'w', encoding='utf-8') as f:
-                    for cfg in final_unique:
-                        f.write(cfg + '\n')
-                logger.info(f"✅ Archive saved: {len(final_unique)} configs in {self.output_file}")
-            except Exception as e:
-                logger.error(f"Failed to write archive: {e}")
-                return False
+            # Объединяем: сначала старые, потом новые (удаляем дубликаты по ключу)
+            seen_keys = set()
+            merged_configs = []
+            for cfg in archive_configs + new_configs_with_names:
+                key = self._get_config_key(cfg)
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    merged_configs.append(cfg)
 
-            try:
-                with open(self.simple_file, 'w', encoding='utf-8') as f:
-                    for cfg in final_unique:
-                        f.write(cfg + '\n')
-                logger.info(f"✅ Simple output saved: {len(final_unique)} configs in {self.simple_file}")
-            except Exception as e:
-                logger.error(f"Failed to write simple output: {e}")
+            logger.info(f"🔄 Merged archive: {len(archive_configs)} old + {len(new_configs_with_names)} new → {len(merged_configs)} unique")
 
-            # Шаг 11: Генерация Xray-конфига (опционально)
+            # Сохраняем архив с именами из маппинга
+            self._save_archive_with_names(merged_configs, name_mapping)
+
+            # Сохраняем только новые конфиги (без архивации) с именами
+            self._save_simple(new_configs_with_names, name_mapping)
+
+            logger.info(f"✅ Archive saved: {len(merged_configs)} configs in {self.output_file}")
+            logger.info(f"✅ Simple output saved: {len(new_configs_with_names)} configs in {self.simple_file}")
+
+            # Шаг 8: Генерация Xray-конфига (опционально)
             logger.info("📦 Generating Xray balanced config...")
             try:
                 from xray_balancer import ConfigToXray
@@ -515,12 +603,12 @@ class OptimizedPipeline:
             except Exception as e:
                 logger.warning(f"Xray balancer failed: {e}")
 
-            # Шаг 12: Обновление статистики запуска в SQLite
+            # Шаг 9: Обновление статистики запуска в SQLite
             logger.info("📊 Updating run statistics in SQLite...")
             final_stats = {
                 'total_raw': len(raw_configs),
                 'total_valid': len(valid_configs),
-                'total_final': len(final_unique),
+                'total_final': len(merged_configs),
                 'avg_score': sum(item['score'] for item in filtered) / len(filtered) if filtered else 0,
                 'protocols': {},
                 'geo_distribution': {},
@@ -566,7 +654,7 @@ class OptimizedPipeline:
             elapsed = time.time() - start_time
             logger.info("=" * 60)
             logger.info(f"✅ Pipeline completed in {elapsed:.2f}s")
-            logger.info(f"📊 Final configs in archive: {len(final_unique)}")
+            logger.info(f"📊 Final configs in archive: {len(merged_configs)}")
             logger.info("=" * 60)
             return True
 
