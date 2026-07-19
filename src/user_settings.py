@@ -115,10 +115,10 @@ for proto, val in _ENABLED_PROTOCOLS_RAW.items():
 
 # --------------------- Настройки активной проверки (ICMP, TCP, HTTP) ---------------------
 
-ENABLE_ICMP_PING = get_safe_env('PROXY_HUNTER_ENABLE_ICMP', 'True', value_type=bool)
+ENABLE_ICMP_PING = get_safe_env('PROXY_HUNTER_ENABLE_ICMP', 'False', value_type=bool)  # отключаем ICMP
 ICMP_TIMEOUT = get_safe_env('PROXY_HUNTER_ICMP_TIMEOUT', '1.0', value_type=float)
-TCP_TIMEOUT = get_safe_env('PROXY_HUNTER_TCP_TIMEOUT', '1.0', value_type=float)
-HTTP_TIMEOUT = get_safe_env('PROXY_HUNTER_HTTP_TIMEOUT', '2.0', value_type=float)
+TCP_TIMEOUT = get_safe_env('PROXY_HUNTER_TCP_TIMEOUT', '5.0', value_type=float)        # было 1.0 → 5.0
+HTTP_TIMEOUT = get_safe_env('PROXY_HUNTER_HTTP_TIMEOUT', '5.0', value_type=float)      # было 2.0 → 5.0
 MAX_LATENCY_MS = get_safe_env('PROXY_HUNTER_MAX_LATENCY', '6000.0', value_type=float)
 ACTIVE_CHECKER_WORKERS = get_safe_env('PROXY_HUNTER_ACTIVE_WORKERS', '100', value_type=int)
 PER_HOST_LIMIT = get_safe_env('PROXY_HUNTER_PER_HOST_LIMIT', '10', value_type=int)
