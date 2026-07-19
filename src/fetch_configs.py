@@ -16,22 +16,36 @@ from config import ProxyConfig, ChannelConfig
 from config_validator import ConfigValidator
 from parse_fallback import FallbackParser
 from pathlib import Path
-from dateutil import parser as date_parser  # добавлен импорт
+from dateutil import parser as date_parser
 
 from retry_utils import retry_with_backoff, is_retryable
 from session_pool import SessionPool
+from user_settings import (
+    CHANNEL_RETRY_ATTEMPTS,
+    CHANNEL_RETRY_BASE_DELAY,
+    CHANNEL_RETRY_MAX_DELAY,
+    CHANNEL_RETRY_DEADLINE,
+    TELEGRAM_CALLS_PER_SECOND,
+    MAX_RESPONSE_SIZE_BYTES
+)
 
 logger = logging.getLogger(__name__)
 
-# === Rate Limiter для Telegram ===
+# === Rate Limiter с учётом Retry-After ===
 class RateLimiter:
     def __init__(self, calls_per_second: float = 1.5):
         self._sem = asyncio.Semaphore(int(calls_per_second * 60))
         self._lock = asyncio.Lock()
         self._calls_per_second = calls_per_second
+        self._retry_after_until = 0.0
 
     async def acquire(self):
         async with self._lock:
+            now = time.time()
+            if now < self._retry_after_until:
+                wait = self._retry_after_until - now
+                logger.debug(f"Rate limiter waiting {wait:.1f}s due to Retry-After")
+                await asyncio.sleep(wait)
             await self._sem.acquire()
             asyncio.create_task(self._release_after_delay())
 
@@ -39,9 +53,12 @@ class RateLimiter:
         await asyncio.sleep(60 / self._calls_per_second)
         self._sem.release()
 
+    def set_retry_after(self, seconds: int):
+        self._retry_after_until = time.time() + seconds
+
 # === Основной класс ===
 class AsyncConfigFetcher:
-    """Полностью асинхронный сборщик конфигураций с поддержкой лимитов."""
+    """Полностью асинхронный сборщик конфигураций с поддержкой повторных попыток для каналов."""
 
     def __init__(self, config: ProxyConfig, max_concurrent: int = 50):
         self.config = config
@@ -57,7 +74,7 @@ class AsyncConfigFetcher:
         self._connector_limit = min(200, num_channels * 10)
         self._connector_per_host = min(50, num_channels * 5)
 
-        self._rate_limiter = RateLimiter(calls_per_second=1.5)
+        self._rate_limiter = RateLimiter(calls_per_second=TELEGRAM_CALLS_PER_SECOND)
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
         pool = SessionPool()
@@ -74,33 +91,37 @@ class AsyncConfigFetcher:
         await self._rate_limiter.acquire()
 
         session = await self._ensure_session()
-        async with session.get(url) as response:
-            if response.status == 429:
-                retry_after = response.headers.get('Retry-After', '5')
-                try:
-                    wait_time = int(retry_after)
-                except ValueError:
-                    wait_time = 5
-                await asyncio.sleep(wait_time)
-                raise aiohttp.ClientResponseError(
-                    response.request_info,
-                    response.history,
-                    status=response.status,
-                    message=f"Rate limited, retry after {wait_time}s"
-                )
-            if response.status >= 500:
-                raise aiohttp.ClientResponseError(
-                    response.request_info,
-                    response.history,
-                    status=response.status,
-                    message=response.reason
-                )
-            text = await response.text()
-            # Ограничение размера текста (1 МБ)
-            if len(text) > 1_000_000:
-                logger.warning(f"Response from {url} too large ({len(text)} bytes), truncating to 1MB")
-                text = text[:1_000_000]
-            return text
+        try:
+            async with session.get(url) as response:
+                if response.status == 429:
+                    retry_after = response.headers.get('Retry-After', '5')
+                    try:
+                        wait_time = int(retry_after)
+                    except ValueError:
+                        wait_time = 5
+                    self._rate_limiter.set_retry_after(wait_time)
+                    await asyncio.sleep(wait_time)
+                    raise aiohttp.ClientResponseError(
+                        response.request_info,
+                        response.history,
+                        status=response.status,
+                        message=f"Rate limited, retry after {wait_time}s"
+                    )
+                if response.status >= 500:
+                    raise aiohttp.ClientResponseError(
+                        response.request_info,
+                        response.history,
+                        status=response.status,
+                        message=response.reason
+                    )
+                text = await response.text()
+                if len(text) > MAX_RESPONSE_SIZE_BYTES:
+                    logger.warning(f"Response from {url} too large ({len(text)} bytes), truncating to 1MB")
+                    text = text[:MAX_RESPONSE_SIZE_BYTES]
+                return text
+        except asyncio.TimeoutError:
+            logger.warning(f"Timeout fetching {url}")
+            raise
 
     async def fetch_ssconf_configs(self, url: str) -> List[str]:
         https_url = self.validator.convert_ssconf_to_https(url)
@@ -116,6 +137,13 @@ class AsyncConfigFetcher:
             return [text]
         return self.validator.split_configs(text)
 
+    # Обёртка для повторных попыток для всего канала
+    @retry_with_backoff(
+        attempts=CHANNEL_RETRY_ATTEMPTS,
+        base_delay=CHANNEL_RETRY_BASE_DELAY,
+        max_delay=CHANNEL_RETRY_MAX_DELAY,
+        deadline=CHANNEL_RETRY_DEADLINE
+    )
     async def fetch_channel(self, channel: ChannelConfig) -> List[str]:
         async with self._semaphore:
             return await self._fetch_channel_internal(channel)
@@ -250,7 +278,6 @@ class AsyncConfigFetcher:
             time_element = message.find_parent('div', class_='tgme_widget_message').find('time')
             if time_element and 'datetime' in time_element.attrs:
                 dt_str = time_element['datetime']
-                # Используем dateutil.parser для гибкого парсинга
                 return date_parser.parse(dt_str)
         except Exception as e:
             logger.debug(f"Date parsing failed: {e}")
@@ -301,7 +328,7 @@ class AsyncConfigFetcher:
         all_configs = []
         for idx, result in enumerate(results):
             if isinstance(result, Exception):
-                logger.error(f"Channel {enabled[idx].url} failed: {result}")
+                logger.error(f"Channel {enabled[idx].url} failed after retries: {result}")
             else:
                 all_configs.extend(result)
 
