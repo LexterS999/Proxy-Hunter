@@ -11,6 +11,7 @@ from typing import Dict, Optional, Tuple, List
 from datetime import datetime
 
 from db import HistoryDB
+from user_settings import SCORE_WEIGHTS  # добавлен импорт
 
 logger = logging.getLogger(__name__)
 
