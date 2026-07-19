@@ -1,7 +1,7 @@
 """
 Модуль для активной проверки работоспособности прокси-конфигураций.
-Выполняет TCP SYN и HTTP-пробинг с кешированием.
-Использует настройки из user_settings.
+Выполняет TCP SYN и HTTP-пробинг (HEAD) с кешированием результатов.
+ICMP полностью удалён.
 """
 
 import asyncio
@@ -10,11 +10,10 @@ import time
 import socket
 import re
 from typing import Dict, List, Optional, Tuple
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from urllib.parse import urlparse, parse_qs
 
 import aiohttp
-from aiohttp import ClientTimeout
 
 from concurrency import ConcurrencyLimiter
 from session_pool import SessionPool
@@ -30,10 +29,9 @@ from user_settings import (
 logger = logging.getLogger(__name__)
 
 
-class ActiveChecker:
+class CachedActiveChecker:
     """
-    Активная проверка с TCP, HTTP, кешированием и пулом соединений.
-    ICMP отключён.
+    Активная проверка с кешированием результатов на основе TTL.
     """
 
     def __init__(self,
@@ -41,25 +39,23 @@ class ActiveChecker:
                  max_workers: int = None,
                  test_url: str = "https://www.google.com/generate_204",
                  max_latency: float = None,
-                 history: Dict = None):
+                 history: Dict = None,
+                 cache_ttl: int = 3600):  # 1 час
         self.timeout = timeout or TCP_TIMEOUT
         self.max_workers = max_workers or ACTIVE_CHECKER_WORKERS
         self.test_url = test_url
         self.max_latency = max_latency or MAX_LATENCY_MS
         self.history = history or {}
+        self.cache_ttl = cache_ttl
+        self._cache = {}  # config -> (timestamp, result)
         self._session = None
         self._connector = None
-
         self._limiter = ConcurrencyLimiter(
             global_limit=self.max_workers,
             per_host_limit=PER_HOST_LIMIT
         )
-
         self._tcp_cache = OrderedDict()
         self._cache_max_size = 5000
-
-        # ICMP полностью отключён
-        self._enable_icmp = False
 
     def _should_skip(self, config: str) -> bool:
         """Фильтрация по истории."""
@@ -127,36 +123,48 @@ class ActiveChecker:
             return self._tcp_cache[key]
 
         latency = await self._tcp_latency_with_retry(host, port)
-
         if len(self._tcp_cache) >= self._cache_max_size:
             self._tcp_cache.popitem(last=False)
         self._tcp_cache[key] = latency
         return latency
 
     async def _http_probe(self, host: str, port: int, use_tls: bool) -> float:
+        """Использует HEAD-запрос вместо Range."""
         try:
             session = await self._get_session()
             proto = 'https' if use_tls else 'http'
             url = f"{proto}://{host}:{port}"
-            headers = {'Range': 'bytes=0-0'}
             start = time.time()
-            async with session.get(url, headers=headers, allow_redirects=True, timeout=HTTP_TIMEOUT) as resp:
-                if resp.status in (200, 204, 206, 301, 302, 307, 308):
+            # HEAD-запрос
+            async with session.head(url, allow_redirects=True, timeout=HTTP_TIMEOUT) as resp:
+                if resp.status < 400:  # 2xx или 3xx
                     return (time.time() - start) * 1000
             return -1.0
         except Exception:
             return -1.0
 
     async def check_config(self, config: str) -> Dict:
+        # Проверяем кеш
+        now = time.time()
+        if config in self._cache:
+            ts, result = self._cache[config]
+            if now - ts < self.cache_ttl:
+                logger.debug(f"Using cached result for {config[:50]}")
+                return result
+            else:
+                del self._cache[config]
+
         result = {'config': config, 'valid': False, 'latency': -1.0, 'success': False, 'error': None}
 
         if self._should_skip(config):
             result['error'] = 'skipped_by_history'
+            self._cache[config] = (now, result)
             return result
 
         server_info = self._extract_server_info(config)
         if not server_info:
             result['error'] = 'no_server_info'
+            self._cache[config] = (now, result)
             return result
 
         host, port, use_tls = server_info
@@ -164,6 +172,7 @@ class ActiveChecker:
         tcp_latency = await self._limiter.run(host, self._tcp_latency(host, port))
         if tcp_latency < 0:
             result['error'] = 'tcp_failed'
+            self._cache[config] = (now, result)
             return result
 
         if tcp_latency > 0 and tcp_latency < self.max_latency:
@@ -172,26 +181,27 @@ class ActiveChecker:
                 result['latency'] = http_latency
                 result['valid'] = True
                 result['success'] = True
+                self._cache[config] = (now, result)
                 return result
 
         if tcp_latency <= self.max_latency:
             result['latency'] = tcp_latency
             result['valid'] = True
             result['success'] = True
+            self._cache[config] = (now, result)
             return result
 
         result['error'] = 'latency_too_high'
+        self._cache[config] = (now, result)
         return result
 
     async def check_batch(self, configs: List[str]) -> List[Dict]:
         if not configs:
             return []
 
-        filtered_configs = [c for c in configs if not self._should_skip(c)]
-
         # Прогрев кеша TCP
         server_groups = {}
-        for cfg in filtered_configs:
+        for cfg in configs:
             info = self._extract_server_info(cfg)
             if info:
                 server_groups[(info[0], info[1])] = True
@@ -208,14 +218,14 @@ class ActiveChecker:
             async with sem:
                 return await self.check_config(cfg)
 
-        tasks = [check_one(cfg) for cfg in filtered_configs]
+        tasks = [check_one(cfg) for cfg in configs]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         final = []
         for idx, res in enumerate(results):
             if isinstance(res, Exception):
                 final.append({
-                    'config': filtered_configs[idx],
+                    'config': configs[idx],
                     'valid': False,
                     'latency': -1.0,
                     'success': False,
@@ -262,7 +272,7 @@ class ActiveChecker:
         except Exception as e:
             logger.debug(f"Parser extraction failed: {e}")
 
-        # fallback через urlparse
+        # fallback
         try:
             base = config.split('#')[0]
             parsed = urlparse(base)
@@ -276,7 +286,6 @@ class ActiveChecker:
         except Exception:
             pass
 
-        # regex fallback
         match = re.search(r'@([^:]+):(\d+)', config)
         if match:
             host = match.group(1)
@@ -293,3 +302,12 @@ class ActiveChecker:
             r['config'] for r in results
             if r.get('valid', False) and 0 <= r.get('latency', -1) <= max_latency
         ]
+
+    def clear_cache(self):
+        """Очищает кеш результатов."""
+        self._cache.clear()
+        logger.info("Cleared check cache")
+
+
+# Для обратной совместимости переименуем
+ActiveChecker = CachedActiveChecker
