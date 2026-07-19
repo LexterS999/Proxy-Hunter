@@ -163,7 +163,11 @@ CHANNEL_HEALTH_THRESHOLD = get_safe_env('PROXY_HUNTER_CHANNEL_HEALTH_THRESHOLD',
 CHANNEL_MIN_CONFIGS = get_safe_env('PROXY_HUNTER_CHANNEL_MIN_CONFIGS', '3', value_type=int)
 CHANNEL_MIN_VALID_RATIO = get_safe_env('PROXY_HUNTER_CHANNEL_MIN_VALID_RATIO', '0.05', value_type=float)
 CHANNEL_MIN_PROTOCOLS = get_safe_env('PROXY_HUNTER_CHANNEL_MIN_PROTOCOLS', '1', value_type=int)
-CHANNEL_HISTORY_DAYS = get_safe_env('PROXY_HUNTER_CHANNEL_HISTORY_DAYS', '3', value_type=int)
+CHANNEL_HISTORY_DAYS = get_safe_env('PROXY_HUNTER_CHANNEL_HISTORY_DAYS', '7', value_type=int)  # увеличено до 7
+
+# Новые настройки для интеллектуального анализа
+CHANNEL_RECOVERING_TREND_THRESHOLD = get_safe_env('PROXY_HUNTER_RECOVERING_TREND_THRESHOLD', '0.1', value_type=float)
+CHANNEL_MIN_RECENT_DAYS_FOR_TREND = get_safe_env('PROXY_HUNTER_MIN_RECENT_DAYS_FOR_TREND', '2', value_type=int)
 
 _whitelist_raw = os.getenv('PROXY_HUNTER_CHANNEL_WHITELIST', '')
 CHANNEL_WHITELIST = [url.strip() for url in _whitelist_raw.split(',') if url.strip()]
