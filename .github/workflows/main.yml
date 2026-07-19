@@ -36,7 +36,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libmaxminddb-dev unzip
+          sudo apt-get install -y unzip
 
       - name: Install Python dependencies
         run: |
@@ -59,10 +59,8 @@ jobs:
         run: |
           touch configs/output_archive.txt
           touch configs/output_simple.txt
-          echo '{}' > configs/location_cache.json
           echo '{}' > configs/parsed_cache.json
 
-      # Проверяем возраст архива и удаляем, если старше 7 дней
       - name: Rotate archive if older than 7 days
         run: |
           ARCHIVE="configs/output_archive.txt"
@@ -189,12 +187,6 @@ jobs:
           else
             echo "history_db_exists=false" >> $GITHUB_OUTPUT
           fi
-          if [ -f "configs/location_cache.json" ]; then
-            echo "location_cache_exists=true" >> $GITHUB_OUTPUT
-            echo "✅ location_cache.json exists"
-          else
-            echo "location_cache_exists=false" >> $GITHUB_OUTPUT
-          fi
           if [ -f "configs/parsed_cache.json" ]; then
             echo "parsed_cache_exists=true" >> $GITHUB_OUTPUT
             echo "✅ parsed_cache.json exists"
@@ -258,7 +250,6 @@ jobs:
             configs/output_archive.txt
             configs/output_simple.txt
             configs/history.db
-            configs/location_cache.json
             configs/parsed_cache.json
           retention-days: 7
           if-no-files-found: warn
@@ -268,7 +259,7 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add configs/output_archive.txt configs/output_simple.txt configs/location_cache.json configs/parsed_cache.json custom_channels.txt
+          git add configs/output_archive.txt configs/output_simple.txt configs/parsed_cache.json custom_channels.txt
           if git diff --staged --quiet; then
             echo "✅ No changes to commit"
           else
