@@ -832,23 +832,6 @@
     "spx": "",
     "name": "kurdconfig"
   },
-  "a93af9d1a4c303a109e46997c9cedefd": {
-    "uuid": "50414e45-4c5f-5a45-5553-d8c448e1cbf6",
-    "address": "199.181.197.253",
-    "port": 2083,
-    "flow": "",
-    "sni": "zeus-panel-kbxb9u.nova25tir.workers.dev",
-    "type": "ws",
-    "path": "/stream/PANEL_ZEUS/50414e45",
-    "host": "zeus-panel-kbxb9u.nova25tir.workers.dev",
-    "security": "tls",
-    "alpn": "",
-    "fp": "ios",
-    "pbk": "",
-    "sid": "",
-    "spx": "",
-    "name": "@GozargahAzad|#CloudFlare@GozargahAzad"
-  },
   "0bae64dfa470a129df5f70ca3fa3fb6a": {
     "uuid": "50414e45-4c5f-5a45-5553-d8c448e1cbf6",
     "address": "199.181.197.253",
@@ -2679,6 +2662,20 @@
     "flow": "",
     "name": "kurdconfig"
   },
+  "650c2bd5343aa788f739bcebf24d49c3": {
+    "password": "-------BanV2ray------",
+    "address": "edededededededededededede-66.poki-pakipon.ir",
+    "port": 36268,
+    "sni": "chi.yahoo.com",
+    "alpn": "",
+    "type": "grpc",
+    "path": "",
+    "host": "edededededededededededede-66.poki-pakipon.ir",
+    "security": "reality",
+    "fp": "firefox",
+    "flow": "",
+    "name": "@GozargahAzad|\ud83c\udde8\ud83c\udded#Switzerland\ud83c\udde8\ud83c\udded@GozargahAzad"
+  },
   "401b794a6b4bd65cf8e1e3c5b4bd1564": {
     "password": "-------BanV2ray------",
     "address": "soskeynets.poki-pakipon.ir",
@@ -2692,6 +2689,20 @@
     "fp": "firefox",
     "flow": "",
     "name": "\ud83c\udde8\ud83c\udded115018 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
+  },
+  "09383da29ec502e906c3c68a45559f7d": {
+    "password": "-----BanV2ray----",
+    "address": "edededededededededededede-66.poki-pakipon.ir",
+    "port": 16267,
+    "sni": "chi.yahoo.com",
+    "alpn": "",
+    "type": "grpc",
+    "path": "",
+    "host": "edededededededededededede-66.poki-pakipon.ir",
+    "security": "reality",
+    "fp": "firefox",
+    "flow": "",
+    "name": "@GozargahAzad|\ud83c\udde8\ud83c\udded#Switzerland\ud83c\udde8\ud83c\udded@GozargahAzad"
   },
   "7d4a5d0573d3fdb0807b1b7735d96dca": {
     "password": "0ab6c98dae3b48e8b9c4a776b6c9c19a",
@@ -2734,20 +2745,6 @@
     "fp": "",
     "flow": "",
     "name": "\ud83c\udde8\ud83c\udde6115151 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET Join: @soskeynets"
-  },
-  "b4cd088bbb1b97360d77fe35abb3f8c4": {
-    "password": "242a3d8eee5e4ed1a6bfa4141d549a25",
-    "address": "198.41.220.12",
-    "port": 443,
-    "sni": "jobscareerforlawyers.com",
-    "alpn": "",
-    "type": "ws",
-    "path": "6b777a91",
-    "host": "jobscareerforlawyers.com",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "@GozargahAzad|#CloudFlare@GozargahAzad"
   },
   "1b815b3b8d25b22e39fc27a180eba13c": {
     "password": "242a3d8eee5e4ed1a6bfa4141d549a25",
