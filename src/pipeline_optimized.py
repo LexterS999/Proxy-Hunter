@@ -297,16 +297,19 @@ class OptimizedPipeline:
             self.channel_analyzer = ChannelQualityAnalyzer()
             urls = [ch.url for ch in self.config.SOURCE_URLS]
             for ch in self.config.SOURCE_URLS:
-                if not self.channel_analyzer.is_channel_healthy(ch.url):
+                state = self.channel_analyzer.get_channel_state(ch.url)
+                if state == 'inactive':
                     ch.enabled = False
-                    logger.info(f"Channel {ch.url} disabled due to poor long-term health.")
+                    logger.info(f"Channel {ch.url} disabled (state: inactive).")
                 else:
                     ch.enabled = True
+                    logger.debug(f"Channel {ch.url} enabled (state: {state}).")
             report = self.channel_analyzer.get_health_report()
             summary = report.get('summary', {})
             logger.info(
-                f"📈 Channel health: {summary.get('healthy', 0)} healthy / "
-                f"{summary.get('unhealthy', 0)} unhealthy (total {summary.get('total', 0)})"
+                f"📈 Channel health: active={summary.get('active', 0)}, "
+                f"recovering={summary.get('recovering', 0)}, "
+                f"inactive={summary.get('inactive', 0)} (total {summary.get('total', 0)})"
             )
         except Exception as e:
             logger.warning(f"Failed to refresh channel health: {e}")
