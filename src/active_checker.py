@@ -68,7 +68,8 @@ class ActiveChecker:
         self._tcp_cache = OrderedDict()
         self._cache_max_size = 5000
 
-        self._enable_icmp = ENABLE_ICMP_PING and HAS_ICMP
+        # Принудительно отключаем ICMP — убираем проверку по требованию пользователя
+        self._enable_icmp = False
 
     def _should_skip(self, config: str) -> bool:
         """Фильтрация по истории."""
@@ -152,17 +153,7 @@ class ActiveChecker:
             self._tcp_cache.move_to_end(key)
             return self._tcp_cache[key]
 
-        # Если ICMP включён, сначала пинг
-        if self._enable_icmp:
-            icmp_rtt = await self._icmp_ping(host)
-            if icmp_rtt < 0 or icmp_rtt > self.max_latency:
-                # Хост не отвечает на ICMP или слишком высокая задержка — пропускаем
-                latency = -1.0
-                if len(self._tcp_cache) >= self._cache_max_size:
-                    self._tcp_cache.popitem(last=False)
-                self._tcp_cache[key] = latency
-                return latency
-
+        # ICMP отключён — сразу переходим к TCP
         latency = await self._tcp_latency_with_retry(host, port)
 
         if len(self._tcp_cache) >= self._cache_max_size:
