@@ -2859,20 +2859,6 @@
     "flow": "",
     "name": "\ud83c\udde8\ud83c\udde6115123 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
-  "728c7ffc0547a9c552d3acf8721aca68": {
-    "password": "6d25dd28-80a4-4f63-80c6-f36d6ce1d25f",
-    "address": "94.131.122.157",
-    "port": 2053,
-    "sni": "94.131.122.157",
-    "alpn": "",
-    "type": "tcp",
-    "path": "",
-    "host": "94.131.122.157",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "@GozargahAzad|\ud83c\uddec\ud83c\udde7#UnitedKingdom\ud83c\uddec\ud83c\udde7@GozargahAzad"
-  },
   "5b535f93a692a86b8452cda9f8394188": {
     "password": "E-Graphic",
     "address": "104.17.147.22",
@@ -3208,20 +3194,6 @@
     "fp": "",
     "flow": "",
     "name": "\ud83c\uddee\ud83c\uddea115003 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
-  },
-  "ffda4cefc53510f23051452310af3100": {
-    "password": "tg-dns68",
-    "address": "162.159.152.9",
-    "port": 443,
-    "sni": "vip.putata.eu.org",
-    "alpn": "",
-    "type": "ws",
-    "path": "/?ed=2560",
-    "host": "vip.putata.eu.org",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "@GozargahAzad|#CloudFlare@GozargahAzad"
   },
   "6e04c79b3c6c3aaaafe7fe1bec18b8d7": {
     "password": "tg-dns68",
