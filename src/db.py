@@ -346,24 +346,32 @@ class HistoryDB:
                 result.append(d)
             return result
 
-    def get_channel_long_term_score(self, url: str, days: int = 3) -> Optional[float]:
+    def get_channel_history_scores(self, url: str, days: int = 7) -> List[Dict]:
         """
-        Вычисляет средний скор канала за последние N дней (по умолчанию 3).
-        Использует channel_history.
+        Возвращает историю скоров канала за последние N дней (по умолчанию 7).
+        Возвращает список словарей с ключами 'timestamp' и 'score'.
         """
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT overall_score FROM channel_history
+                SELECT timestamp, overall_score FROM channel_history
                 WHERE url = ? AND timestamp >= ?
-                ORDER BY timestamp DESC
+                ORDER BY timestamp ASC
             ''', (url, cutoff))
             rows = cursor.fetchall()
-            scores = [row['overall_score'] for row in rows if row['overall_score'] > 0]
-            if not scores:
-                return None
-            return sum(scores) / len(scores)
+            return [{'timestamp': row['timestamp'], 'score': row['overall_score']} for row in rows]
+
+    def get_channel_long_term_score(self, url: str, days: int = 7) -> Optional[float]:
+        """
+        Вычисляет средний скор канала за последние N дней (по умолчанию 7).
+        Использует channel_history.
+        """
+        scores = self.get_channel_history_scores(url, days)
+        valid_scores = [s['score'] for s in scores if s['score'] > 0]
+        if not valid_scores:
+            return None
+        return sum(valid_scores) / len(valid_scores)
 
 
 # Инициализация БД при первом импорте
