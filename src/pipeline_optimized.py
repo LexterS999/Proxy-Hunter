@@ -166,7 +166,6 @@ class OptimizedPipeline:
             return hashlib.md5(config.encode()).hexdigest()
 
     def _generate_name(self, config: str) -> str:
-        # Простое имя без гео: протокол + хеш
         try:
             protocol = config.split('://')[0].upper()
             key = self._get_config_key(config)
@@ -395,7 +394,7 @@ class OptimizedPipeline:
                                 'score': score_info['score'],
                                 'stability': score_info['stability'],
                                 'lifetime': score_info['lifetime'],
-                                'is_datacenter': False,  # без гео
+                                'is_datacenter': False,
                                 'server_type': 'UNK',
                                 'parsed': info['parsed']
                             })
@@ -444,6 +443,7 @@ class OptimizedPipeline:
                 await self.save_state()
                 return False
 
+            # Закрываем сессию после проверки
             await SessionPool().close()
 
             good_configs = [
@@ -583,6 +583,12 @@ class OptimizedPipeline:
         except Exception as e:
             logger.error(f"❌ Pipeline failed: {e}\n{traceback.format_exc()}")
             return False
+        finally:
+            # Закрываем все сессии
+            try:
+                await SessionPool().close()
+            except Exception as e:
+                logger.warning(f"Error closing session pool: {e}")
 
 
 def main():
