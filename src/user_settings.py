@@ -98,7 +98,7 @@ USE_MAXIMUM_POWER = get_safe_env('PROXY_HUNTER_USE_MAXIMUM_POWER', 'True', value
 SPECIFIC_CONFIG_COUNT = get_safe_env('PROXY_HUNTER_SPECIFIC_CONFIG_COUNT', '5000', value_type=int)
 MAX_CONFIG_AGE_DAYS = get_safe_env('PROXY_HUNTER_MAX_CONFIG_AGE_DAYS', '14', value_type=int)
 
-# Включаем vmess и ss по умолчанию
+# Включаемые протоколы
 _ENABLED_PROTOCOLS_RAW = {
     "wireguard://": os.getenv('PROXY_HUNTER_ENABLE_WIREGUARD', 'False'),
     "hysteria2://": os.getenv('PROXY_HUNTER_ENABLE_HYSTERIA2', 'True'),
@@ -113,35 +113,37 @@ ENABLED_PROTOCOLS = {}
 for proto, val in _ENABLED_PROTOCOLS_RAW.items():
     ENABLED_PROTOCOLS[proto] = get_safe_env(f'PROXY_HUNTER_ENABLE_{proto.replace("://", "").upper()}', val, value_type=bool)
 
-# --------------------- Геолокация и обогащение ---------------------
+# --------------------- Настройки активной проверки (ICMP, TCP, HTTP) ---------------------
 
-GEO_COUNTRY_URL = "https://media.githubusercontent.com/media/iplocate/ip-address-databases/refs/heads/main/ip-to-country/ip-to-country.mmdb"
-GEO_ASN_URL = "https://media.githubusercontent.com/media/iplocate/ip-address-databases/refs/heads/main/ip-to-asn/ip-to-asn.mmdb"
+ENABLE_ICMP_PING = get_safe_env('PROXY_HUNTER_ENABLE_ICMP', 'True', value_type=bool)
+ICMP_TIMEOUT = get_safe_env('PROXY_HUNTER_ICMP_TIMEOUT', '1.0', value_type=float)
+TCP_TIMEOUT = get_safe_env('PROXY_HUNTER_TCP_TIMEOUT', '1.0', value_type=float)
+HTTP_TIMEOUT = get_safe_env('PROXY_HUNTER_HTTP_TIMEOUT', '2.0', value_type=float)
+MAX_LATENCY_MS = get_safe_env('PROXY_HUNTER_MAX_LATENCY', '6000.0', value_type=float)
+ACTIVE_CHECKER_WORKERS = get_safe_env('PROXY_HUNTER_ACTIVE_WORKERS', '100', value_type=int)
+PER_HOST_LIMIT = get_safe_env('PROXY_HUNTER_PER_HOST_LIMIT', '10', value_type=int)
 
-GEO_COUNTRY_CACHE_PATH = None
-GEO_ASN_CACHE_PATH = None
+# --------------------- Настройки повторных попыток и Rate Limiting ---------------------
 
-# --------------------- Именование конфигураций ---------------------
+CHANNEL_RETRY_ATTEMPTS = get_safe_env('PROXY_HUNTER_CHANNEL_RETRIES', '3', value_type=int)
+CHANNEL_RETRY_BASE_DELAY = get_safe_env('PROXY_HUNTER_CHANNEL_RETRY_DELAY', '0.5', value_type=float)
+CHANNEL_RETRY_MAX_DELAY = get_safe_env('PROXY_HUNTER_CHANNEL_RETRY_MAX_DELAY', '10.0', value_type=float)
+CHANNEL_RETRY_DEADLINE = get_safe_env('PROXY_HUNTER_CHANNEL_RETRY_DEADLINE', '60.0', value_type=float)
 
-# Изменённый формат: флаг + код страны + протокол|транспорт|security
-NAMING_FORMAT = "{protocol_info}"
+TELEGRAM_CALLS_PER_SECOND = get_safe_env('PROXY_HUNTER_TELEGRAM_RATE', '1.5', value_type=float)
+MAX_RESPONSE_SIZE_BYTES = get_safe_env('PROXY_HUNTER_MAX_RESPONSE_SIZE', '1048576', value_type=int)  # 1 МБ
+
+# --------------------- Именование конфигураций (без гео) ---------------------
+
+NAMING_FORMAT = "PROTOCOL{protocol_info}"
 NAMING_SEPARATOR = "-"
-
-SHOW_DC_TAG = True
-
-DC_KEYWORDS = [
-    'cloud', 'host', 'data', 'server', 'vps', 'dedicated',
-    'colocation', 'infrastructure', 'digitalocean', 'aws',
-    'amazon', 'azure', 'google cloud', 'oracle cloud',
-    'linode', 'vultr', 'hetzner', 'ovh', 'scaleway', 'leaseweb'
-]
 
 # --------------------- Оценка качества ---------------------
 
 SCORE_WEIGHTS = {
     'stability': 0.3,
     'success_rate': 0.25,
-    'reputation': 0.2,
+    'reputation': 0.2,      # репутация теперь всегда 0.5 (без гео)
     'lifetime': 0.15,
     'config_quality': 0.1
 }
@@ -163,9 +165,8 @@ CHANNEL_HEALTH_THRESHOLD = get_safe_env('PROXY_HUNTER_CHANNEL_HEALTH_THRESHOLD',
 CHANNEL_MIN_CONFIGS = get_safe_env('PROXY_HUNTER_CHANNEL_MIN_CONFIGS', '3', value_type=int)
 CHANNEL_MIN_VALID_RATIO = get_safe_env('PROXY_HUNTER_CHANNEL_MIN_VALID_RATIO', '0.05', value_type=float)
 CHANNEL_MIN_PROTOCOLS = get_safe_env('PROXY_HUNTER_CHANNEL_MIN_PROTOCOLS', '1', value_type=int)
-CHANNEL_HISTORY_DAYS = get_safe_env('PROXY_HUNTER_CHANNEL_HISTORY_DAYS', '7', value_type=int)  # увеличено до 7
+CHANNEL_HISTORY_DAYS = get_safe_env('PROXY_HUNTER_CHANNEL_HISTORY_DAYS', '7', value_type=int)
 
-# Новые настройки для интеллектуального анализа
 CHANNEL_RECOVERING_TREND_THRESHOLD = get_safe_env('PROXY_HUNTER_RECOVERING_TREND_THRESHOLD', '0.1', value_type=float)
 CHANNEL_MIN_RECENT_DAYS_FOR_TREND = get_safe_env('PROXY_HUNTER_MIN_RECENT_DAYS_FOR_TREND', '2', value_type=int)
 
