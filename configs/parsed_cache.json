@@ -2721,20 +2721,6 @@
     "flow": "",
     "name": "\ud83c\udf0d115159 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
-  "3c1501acd9bd148bdefd0b7e83f4d8d0": {
-    "password": "2238e2f3-1a01-485e-8c22-24b65764c68b",
-    "address": "172.64.152.23",
-    "port": 443,
-    "sni": "gzjx.dpdns.org",
-    "alpn": "",
-    "type": "ws",
-    "path": "/51.91.253.83",
-    "host": "gzjx.dpdns.org",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "@GozargahAzad|#CloudFlare@GozargahAzad"
-  },
   "f2fc650d115b24d9eb8e9e4737981f10": {
     "password": "2238e2f3-1a01-485e-8c22-24b65764c68b",
     "address": "172.64.152.23",
@@ -2748,6 +2734,20 @@
     "fp": "",
     "flow": "",
     "name": "\ud83c\udde8\ud83c\udde6115151 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET Join: @soskeynets"
+  },
+  "b4cd088bbb1b97360d77fe35abb3f8c4": {
+    "password": "242a3d8eee5e4ed1a6bfa4141d549a25",
+    "address": "198.41.220.12",
+    "port": 443,
+    "sni": "jobscareerforlawyers.com",
+    "alpn": "",
+    "type": "ws",
+    "path": "6b777a91",
+    "host": "jobscareerforlawyers.com",
+    "security": "tls",
+    "fp": "",
+    "flow": "",
+    "name": "@GozargahAzad|#CloudFlare@GozargahAzad"
   },
   "39cc1384f67fe8260c1ff3f29cab16f3": {
     "password": "257d8622-6701-4c98-a432-67a9696f58ae",
@@ -2973,20 +2973,6 @@
     "flow": "",
     "name": "kurdconfig@kurdconfig"
   },
-  "a6ab6a1a91caa91417c1de1ea1357ab6": {
-    "password": "Watashi_VPN",
-    "address": "104.18.38.122",
-    "port": 8443,
-    "sni": "t-watashi-r-jacket-o-people-jan.watashi-java.ir",
-    "alpn": "",
-    "type": "ws",
-    "path": "/",
-    "host": "t-watashi-r-jacket-o-people-jan.watashi-java.ir",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "@GozargahAzad|#CloudFlare@GozargahAzad"
-  },
   "7742ce5da4d54a4e726b8d7b589a159d": {
     "password": "Watashi_VPN",
     "address": "104.18.38.122",
@@ -3196,6 +3182,20 @@
     "fp": "",
     "flow": "",
     "name": "\ud83c\uddee\ud83c\uddea115003 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
+  },
+  "d20b18815f550ef6a146bc8800079600": {
+    "password": "tg-dns68",
+    "address": "162.159.152.207",
+    "port": 443,
+    "sni": "vip.putata.eu.org",
+    "alpn": "",
+    "type": "ws",
+    "path": "/?ed=2560",
+    "host": "vip.putata.eu.org",
+    "security": "tls",
+    "fp": "",
+    "flow": "",
+    "name": "@GozargahAzad|#CloudFlare@GozargahAzad"
   },
   "ffda4cefc53510f23051452310af3100": {
     "password": "tg-dns68",
