@@ -1,6 +1,7 @@
 """
 Модуль для работы с SQLite-базой данных истории.
 Хранит статистику запусков, каналов и профилей с компрессией.
+Добавлены индексы, LRU-кеш для распаковки, WAL-режим.
 """
 
 import sqlite3
@@ -11,6 +12,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 from contextlib import contextmanager
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +30,9 @@ def _compress(data: Any) -> bytes:
         return b''
 
 
-def _decompress(blob: bytes) -> Any:
-    """Распаковывает bytes в JSON-объект."""
+@lru_cache(maxsize=1024)
+def _decompress_cached(blob: bytes) -> Any:
+    """Распаковывает bytes в JSON-объект с кешированием."""
     if blob is None or not blob:
         return None
     try:
@@ -38,8 +41,13 @@ def _decompress(blob: bytes) -> Any:
         return None
 
 
+def _decompress(blob: bytes) -> Any:
+    """Обёртка для обратной совместимости."""
+    return _decompress_cached(blob)
+
+
 class HistoryDB:
-    """Синглтон для доступа к SQLite базе истории."""
+    """Синглтон для доступа к SQLite базе истории с индексами и WAL."""
 
     _instance = None
 
@@ -50,10 +58,13 @@ class HistoryDB:
         return cls._instance
 
     def _init_db(self):
-        """Создаёт таблицы, если их нет."""
+        """Создаёт таблицы и индексы, включает WAL."""
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         with self._get_connection() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
             cursor = conn.cursor()
+
             # Таблица запусков (runs)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS runs (
@@ -67,20 +78,22 @@ class HistoryDB:
                     p95_latency REAL,
                     p99_latency REAL,
                     success_rate REAL,
-                    protocols BLOB,   -- сжатый JSON
+                    protocols BLOB,
                     geo_distribution BLOB,
                     anomalies BLOB
                 )
             ''')
+
             # Таблица каналов (channels)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS channels (
                     url TEXT PRIMARY KEY,
                     enabled INTEGER DEFAULT 1,
-                    metrics BLOB,   -- сжатый JSON
+                    metrics BLOB,
                     last_updated TEXT
                 )
             ''')
+
             # Таблица профилей (profiles)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS profiles (
@@ -91,21 +104,23 @@ class HistoryDB:
                     last_seen TEXT,
                     success_count INTEGER DEFAULT 0,
                     fail_count INTEGER DEFAULT 0,
-                    latencies BLOB,   -- сжатый список
-                    timestamps BLOB,  -- сжатый список
+                    latencies BLOB,
+                    timestamps BLOB,
                     is_active INTEGER DEFAULT 1,
                     stability REAL,
                     lifetime REAL,
                     overall_score REAL
                 )
             ''')
-            # Таблица для хранения произвольных метаданных (например, порогов)
+
+            # Таблица метаданных
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS metadata (
                     key TEXT PRIMARY KEY,
                     value TEXT
                 )
             ''')
+
             # Таблица истории каналов (channel_history)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS channel_history (
@@ -122,8 +137,18 @@ class HistoryDB:
                     FOREIGN KEY(run_id) REFERENCES runs(id)
                 )
             ''')
+
+            # Индексы (добавляем, если их нет)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_history_url ON channel_history(url)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_history_timestamp ON channel_history(timestamp)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_history_run_id ON channel_history(run_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_profiles_server ON profiles(server)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_profiles_protocol ON profiles(protocol)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_profiles_last_seen ON profiles(last_seen)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_runs_timestamp ON runs(timestamp)")
+
             conn.commit()
-            logger.info("SQLite history database initialized.")
+            logger.info("SQLite history database initialized with indexes and WAL.")
 
     @contextmanager
     def _get_connection(self):
@@ -135,9 +160,8 @@ class HistoryDB:
         finally:
             conn.close()
 
-    # ----- Методы для работы с runs -----
+    # ----- Методы для работы с runs (без изменений) -----
     def add_run(self, stats: Dict) -> int:
-        """Добавляет запись о запуске, возвращает id."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -164,7 +188,6 @@ class HistoryDB:
             return cursor.lastrowid
 
     def get_recent_runs(self, limit: int = 10) -> List[Dict]:
-        """Возвращает последние N запусков."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -181,13 +204,11 @@ class HistoryDB:
             return result
 
     def get_last_run(self) -> Optional[Dict]:
-        """Возвращает последний запуск."""
         runs = self.get_recent_runs(1)
         return runs[0] if runs else None
 
-    # ----- Методы для работы с каналами -----
+    # ----- Методы для работы с каналами (без изменений) -----
     def update_channel(self, url: str, metrics: Dict, enabled: bool = True):
-        """Обновляет или вставляет данные канала."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -202,7 +223,6 @@ class HistoryDB:
             conn.commit()
 
     def get_channel(self, url: str) -> Optional[Dict]:
-        """Возвращает данные канала."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT * FROM channels WHERE url = ?', (url,))
@@ -214,7 +234,6 @@ class HistoryDB:
             return None
 
     def get_all_channels(self) -> List[Dict]:
-        """Возвращает все каналы."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT * FROM channels')
@@ -226,9 +245,8 @@ class HistoryDB:
                 result.append(d)
             return result
 
-    # ----- Методы для работы с профилями -----
+    # ----- Методы для работы с профилями (без изменений) -----
     def update_profile(self, key: str, profile_data: Dict):
-        """Обновляет или вставляет профиль."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -255,7 +273,6 @@ class HistoryDB:
             conn.commit()
 
     def get_profile(self, key: str) -> Optional[Dict]:
-        """Возвращает профиль."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT * FROM profiles WHERE key = ?', (key,))
@@ -269,7 +286,6 @@ class HistoryDB:
             return None
 
     def get_all_profiles(self) -> List[Dict]:
-        """Возвращает все профили."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT * FROM profiles')
@@ -283,9 +299,8 @@ class HistoryDB:
                 result.append(d)
             return result
 
-    # ----- Методы для метаданных -----
+    # ----- Методы для метаданных (без изменений) -----
     def get_metadata(self, key: str, default: Any = None) -> Any:
-        """Получает метаданные."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT value FROM metadata WHERE key = ?', (key,))
@@ -298,7 +313,6 @@ class HistoryDB:
             return default
 
     def set_metadata(self, key: str, value: Any):
-        """Устанавливает метаданные."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -306,9 +320,8 @@ class HistoryDB:
             ''', (key, json.dumps(value)))
             conn.commit()
 
-    # ----- Методы для истории каналов -----
+    # ----- Методы для истории каналов (без изменений) -----
     def add_channel_history(self, url: str, run_id: int, metrics: Dict):
-        """Добавляет запись истории для канала."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -330,7 +343,6 @@ class HistoryDB:
             conn.commit()
 
     def get_channel_history(self, url: str, limit: int = 10) -> List[Dict]:
-        """Возвращает историю канала за последние N запусков."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -347,10 +359,6 @@ class HistoryDB:
             return result
 
     def get_channel_history_scores(self, url: str, days: int = 7) -> List[Dict]:
-        """
-        Возвращает историю скоров канала за последние N дней (по умолчанию 7).
-        Возвращает список словарей с ключами 'timestamp' и 'score'.
-        """
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -363,10 +371,6 @@ class HistoryDB:
             return [{'timestamp': row['timestamp'], 'score': row['overall_score']} for row in rows]
 
     def get_channel_long_term_score(self, url: str, days: int = 7) -> Optional[float]:
-        """
-        Вычисляет средний скор канала за последние N дней (по умолчанию 7).
-        Использует channel_history.
-        """
         scores = self.get_channel_history_scores(url, days)
         valid_scores = [s['score'] for s in scores if s['score'] > 0]
         if not valid_scores:
@@ -374,5 +378,5 @@ class HistoryDB:
         return sum(valid_scores) / len(valid_scores)
 
 
-# Инициализация БД при первом импорте
+# Инициализация
 _db = HistoryDB()
