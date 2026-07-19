@@ -426,11 +426,11 @@ class OptimizedPipeline:
                 await self.save_state()
                 return False
 
-            # Шаг 5: Активная проверка
-            logger.info("🔌 Active checking (ICMP, TCP, HTTP, async)...")
+            # Шаг 5: Активная проверка (таймаут увеличен до 5 секунд)
+            logger.info("🔌 Active checking (TCP, HTTP, async, ICMP disabled)...")
             history = self._safe_load_history()
             checker = ActiveChecker(
-                timeout=2.0,
+                timeout=5.0,                     # было 2.0 – увеличиваем для надёжности
                 max_workers=None,
                 max_latency=10000.0,
                 history=history
