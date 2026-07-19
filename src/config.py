@@ -215,7 +215,7 @@ class ProxyConfig:
         return channels
 
     def _apply_channel_health_filter(self):
-        """Применяет фильтр здоровья к каналам."""
+        """Применяет фильтр здоровья к каналам с учётом их состояния."""
         if not self.SOURCE_URLS:
             return
         # Загружаем анализатор, если ещё не загружен
@@ -224,13 +224,22 @@ class ProxyConfig:
         # Обновляем данные о здоровье для всех каналов
         urls = [ch.url for ch in self.SOURCE_URLS]
         self._analyzer.update_health(urls)
-        # Отключаем нездоровые каналы
+        # Отключаем только truly inactive каналы
+        states = {}
         for ch in self.SOURCE_URLS:
-            if not self._analyzer.is_channel_healthy(ch.url):
+            state = self._analyzer.get_channel_state(ch.url)
+            states[ch.url] = state
+            if state == 'inactive':
                 ch.enabled = False
-                logger.info(f"Channel {ch.url} disabled due to poor health.")
+                logger.info(f"Channel {ch.url} disabled (state: inactive).")
             else:
                 ch.enabled = True
+                logger.debug(f"Channel {ch.url} enabled (state: {state}).")
+        # Логируем сводку
+        active_count = sum(1 for s in states.values() if s == 'active')
+        recovering_count = sum(1 for s in states.values() if s == 'recovering')
+        inactive_count = sum(1 for s in states.values() if s == 'inactive')
+        logger.info(f"Channel health summary: active={active_count}, recovering={recovering_count}, inactive={inactive_count}")
 
     def update_channel_stats(self, channel: ChannelConfig, success: bool, response_time: float = 0):
         if success:
