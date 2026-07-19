@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
 Оптимизированный пайплайн Proxy-Hunter с улучшенной оценкой,
-активной проверкой (асинхронной), кешированием и прогресс-баром.
-Использует SQLite для долгосрочного хранения истории.
-Без GeoIP.
+активной проверкой (асинхронной), кешированием, graceful shutdown,
+и использованием aiofiles для всех файловых операций.
 """
 
 import sys
@@ -23,6 +22,7 @@ from pathlib import Path
 from typing import List, Dict, Optional, Set
 from datetime import datetime, timedelta
 
+import aiofiles
 from tqdm import tqdm
 
 from config import ProxyConfig
@@ -64,7 +64,11 @@ class OptimizedPipeline:
         self.db = HistoryDB()
         self.ARCHIVE_RETENTION_DAYS = 7
 
+        # Кеш для ActiveChecker (будет создан позже)
+        self.checker_cache = None
+
         self._check_dependencies()
+        self._setup_signal_handlers()
 
     def _check_dependencies(self):
         missing = []
@@ -88,48 +92,61 @@ class OptimizedPipeline:
             import tqdm
         except ImportError:
             missing.append("tqdm")
+        try:
+            import aiofiles
+        except ImportError:
+            missing.append("aiofiles")
         if missing:
             logger.error(f"Missing required dependencies: {', '.join(missing)}")
             logger.error("Please install: pip install -r requirements.txt")
             sys.exit(1)
 
+    def _setup_signal_handlers(self):
+        def handler(sig, frame):
+            logger.info(f"Received signal {sig}, initiating graceful shutdown...")
+            self._shutdown_requested = True
+        signal.signal(signal.SIGINT, handler)
+        signal.signal(signal.SIGTERM, handler)
+
     def _get_cache_key(self, config: str) -> str:
         return hashlib.md5(config.encode()).hexdigest()
 
-    def _load_parsed_cache(self) -> Dict:
+    async def _load_parsed_cache_async(self) -> Dict:
         if os.path.exists(self.parsed_cache_file):
             try:
-                if os.path.getsize(self.parsed_cache_file) > 0:
-                    with open(self.parsed_cache_file, 'r') as f:
-                        return json.load(f)
-                else:
-                    logger.warning(f"Parsed cache file {self.parsed_cache_file} is empty, starting fresh.")
-            except (json.JSONDecodeError, ValueError) as e:
+                async with aiofiles.open(self.parsed_cache_file, 'r') as f:
+                    content = await f.read()
+                    if content:
+                        return json.loads(content)
+                    else:
+                        logger.warning(f"Parsed cache file {self.parsed_cache_file} is empty, starting fresh.")
+            except (json.JSONDecodeError, ValueError, OSError) as e:
                 logger.warning(f"Failed to load parsed cache: {e}, starting fresh.")
         return {}
 
-    def _save_parsed_cache(self, cache: Dict):
+    async def _save_parsed_cache_async(self, cache: Dict):
         try:
             Path(self.parsed_cache_file).parent.mkdir(parents=True, exist_ok=True)
-            with open(self.parsed_cache_file, 'w') as f:
-                json.dump(cache, f, indent=2)
+            async with aiofiles.open(self.parsed_cache_file, 'w') as f:
+                await f.write(json.dumps(cache, indent=2))
         except Exception as e:
             logger.warning(f"Failed to save parsed cache: {e}")
 
-    def _load_name_mapping(self) -> Dict[str, str]:
+    async def _load_name_mapping_async(self) -> Dict[str, str]:
         if os.path.exists(self.name_mapping_file):
             try:
-                with open(self.name_mapping_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                async with aiofiles.open(self.name_mapping_file, 'r', encoding='utf-8') as f:
+                    content = await f.read()
+                    return json.loads(content)
             except Exception as e:
                 logger.warning(f"Failed to load name mapping: {e}")
         return {}
 
-    def _save_name_mapping(self, mapping: Dict[str, str]):
+    async def _save_name_mapping_async(self, mapping: Dict[str, str]):
         try:
             Path(self.name_mapping_file).parent.mkdir(parents=True, exist_ok=True)
-            with open(self.name_mapping_file, 'w', encoding='utf-8') as f:
-                json.dump(mapping, f, indent=2, ensure_ascii=False)
+            async with aiofiles.open(self.name_mapping_file, 'w', encoding='utf-8') as f:
+                await f.write(json.dumps(mapping, indent=2, ensure_ascii=False))
         except Exception as e:
             logger.error(f"Failed to save name mapping: {e}")
 
@@ -173,17 +190,18 @@ class OptimizedPipeline:
         except:
             return f"config-{hashlib.md5(config.encode()).hexdigest()[:8]}"
 
-    def _load_archive(self) -> List[str]:
+    async def _load_archive_async(self) -> List[str]:
         if not os.path.exists(self.output_file):
             return []
         try:
-            with open(self.output_file, 'r', encoding='utf-8') as f:
-                return [line.strip() for line in f if line.strip() and not line.startswith('//')]
+            async with aiofiles.open(self.output_file, 'r', encoding='utf-8') as f:
+                content = await f.read()
+                return [line.strip() for line in content.splitlines() if line.strip() and not line.startswith('//')]
         except Exception as e:
             logger.warning(f"Failed to load archive: {e}")
             return []
 
-    def _save_archive_with_names(self, configs: List[str], mapping: Dict[str, str]):
+    async def _save_archive_with_names_async(self, configs: List[str], mapping: Dict[str, str]):
         for cfg in configs:
             key = self._get_config_key(cfg)
             if key not in mapping:
@@ -204,14 +222,13 @@ class OptimizedPipeline:
 
         try:
             Path(self.output_file).parent.mkdir(parents=True, exist_ok=True)
-            with open(self.output_file, 'w', encoding='utf-8') as f:
-                for line in lines:
-                    f.write(line + '\n')
-            self._save_name_mapping(mapping)
+            async with aiofiles.open(self.output_file, 'w', encoding='utf-8') as f:
+                await f.write('\n'.join(lines) + '\n')
+            await self._save_name_mapping_async(mapping)
         except Exception as e:
             logger.error(f"Failed to save archive: {e}")
 
-    def _save_simple(self, configs: List[str], mapping: Dict[str, str]):
+    async def _save_simple_async(self, configs: List[str], mapping: Dict[str, str]):
         lines = []
         for cfg in configs:
             key = self._get_config_key(cfg)
@@ -226,9 +243,8 @@ class OptimizedPipeline:
                 lines.append(cfg)
         try:
             Path(self.simple_file).parent.mkdir(parents=True, exist_ok=True)
-            with open(self.simple_file, 'w', encoding='utf-8') as f:
-                for line in lines:
-                    f.write(line + '\n')
+            async with aiofiles.open(self.simple_file, 'w', encoding='utf-8') as f:
+                await f.write('\n'.join(lines) + '\n')
         except Exception as e:
             logger.error(f"Failed to save simple output: {e}")
 
@@ -287,23 +303,14 @@ class OptimizedPipeline:
                 logger.warning(f"Failed to save bloom filter state: {e}")
         logger.info("State saved.")
 
-    def _setup_signal_handlers(self):
-        def handler(sig, frame):
-            logger.info(f"Received signal {sig}, initiating graceful shutdown...")
-            self._shutdown_requested = True
-        signal.signal(signal.SIGINT, handler)
-        signal.signal(signal.SIGTERM, handler)
-
     async def run(self) -> bool:
         try:
-            self._setup_signal_handlers()
-
             start_time = time.time()
             logger.info("=" * 60)
             logger.info("🚀 Starting Proxy-Hunter Pipeline (optimized, async, SQLite, no GeoIP)")
             logger.info("=" * 60)
 
-            # Шаг 1: Сбор конфигураций
+            # Шаг 1: Сбор
             logger.info("📡 Fetching configurations...")
             fetcher = AsyncConfigFetcher(self.config)
             raw_configs = await fetcher.fetch_all()
@@ -311,7 +318,6 @@ class OptimizedPipeline:
                 await self.save_state()
                 return False
 
-            # Шаг 1.5: Сохранение статистики каналов
             run_stats = {
                 'timestamp': datetime.now().isoformat(),
                 'total_raw': len(raw_configs),
@@ -335,9 +341,9 @@ class OptimizedPipeline:
                 return False
             logger.info(f"✅ Raw configs: {len(raw_configs)}")
 
-            # Шаг 2: Валидация и извлечение данных
+            # Шаг 2: Парсинг и валидация (асинхронно)
             logger.info("🔍 Validating and extracting server info...")
-            parsed_cache = self._load_parsed_cache()
+            parsed_cache = await self._load_parsed_cache_async()
             valid_configs = []
             parse_stats = {'strict': 0, 'heuristic': 0, 'failed': 0}
 
@@ -370,7 +376,7 @@ class OptimizedPipeline:
             if self._shutdown_requested:
                 await self.save_state()
                 return False
-            self._save_parsed_cache(parsed_cache)
+            await self._save_parsed_cache_async(parsed_cache)
             logger.info(f"✅ Valid configs: {len(valid_configs)}")
             logger.info(f"   Parse stats: strict={parse_stats['strict']}, heuristic={parse_stats['heuristic']}, failed={parse_stats['failed']}")
 
@@ -378,7 +384,7 @@ class OptimizedPipeline:
                 logger.error("No valid configs found.")
                 return False
 
-            # Шаг 3: Оценка профилей
+            # Шаг 3: Оценка
             logger.info("⚡ Scoring profiles...")
             scored_configs = []
             with tqdm(total=len(valid_configs), desc="Scoring configs") as pbar:
@@ -411,30 +417,32 @@ class OptimizedPipeline:
                 logger.error("No configs scored.")
                 return False
 
-            # Шаг 4: Фильтрация по скору
+            # Шаг 4: Фильтр по скору
             min_score = 0.0
             filtered = [item for item in scored_configs if item['score'] >= min_score]
             logger.info(f"✅ After min_score filter: {len(filtered)}")
-
             if not filtered:
                 logger.warning("No configs passed min_score filter, lowering threshold...")
                 min_score = 0.0
                 filtered = [item for item in scored_configs if item['score'] >= min_score]
                 logger.info(f"✅ After lowered filter: {len(filtered)}")
-
             if self._shutdown_requested or not filtered:
                 await self.save_state()
                 return False
 
-            # Шаг 5: Активная проверка (без ICMP)
-            logger.info("🔌 Active checking (TCP, HTTP, async)...")
+            # Шаг 5: Активная проверка (с кешированием)
+            logger.info("🔌 Active checking (TCP, HTTP HEAD, async, cached)...")
             history = self._safe_load_history()
-            checker = ActiveChecker(
-                timeout=5.0,
-                max_workers=None,
-                max_latency=10000.0,
-                history=history
-            )
+            # Используем кешированный чекер
+            if self.checker_cache is None:
+                self.checker_cache = ActiveChecker(
+                    timeout=5.0,
+                    max_workers=None,
+                    max_latency=10000.0,
+                    history=history,
+                    cache_ttl=3600
+                )
+            checker = self.checker_cache
 
             configs_to_check = [item['config'] for item in filtered]
             check_results = await checker.check_batch(configs_to_check)
@@ -443,7 +451,6 @@ class OptimizedPipeline:
                 await self.save_state()
                 return False
 
-            # Закрываем сессию после проверки
             await SessionPool().close()
 
             good_configs = [
@@ -484,9 +491,9 @@ class OptimizedPipeline:
                     await self.save_state()
                 return False
 
-            # Шаг 7: Архивация с именами (без гео)
+            # Шаг 7: Архивация с именами
             logger.info("💾 Archiving logic (with name mapping)...")
-            name_mapping = self._load_name_mapping()
+            name_mapping = await self._load_name_mapping_async()
 
             new_configs_with_names = []
             for cfg in deduped:
@@ -495,7 +502,7 @@ class OptimizedPipeline:
                     name_mapping[key] = self._generate_name(cfg)
                 new_configs_with_names.append(cfg)
 
-            archive_configs = self._load_archive()
+            archive_configs = await self._load_archive_async()
             seen_keys = set()
             merged_configs = []
             for cfg in archive_configs + new_configs_with_names:
@@ -506,8 +513,8 @@ class OptimizedPipeline:
 
             logger.info(f"🔄 Merged archive: {len(archive_configs)} old + {len(new_configs_with_names)} new → {len(merged_configs)} unique")
 
-            self._save_archive_with_names(merged_configs, name_mapping)
-            self._save_simple(new_configs_with_names, name_mapping)
+            await self._save_archive_with_names_async(merged_configs, name_mapping)
+            await self._save_simple_async(new_configs_with_names, name_mapping)
 
             logger.info(f"✅ Archive saved: {len(merged_configs)} configs in {self.output_file}")
             logger.info(f"✅ Simple output saved: {len(new_configs_with_names)} configs in {self.simple_file}")
@@ -584,7 +591,6 @@ class OptimizedPipeline:
             logger.error(f"❌ Pipeline failed: {e}\n{traceback.format_exc()}")
             return False
         finally:
-            # Закрываем все сессии
             try:
                 await SessionPool().close()
             except Exception as e:
