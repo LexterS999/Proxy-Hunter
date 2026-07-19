@@ -31,34 +31,50 @@ from user_settings import (
 
 logger = logging.getLogger(__name__)
 
-# === Rate Limiter с учётом Retry-After ===
-class RateLimiter:
-    def __init__(self, calls_per_second: float = 1.5):
-        self._sem = asyncio.Semaphore(int(calls_per_second * 60))
+
+class AdaptiveRateLimiter:
+    """Адаптивный Token Bucket с обратной связью по ошибкам."""
+    def __init__(self, rate: float = 1.5, max_burst: int = 10):
+        self.rate = rate
+        self.max_tokens = max_burst
+        self.tokens = max_burst
+        self.last_refill = time.time()
         self._lock = asyncio.Lock()
-        self._calls_per_second = calls_per_second
-        self._retry_after_until = 0.0
+        self.backoff_factor = 1.0  # множитель скорости
 
     async def acquire(self):
         async with self._lock:
             now = time.time()
-            if now < self._retry_after_until:
-                wait = self._retry_after_until - now
-                logger.debug(f"Rate limiter waiting {wait:.1f}s due to Retry-After")
-                await asyncio.sleep(wait)
-            await self._sem.acquire()
-            asyncio.create_task(self._release_after_delay())
+            elapsed = now - self.last_refill
+            self.tokens = min(self.max_tokens,
+                              self.tokens + elapsed * self.rate * self.backoff_factor)
+            self.last_refill = now
 
-    async def _release_after_delay(self):
-        await asyncio.sleep(60 / self._calls_per_second)
-        self._sem.release()
+            if self.tokens < 1:
+                wait = (1 - self.tokens) / (self.rate * self.backoff_factor)
+                await asyncio.sleep(wait)
+                self.tokens = 0
+            else:
+                self.tokens -= 1
+
+    def report_success(self):
+        """Увеличиваем скорость при успехе."""
+        self.backoff_factor = min(2.0, self.backoff_factor * 1.02)
+
+    def report_error(self, is_429: bool = False):
+        """Уменьшаем скорость при ошибке."""
+        if is_429:
+            self.backoff_factor = max(0.1, self.backoff_factor * 0.7)
+        else:
+            self.backoff_factor = max(0.3, self.backoff_factor * 0.9)
 
     def set_retry_after(self, seconds: int):
-        self._retry_after_until = time.time() + seconds
+        """Принудительно ждать."""
+        self.last_refill = time.time() + seconds
 
-# === Основной класс ===
+
 class AsyncConfigFetcher:
-    """Полностью асинхронный сборщик конфигураций с поддержкой повторных попыток для каналов."""
+    """Полностью асинхронный сборщик конфигураций с адаптивным лимитером."""
 
     def __init__(self, config: ProxyConfig, max_concurrent: int = 50):
         self.config = config
@@ -74,7 +90,8 @@ class AsyncConfigFetcher:
         self._connector_limit = min(200, num_channels * 10)
         self._connector_per_host = min(50, num_channels * 5)
 
-        self._rate_limiter = RateLimiter(calls_per_second=TELEGRAM_CALLS_PER_SECOND)
+        # Используем адаптивный лимитер
+        self._rate_limiter = AdaptiveRateLimiter(rate=TELEGRAM_CALLS_PER_SECOND)
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
         pool = SessionPool()
@@ -100,6 +117,7 @@ class AsyncConfigFetcher:
                     except ValueError:
                         wait_time = 5
                     self._rate_limiter.set_retry_after(wait_time)
+                    self._rate_limiter.report_error(is_429=True)
                     await asyncio.sleep(wait_time)
                     raise aiohttp.ClientResponseError(
                         response.request_info,
@@ -108,6 +126,7 @@ class AsyncConfigFetcher:
                         message=f"Rate limited, retry after {wait_time}s"
                     )
                 if response.status >= 500:
+                    self._rate_limiter.report_error(is_429=False)
                     raise aiohttp.ClientResponseError(
                         response.request_info,
                         response.history,
@@ -116,10 +135,12 @@ class AsyncConfigFetcher:
                     )
                 text = await response.text()
                 if len(text) > MAX_RESPONSE_SIZE_BYTES:
-                    logger.warning(f"Response from {url} too large ({len(text)} bytes), truncating to 1MB")
+                    logger.warning(f"Response from {url} too large ({len(text)} bytes), truncating")
                     text = text[:MAX_RESPONSE_SIZE_BYTES]
+                self._rate_limiter.report_success()
                 return text
         except asyncio.TimeoutError:
+            self._rate_limiter.report_error(is_429=False)
             logger.warning(f"Timeout fetching {url}")
             raise
 
@@ -137,7 +158,6 @@ class AsyncConfigFetcher:
             return [text]
         return self.validator.split_configs(text)
 
-    # Обёртка для повторных попыток для всего канала
     @retry_with_backoff(
         attempts=CHANNEL_RETRY_ATTEMPTS,
         base_delay=CHANNEL_RETRY_BASE_DELAY,
@@ -338,6 +358,7 @@ class AsyncConfigFetcher:
 
     async def close(self):
         pass
+
 
 # Для обратной совместимости
 class ConfigFetcher:
