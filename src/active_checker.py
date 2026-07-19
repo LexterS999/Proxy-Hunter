@@ -116,7 +116,6 @@ class ActiveChecker:
         if not self._enable_icmp:
             return -1.0
         try:
-            # icmplib.ping - асинхронный? Нет, он синхронный, но мы запустим в executor.
             loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(
                 None,
