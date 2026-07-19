@@ -11,7 +11,7 @@ from typing import Dict, Optional, Tuple, List
 from datetime import datetime
 
 from db import HistoryDB
-from user_settings import SCORE_WEIGHTS  # добавлен импорт
+from user_settings import SCORE_WEIGHTS
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +160,6 @@ class ProfileScorer:
         success_rate = profile['success_count'] / total if total > 0 else 0.5
         config_quality = self.calculate_config_quality('', parsed)
 
-        # Репутация фиксирована (0.5), без гео
         reputation = 0.5
 
         if len(profile.get('timestamps', [])) < 2:
