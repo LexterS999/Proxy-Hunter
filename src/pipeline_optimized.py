@@ -3,6 +3,7 @@
 Оптимизированный пайплайн Proxy-Hunter с улучшенной оценкой,
 активной проверкой (асинхронной), кешированием и прогресс-баром.
 Использует SQLite для долгосрочного хранения истории.
+Без GeoIP.
 """
 
 import sys
@@ -31,8 +32,6 @@ from deep_deduplicate import DeepDeduplicator
 from config_quality import ConfigQualityChecker
 from quality_analyzer_enhanced import EnhancedQualityAnalyzer
 from profile_scorer import ProfileScorer
-from rename_configs import ConfigRenamer
-from enrich_configs import ConfigEnricher
 from active_checker import ActiveChecker
 from parse_fallback import FallbackParser
 from session_pool import SessionPool
@@ -54,11 +53,10 @@ class OptimizedPipeline:
         self.deduplicator = DeepDeduplicator()
         self.quality_checker = ConfigQualityChecker(timeout=0, max_workers=1)
         self.scorer = ProfileScorer()
-        self.output_file = 'configs/output_archive.txt'          # архивный файл
-        self.simple_file = 'configs/output_simple.txt'          # свежие конфиги
-        self.location_cache_file = 'configs/location_cache.json'
+        self.output_file = 'configs/output_archive.txt'
+        self.simple_file = 'configs/output_simple.txt'
         self.parsed_cache_file = 'configs/parsed_cache.json'
-        self.name_mapping_file = 'configs/name_mapping.json'   # новый файл для маппинга имён
+        self.name_mapping_file = 'configs/name_mapping.json'
         self.channel_stats_file = 'configs/channel_stats.json'
         self.channel_analyzer = None
         self._shutdown_requested = False
@@ -78,10 +76,6 @@ class OptimizedPipeline:
             import bs4
         except ImportError:
             missing.append("beautifulsoup4")
-        try:
-            import maxminddb
-        except ImportError:
-            missing.append("maxminddb")
         try:
             import numpy
         except ImportError:
@@ -123,7 +117,6 @@ class OptimizedPipeline:
             logger.warning(f"Failed to save parsed cache: {e}")
 
     def _load_name_mapping(self) -> Dict[str, str]:
-        """Загружает маппинг конфиг -> имя из JSON."""
         if os.path.exists(self.name_mapping_file):
             try:
                 with open(self.name_mapping_file, 'r', encoding='utf-8') as f:
@@ -133,7 +126,6 @@ class OptimizedPipeline:
         return {}
 
     def _save_name_mapping(self, mapping: Dict[str, str]):
-        """Сохраняет маппинг конфиг -> имя в JSON."""
         try:
             Path(self.name_mapping_file).parent.mkdir(parents=True, exist_ok=True)
             with open(self.name_mapping_file, 'w', encoding='utf-8') as f:
@@ -142,10 +134,6 @@ class OptimizedPipeline:
             logger.error(f"Failed to save name mapping: {e}")
 
     def _get_config_key(self, config: str) -> str:
-        """
-        Генерирует уникальный ключ для конфига на основе server:port:protocol:credential.
-        Используется для поиска в маппинге имён.
-        """
         try:
             data, _ = FallbackParser.parse_with_stats(config)
             if not data:
@@ -178,24 +166,15 @@ class OptimizedPipeline:
             return hashlib.md5(config.encode()).hexdigest()
 
     def _generate_name(self, config: str) -> str:
-        """
-        Генерирует имя для конфига, используя ConfigRenamer, но без обращения к GeoIP
-        (использует кеш). Возвращает только имя (без перестроения URI).
-        """
+        # Простое имя без гео: протокол + хеш
         try:
-            # Используем существующий реймер, но только для генерации имени
-            renamer = ConfigRenamer(self.location_cache_file)
-            # Переименовываем конфиг, получаем полную строку с #имя
-            renamed = renamer.rename_config(config, 0)
-            if renamed and '#' in renamed:
-                return renamed.split('#', 1)[1]
-            return ''
-        except Exception as e:
-            logger.debug(f"Failed to generate name: {e}")
-            return ''
+            protocol = config.split('://')[0].upper()
+            key = self._get_config_key(config)
+            return f"{protocol}-{key[:8]}"
+        except:
+            return f"config-{hashlib.md5(config.encode()).hexdigest()[:8]}"
 
     def _load_archive(self) -> List[str]:
-        """Загружает все конфиги из архивного файла."""
         if not os.path.exists(self.output_file):
             return []
         try:
@@ -206,28 +185,16 @@ class OptimizedPipeline:
             return []
 
     def _save_archive_with_names(self, configs: List[str], mapping: Dict[str, str]):
-        """
-        Сохраняет архив, подставляя имена из mapping.
-        Для конфигов, которых нет в mapping, генерирует новое имя и добавляет.
-        """
-        # Убедимся, что все конфиги есть в mapping
         for cfg in configs:
             key = self._get_config_key(cfg)
             if key not in mapping:
-                name = self._generate_name(cfg)
-                if name:
-                    mapping[key] = name
-                else:
-                    # Если имя не сгенерировалось, используем хеш
-                    mapping[key] = f"config-{key[:8]}"
+                mapping[key] = self._generate_name(cfg)
 
-        # Строим строки для записи
         lines = []
         for cfg in configs:
             key = self._get_config_key(cfg)
             name = mapping.get(key, '')
             if name:
-                # Вставляем имя в конфиг
                 if '#' in cfg:
                     base = cfg.split('#')[0]
                     lines.append(f"{base}#{name}")
@@ -241,13 +208,11 @@ class OptimizedPipeline:
             with open(self.output_file, 'w', encoding='utf-8') as f:
                 for line in lines:
                     f.write(line + '\n')
-            # Сохраняем обновлённый mapping
             self._save_name_mapping(mapping)
         except Exception as e:
             logger.error(f"Failed to save archive: {e}")
 
     def _save_simple(self, configs: List[str], mapping: Dict[str, str]):
-        """Сохраняет только свежие конфиги (без архивации) с именами."""
         lines = []
         for cfg in configs:
             key = self._get_config_key(cfg)
@@ -336,7 +301,7 @@ class OptimizedPipeline:
 
             start_time = time.time()
             logger.info("=" * 60)
-            logger.info("🚀 Starting Proxy-Hunter Pipeline (optimized, async, SQLite)")
+            logger.info("🚀 Starting Proxy-Hunter Pipeline (optimized, async, SQLite, no GeoIP)")
             logger.info("=" * 60)
 
             # Шаг 1: Сбор конфигураций
@@ -347,7 +312,7 @@ class OptimizedPipeline:
                 await self.save_state()
                 return False
 
-            # Шаг 1.5: Сохранение статистики каналов в SQLite
+            # Шаг 1.5: Сохранение статистики каналов
             run_stats = {
                 'timestamp': datetime.now().isoformat(),
                 'total_raw': len(raw_configs),
@@ -371,7 +336,7 @@ class OptimizedPipeline:
                 return False
             logger.info(f"✅ Raw configs: {len(raw_configs)}")
 
-            # Шаг 2: Валидация и извлечение данных с кешированием
+            # Шаг 2: Валидация и извлечение данных
             logger.info("🔍 Validating and extracting server info...")
             parsed_cache = self._load_parsed_cache()
             valid_configs = []
@@ -414,7 +379,7 @@ class OptimizedPipeline:
                 logger.error("No valid configs found.")
                 return False
 
-            # Шаг 3: Оценка каждого профиля
+            # Шаг 3: Оценка профилей
             logger.info("⚡ Scoring profiles...")
             scored_configs = []
             with tqdm(total=len(valid_configs), desc="Scoring configs") as pbar:
@@ -430,8 +395,8 @@ class OptimizedPipeline:
                                 'score': score_info['score'],
                                 'stability': score_info['stability'],
                                 'lifetime': score_info['lifetime'],
-                                'is_datacenter': score_info['is_datacenter'],
-                                'server_type': score_info['server_type'],
+                                'is_datacenter': False,  # без гео
+                                'server_type': 'UNK',
                                 'parsed': info['parsed']
                             })
                     except Exception as e:
@@ -447,7 +412,7 @@ class OptimizedPipeline:
                 logger.error("No configs scored.")
                 return False
 
-            # Шаг 4: Фильтрация по композитному скору
+            # Шаг 4: Фильтрация по скору
             min_score = 0.0
             filtered = [item for item in scored_configs if item['score'] >= min_score]
             logger.info(f"✅ After min_score filter: {len(filtered)}")
@@ -458,14 +423,12 @@ class OptimizedPipeline:
                 filtered = [item for item in scored_configs if item['score'] >= min_score]
                 logger.info(f"✅ After lowered filter: {len(filtered)}")
 
-            if self._shutdown_requested:
+            if self._shutdown_requested or not filtered:
                 await self.save_state()
-                return False
-            if not filtered:
                 return False
 
             # Шаг 5: Активная проверка
-            logger.info("🔌 Active checking (TCP SYN, cached, async)...")
+            logger.info("🔌 Active checking (ICMP, TCP, HTTP, async)...")
             history = self._safe_load_history()
             checker = ActiveChecker(
                 timeout=2.0,
@@ -500,7 +463,7 @@ class OptimizedPipeline:
                     logger.error(f"   Sample {i+1}: error={r.get('error')}, config={r.get('config', '')[:80]}")
                 return False
 
-            # Обновляем скоры на основе реальной задержки
+            # Обновляем скоры
             for result in check_results:
                 if result.get('valid', False) and result.get('latency', -1) > 0:
                     latency_ms = result['latency']
@@ -510,7 +473,7 @@ class OptimizedPipeline:
                             item['score'] = min(100, item['score'] + latency_bonus)
                             break
 
-            # Шаг 6: Дедупликация (только для новых конфигов)
+            # Шаг 6: Дедупликация
             logger.info("🧹 Deep deduplication (new configs)...")
             quality_scores = {item['config']: item['score'] for item in filtered if item['config'] in good_configs}
             deduped = await self.deduplicator.deduplicate_configs_async(good_configs, quality_scores)
@@ -521,63 +484,18 @@ class OptimizedPipeline:
                     await self.save_state()
                 return False
 
-            # Шаг 7: Обогащение геоданными (если нужно)
-            logger.info("🌍 Enriching configs with geolocation...")
-            cache_exists = os.path.exists(self.location_cache_file)
-            cache_empty = True
-            if cache_exists:
-                try:
-                    if os.path.getsize(self.location_cache_file) > 0:
-                        with open(self.location_cache_file, 'r') as f:
-                            data = json.load(f)
-                            if data:
-                                cache_empty = False
-                    else:
-                        logger.warning(f"Location cache file {self.location_cache_file} is empty, treating as empty cache.")
-                except Exception:
-                    cache_empty = True
-
-            if cache_empty:
-                logger.info("Location cache missing or empty, running enrich_configs...")
-                enricher = ConfigEnricher()
-                temp_file = 'configs/temp_for_enrich.txt'
-                try:
-                    with open(temp_file, 'w') as f:
-                        for cfg in deduped:
-                            f.write(cfg + '\n')
-                    enricher.process_configs(temp_file, self.location_cache_file)
-                except Exception as e:
-                    logger.error(f"Error during enrich_configs: {e}")
-                finally:
-                    if os.path.exists(temp_file):
-                        os.remove(temp_file)
-            else:
-                logger.info("Location cache found, skipping enrich_configs.")
-
-            # ========== НОВАЯ ЛОГИКА АРХИВАЦИИ ==========
+            # Шаг 7: Архивация с именами (без гео)
             logger.info("💾 Archiving logic (with name mapping)...")
-
-            # Загружаем маппинг имён
             name_mapping = self._load_name_mapping()
 
-            # Для новых конфигов генерируем имена только если их нет в mapping
             new_configs_with_names = []
             for cfg in deduped:
                 key = self._get_config_key(cfg)
                 if key not in name_mapping:
-                    name = self._generate_name(cfg)
-                    if name:
-                        name_mapping[key] = name
-                    else:
-                        # fallback
-                        name_mapping[key] = f"config-{key[:8]}"
-                # Добавляем конфиг в список для архива (уже с именем, но мы применим его при записи)
+                    name_mapping[key] = self._generate_name(cfg)
                 new_configs_with_names.append(cfg)
 
-            # Загружаем существующий архив (старые конфиги)
             archive_configs = self._load_archive()
-
-            # Объединяем: сначала старые, потом новые (удаляем дубликаты по ключу)
             seen_keys = set()
             merged_configs = []
             for cfg in archive_configs + new_configs_with_names:
@@ -588,16 +506,13 @@ class OptimizedPipeline:
 
             logger.info(f"🔄 Merged archive: {len(archive_configs)} old + {len(new_configs_with_names)} new → {len(merged_configs)} unique")
 
-            # Сохраняем архив с именами из маппинга
             self._save_archive_with_names(merged_configs, name_mapping)
-
-            # Сохраняем только новые конфиги (без архивации) с именами
             self._save_simple(new_configs_with_names, name_mapping)
 
             logger.info(f"✅ Archive saved: {len(merged_configs)} configs in {self.output_file}")
             logger.info(f"✅ Simple output saved: {len(new_configs_with_names)} configs in {self.simple_file}")
 
-            # Шаг 8: Генерация Xray-конфига (опционально)
+            # Шаг 8: Xray конфиг
             logger.info("📦 Generating Xray balanced config...")
             try:
                 from xray_balancer import ConfigToXray
@@ -606,7 +521,7 @@ class OptimizedPipeline:
             except Exception as e:
                 logger.warning(f"Xray balancer failed: {e}")
 
-            # Шаг 9: Обновление статистики запуска в SQLite
+            # Шаг 9: Обновление статистики
             logger.info("📊 Updating run statistics in SQLite...")
             final_stats = {
                 'total_raw': len(raw_configs),
