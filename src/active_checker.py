@@ -1,6 +1,6 @@
 """
 Модуль для активной проверки работоспособности прокси-конфигураций.
-Выполняет ICMP ping (опционально), TCP SYN и HTTP-пробинг с кешированием.
+Выполняет TCP SYN и HTTP-пробинг с кешированием.
 Использует настройки из user_settings.
 """
 
@@ -8,7 +8,6 @@ import asyncio
 import logging
 import time
 import socket
-import os
 import re
 from typing import Dict, List, Optional, Tuple
 from collections import OrderedDict
@@ -21,8 +20,6 @@ from concurrency import ConcurrencyLimiter
 from session_pool import SessionPool
 from retry_utils import retry_with_backoff
 from user_settings import (
-    ENABLE_ICMP_PING,
-    ICMP_TIMEOUT,
     TCP_TIMEOUT,
     HTTP_TIMEOUT,
     MAX_LATENCY_MS,
@@ -32,18 +29,11 @@ from user_settings import (
 
 logger = logging.getLogger(__name__)
 
-# Попытка импорта icmplib для ICMP (если не установлен, ICMP будет пропущен)
-try:
-    from icmplib import ping as icmp_ping
-    HAS_ICMP = True
-except ImportError:
-    HAS_ICMP = False
-    logger.warning("icmplib not installed, ICMP ping disabled. Install with: pip install icmplib")
-
 
 class ActiveChecker:
     """
-    Активная проверка с ICMP, TCP, HTTP, кешированием и пулом соединений.
+    Активная проверка с TCP, HTTP, кешированием и пулом соединений.
+    ICMP отключён.
     """
 
     def __init__(self,
@@ -68,7 +58,7 @@ class ActiveChecker:
         self._tcp_cache = OrderedDict()
         self._cache_max_size = 5000
 
-        # Принудительно отключаем ICMP — убираем проверку по требованию пользователя
+        # ICMP полностью отключён
         self._enable_icmp = False
 
     def _should_skip(self, config: str) -> bool:
@@ -112,23 +102,6 @@ class ActiveChecker:
         )
         return self._session
 
-    async def _icmp_ping(self, host: str) -> float:
-        """Выполняет ICMP ping и возвращает RTT в миллисекундах или -1 при ошибке."""
-        if not self._enable_icmp:
-            return -1.0
-        try:
-            loop = asyncio.get_running_loop()
-            result = await loop.run_in_executor(
-                None,
-                lambda: icmp_ping(host, count=1, timeout=ICMP_TIMEOUT, privileged=False)
-            )
-            if result.is_alive:
-                return result.avg_rtt * 1000  # в мс
-            return -1.0
-        except Exception as e:
-            logger.debug(f"ICMP ping error for {host}: {e}")
-            return -1.0
-
     @retry_with_backoff(attempts=3, base_delay=0.2, max_delay=1.0, deadline=5.0,
                         retryable_exceptions=(asyncio.TimeoutError, ConnectionError, OSError, ConnectionResetError))
     async def _tcp_latency_with_retry(self, host: str, port: int) -> float:
@@ -153,7 +126,6 @@ class ActiveChecker:
             self._tcp_cache.move_to_end(key)
             return self._tcp_cache[key]
 
-        # ICMP отключён — сразу переходим к TCP
         latency = await self._tcp_latency_with_retry(host, port)
 
         if len(self._tcp_cache) >= self._cache_max_size:
