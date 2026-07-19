@@ -80,7 +80,6 @@ class ProxyConfig:
         self.SUPPORTED_PROTOCOLS = self._initialize_protocols()
         self._initialize_settings()
         self._set_smart_limits()
-        # Анализатор каналов (ленивая инициализация)
         self._analyzer = None
 
     def _initialize_protocols(self) -> Dict:
@@ -117,8 +116,7 @@ class ProxyConfig:
             self._set_specific_count_mode()
 
     def _set_maximum_power_mode(self):
-        # Увеличиваем максимальное количество конфигураций для сбора
-        max_configs = 20000  # было 10000
+        max_configs = 20000
         for protocol in self.SUPPORTED_PROTOCOLS:
             self.SUPPORTED_PROTOCOLS[protocol].update({
                 "min_configs": 1,
@@ -205,9 +203,7 @@ class ProxyConfig:
 
     def get_enabled_channels(self) -> List[ChannelConfig]:
         channels = [channel for channel in self.SOURCE_URLS if channel.enabled]
-        # Применяем анализ каналов, чтобы отключить плохие
         self._apply_channel_health_filter()
-        # Повторно получаем список после фильтрации
         channels = [channel for channel in self.SOURCE_URLS if channel.enabled]
         if not channels:
             self.save_empty_config_file()
@@ -215,16 +211,12 @@ class ProxyConfig:
         return channels
 
     def _apply_channel_health_filter(self):
-        """Применяет фильтр здоровья к каналам с учётом их состояния."""
         if not self.SOURCE_URLS:
             return
-        # Загружаем анализатор, если ещё не загружен
         if self._analyzer is None:
             self._analyzer = ChannelQualityAnalyzer()
-        # Обновляем данные о здоровье для всех каналов
         urls = [ch.url for ch in self.SOURCE_URLS]
         self._analyzer.update_health(urls)
-        # Отключаем только truly inactive каналы
         states = {}
         for ch in self.SOURCE_URLS:
             state = self._analyzer.get_channel_state(ch.url)
@@ -235,7 +227,6 @@ class ProxyConfig:
             else:
                 ch.enabled = True
                 logger.debug(f"Channel {ch.url} enabled (state: {state}).")
-        # Логируем сводку
         active_count = sum(1 for s in states.values() if s == 'active')
         recovering_count = sum(1 for s in states.values() if s == 'recovering')
         inactive_count = sum(1 for s in states.values() if s == 'inactive')
