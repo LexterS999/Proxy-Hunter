@@ -276,6 +276,18 @@ class OptimizedPipeline:
     def _safe_load_history(self) -> Dict:
         return {}
 
+    async def _load_name_mapping_async(self) -> Dict[str, str]:
+        """Загружает словарь соответствия ключ->имя из файла."""
+        if not os.path.exists(self.name_mapping_file):
+            return {}
+        try:
+            async with aiofiles.open(self.name_mapping_file, 'r', encoding='utf-8') as f:
+                content = await f.read()
+                return json.loads(content)
+        except Exception as e:
+            logger.warning(f"Failed to load name mapping: {e}")
+            return {}
+
     async def _save_name_mapping_async(self, mapping: Dict[str, str]):
         try:
             Path(self.name_mapping_file).parent.mkdir(parents=True, exist_ok=True)
