@@ -88,51 +88,21 @@ class OptimizedPipeline:
         self._setup_signal_handlers()
 
     def _load_model(self):
-        """Загружает ML-модель, если она есть, или создаёт заглушку."""
+        """Загружает ML-модель, если она есть."""
         model_path = 'configs/quality_model.cbm'
-        if not os.path.exists(model_path):
-            logger.warning("Model file not found, creating default stub model.")
-            self._create_default_model(model_path)
-            return
-
         try:
             data = joblib.load(model_path)
-            if data is None or not isinstance(data, dict):
-                raise ValueError("Invalid model data")
-            self.model = data.get('model')
-            self.feature_cols = data.get('features', [])
-            self.cat_cols = data.get('categorical', [])
-            if self.model is None:
-                raise ValueError("Model object missing")
-            logger.info("✅ Quality model loaded successfully")
+            self.model = data['model']
+            self.feature_cols = data['features']
+            self.cat_cols = data['categorical']
+            logger.info(f"✅ Quality model loaded from {model_path}")
+        except FileNotFoundError:
+            logger.warning(f"Model file {model_path} not found, using fallback scoring.")
+            self.model = None
         except Exception as e:
-            logger.warning(f"Could not load quality model: {e}. Creating default stub.")
-            self._create_default_model(model_path)
+            logger.warning(f"Could not load quality model: {e}. Using fallback scoring.")
+            self.model = None
 
-    def _create_default_model(self, model_path):
-        """Создаёт фиктивную модель, которая всегда возвращает 50."""
-        from catboost import CatBoostRegressor
-        import joblib
-        # Создаём простую модель с одним деревом
-        model = CatBoostRegressor(iterations=1, depth=1, verbose=False)
-        # Обучаем на одном примере
-        import numpy as np
-        X_dummy = np.array([[0.0]])
-        y_dummy = np.array([50.0])
-        model.fit(X_dummy, y_dummy)
-        # Сохраняем модель с пустыми списками признаков
-        data = {
-            'model': model,
-            'features': [],
-            'categorical': []
-        }
-        os.makedirs(os.path.dirname(model_path), exist_ok=True)
-        joblib.dump(data, model_path)
-        self.model = model
-        self.feature_cols = []
-        self.cat_cols = []
-        logger.info("✅ Default stub model created.")
-        
     def _setup_logging(self):
         log_dir = Path('logs')
         log_dir.mkdir(exist_ok=True)
