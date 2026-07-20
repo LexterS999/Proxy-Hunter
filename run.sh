@@ -24,9 +24,10 @@ else
     echo "ℹ️  Using system Python: $(command -v python3)"
 fi
 
-# Проверка зависимостей (убрали geoip2)
+# ИСПРАВЛЕНИЕ #13: Убрана проверка geoip2 (не используется в проекте)
+# Проверка зависимостей
 echo "➤ Checking required Python modules..."
-$PYTHON_CMD -c "import requests, bs4" 2>/dev/null || {
+$PYTHON_CMD -c "import aiohttp, bs4, xxhash, aiofiles, tqdm" 2>/dev/null || {
     echo "⚠️  Some dependencies are missing. Installing..."
     $PYTHON_CMD -m pip install -r requirements.txt --quiet
 }
@@ -41,21 +42,29 @@ else
     exit 1
 fi
 
-# Проверка выходных файлов
+# ИСПРАВЛЕНИЕ #12: Проверяем output_archive.txt (реальный выходной файл пайплайна)
 echo ""
-if [ -f "configs/output_archive.txt" ] && [ -f "configs/output_simple.txt" ]; then
-    ARCHIVE_SIZE=$(wc -c < "configs/output_archive.txt")
-    SIMPLE_SIZE=$(wc -c < "configs/output_simple.txt")
-    echo "✅ Output files created:"
-    echo "   configs/output_archive.txt - $ARCHIVE_SIZE bytes"
-    echo "   configs/output_simple.txt - $SIMPLE_SIZE bytes"
+if [ -f "configs/output_archive.txt" ]; then
+    FILE_SIZE=$(wc -c < "configs/output_archive.txt")
+    LINE_COUNT=$(wc -l < "configs/output_archive.txt")
+    echo "✅ Output file created: configs/output_archive.txt"
+    echo "   Size: $FILE_SIZE bytes"
+    echo "   Lines: $LINE_COUNT"
     echo ""
-    echo "📄 First 5 lines of output_archive.txt:"
+    echo "📄 First 5 lines of output:"
     head -n 5 "configs/output_archive.txt" | sed 's/^/   /'
 else
-    echo "❌ ERROR: Output files missing!"
+    echo "❌ ERROR: configs/output_archive.txt was not created!"
     echo "   Check pipeline logs for details."
     exit 1
+fi
+
+# Также проверяем simple output
+if [ -f "configs/output_simple.txt" ]; then
+    SIMPLE_SIZE=$(wc -c < "configs/output_simple.txt")
+    SIMPLE_LINES=$(wc -l < "configs/output_simple.txt")
+    echo ""
+    echo "✅ Simple output: configs/output_simple.txt ($SIMPLE_LINES lines, $SIMPLE_SIZE bytes)"
 fi
 
 echo ""
