@@ -62,8 +62,11 @@ jobs:
           import sys
           sys.path.insert(0, 'src')
           from db import get_db
-          db = get_db()
-          print('Database schema initialized (parsed_cache, model_versions included)')
+          import asyncio
+          async def migrate():
+              db = await get_db()
+              print('Database schema initialized (parsed_cache, model_versions included)')
+          asyncio.run(migrate())
           "
 
       - name: Ensure required files exist
@@ -72,6 +75,7 @@ jobs:
           touch configs/output_simple.txt
           echo '{}' > configs/parsed_cache.json
           [ -f custom_channels.txt ] || touch custom_channels.txt
+          [ -f configs/name_mapping.json ] || echo '{}' > configs/name_mapping.json
 
       - name: Rotate archive if older than 7 days
         run: |
@@ -97,6 +101,7 @@ jobs:
         run: |
           python -c "import sys; print(sys.executable)"
           python -c "import aiohttp, asyncio, uvloop; print('All core modules imported')"
+          xray version 2>&1 | head -1 || echo "Xray not found"
 
       - name: Run optimized pipeline
         id: pipeline
@@ -182,9 +187,9 @@ jobs:
 
       - name: Train quality model (if enough data)
         run: |
-          if [ -f "train_model.py" ]; then
+          if [ -f "src/train_model.py" ]; then
             echo "Training quality model..."
-            python train_model.py || echo "Model training failed, but continuing"
+            python src/train_model.py || echo "Model training failed, but continuing"
           else
             echo "train_model.py not found, skipping model training"
           fi
@@ -303,6 +308,7 @@ jobs:
             configs/output_simple.txt
             configs/history.db
             configs/quality_model.cbm
+            configs/name_mapping.json
             logs/pipeline.log
           retention-days: 7
           if-no-files-found: warn
@@ -316,6 +322,7 @@ jobs:
           if [ -f "configs/output_simple.txt" ]; then git add configs/output_simple.txt; fi
           if [ -f "custom_channels.txt" ]; then git add custom_channels.txt; fi
           if [ -f "configs/quality_model.cbm" ]; then git add configs/quality_model.cbm; fi
+          if [ -f "configs/name_mapping.json" ]; then git add configs/name_mapping.json; fi
           if git diff --staged --quiet; then
             echo "✅ No changes to commit"
           else
