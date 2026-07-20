@@ -13,6 +13,7 @@ import ssl
 from typing import Dict, List, Optional, Tuple
 from collections import OrderedDict, deque
 from urllib.parse import urlparse, parse_qs
+from functools import lru_cache
 
 import aiohttp
 
@@ -33,6 +34,7 @@ logger = logging.getLogger(__name__)
 class CachedActiveChecker:
     """
     Активная проверка с кешированием результатов на основе TTL.
+    Использует lru_cache для TCP-кеша.
     """
 
     def __init__(self,
@@ -55,9 +57,9 @@ class CachedActiveChecker:
             global_limit=self.max_workers,
             per_host_limit=PER_HOST_LIMIT
         )
-        self._tcp_cache = OrderedDict()
-        self._tcp_cache_max_size = 5000
-        self._tcp_cache_alpha = 0.3  # для скользящего среднего
+        # Используем lru_cache для TCP-рукопожатий
+        self._tcp_cache = lru_cache(maxsize=5000)(self._tcp_latency_raw)
+        self._tcp_cache_alpha = 0.3
 
     def _should_skip(self, config: str) -> bool:
         if not self.history:
@@ -108,7 +110,6 @@ class CachedActiveChecker:
         start = time.time()
         try:
             if use_tls:
-                # TLS-рукопожатие
                 context = ssl.create_default_context()
                 reader, writer = await asyncio.wait_for(
                     asyncio.open_connection(host, port, ssl=context),
@@ -121,51 +122,32 @@ class CachedActiveChecker:
                 )
             writer.close()
             await writer.wait_closed()
-            return (time.time() - start) * 1000
+            latency = (time.time() - start) * 1000
+            return latency
         except Exception:
             return -1.0
 
     async def _tcp_latency(self, host: str, port: int, use_tls: bool = False) -> float:
+        """Использует lru_cache для TCP-кеша."""
         key = (host, port, use_tls)
-        if key in self._tcp_cache:
-            self._tcp_cache.move_to_end(key)
-            return self._tcp_cache[key]
-
         try:
-            latency = await self._tcp_latency_with_retry(host, port, use_tls)
+            result = await self._tcp_cache(host, port, use_tls)
+            return result
         except Exception:
-            latency = -1.0
-
-        # Скользящее среднее
-        if key in self._tcp_cache:
-            old = self._tcp_cache[key]
-            if old > 0 and latency > 0:
-                latency = self._tcp_cache_alpha * latency + (1 - self._tcp_cache_alpha) * old
-
-        if len(self._tcp_cache) >= self._tcp_cache_max_size:
-            self._tcp_cache.popitem(last=False)
-        self._tcp_cache[key] = latency
-        return latency
+            return -1.0
 
     async def _http_probe(self, host: str, port: int, use_tls: bool) -> float:
-        """Использует GET-запрос к generate_204, с ограничением редиректов."""
         try:
             session = await self._get_session()
             proto = 'https' if use_tls else 'http'
-            url = f"{proto}://{host}:{port}"
-            # Используем GET с generate_204 или аналогичным
-            test_url = f"{url}/generate_204"
+            url = f"{proto}://{host}:{port}/generate_204"
             start = time.time()
-            async with session.get(test_url, allow_redirects=False, timeout=HTTP_TIMEOUT) as resp:
+            async with session.get(url, allow_redirects=False, timeout=HTTP_TIMEOUT) as resp:
                 if resp.status < 400:
                     return (time.time() - start) * 1000
             return -1.0
         except Exception as e:
-            # Детализация ошибок
-            if isinstance(e, asyncio.TimeoutError):
-                logger.debug(f"HTTP probe timeout for {host}:{port}")
-            else:
-                logger.debug(f"HTTP probe error for {host}:{port}: {e}")
+            logger.debug(f"HTTP probe error for {host}:{port}: {e}")
             return -1.0
 
     async def check_config(self, config: str) -> Dict:
@@ -173,7 +155,6 @@ class CachedActiveChecker:
         if config in self._cache:
             ts, result = self._cache[config]
             if now - ts < self.cache_ttl:
-                logger.debug(f"Using cached result for {config[:50]}")
                 return result
             else:
                 del self._cache[config]
@@ -327,6 +308,7 @@ class CachedActiveChecker:
 
     def clear_cache(self):
         self._cache.clear()
+        self._tcp_cache.cache_clear()
         logger.info("Cleared check cache")
 
 
