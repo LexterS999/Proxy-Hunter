@@ -20,7 +20,7 @@ echo -e "${WHITE} Designed by: ${BRIGHT_GREEN}👽 Anonymous${NC}"
 echo -e "${MAGENTA}═════════════════════════════════════════════${NC}"
 echo ""
 
-REPO_URL="https://github.com/your-username/Proxy-Hunter.git"   # <-- ИЗМЕНИТЕ НА ВАШ РЕПОЗИТОРИЙ
+REPO_URL="https://github.com/LexterS999/Proxy-Hunter.git"   # <-- ИЗМЕНИТЕ НА ВАШ РЕПОЗИТОРИЙ
 INSTALL_DIR="$HOME/multi-proxy-config-fetcher"
 VENV_DIR="$INSTALL_DIR/venv"
 
