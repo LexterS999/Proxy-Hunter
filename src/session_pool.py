@@ -6,7 +6,7 @@ import aiohttp
 import asyncio
 import logging
 from typing import Optional
-import aiodns
+from aiohttp.resolver import AsyncResolver
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +32,8 @@ class SessionPool:
             if self._session is None or self._session.closed:
                 await self._cleanup_old()
 
-                # Используем aiodns для асинхронного DNS
-                resolver = aiodns.DNSResolver()  # <--- ИСПРАВЛЕНО: DefaultResolver → DNSResolver
+                # Используем встроенный AsyncResolver из aiohttp
+                resolver = AsyncResolver()
                 self._connector = aiohttp.TCPConnector(
                     limit=connector_limit,
                     limit_per_host=per_host_limit,
@@ -57,7 +57,7 @@ class SessionPool:
                     headers=default_headers
                 )
                 logger.info(
-                    f"Created shared ClientSession with aiodns, limit={connector_limit}, "
+                    f"Created shared ClientSession with AsyncResolver, limit={connector_limit}, "
                     f"per_host_limit={per_host_limit}"
                 )
             return self._session
