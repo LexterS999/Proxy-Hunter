@@ -2,6 +2,7 @@
 Асинхронный Bloom‑фильтр с шардированием и LRU-кешем для шардов.
 Загружает в память только один шард за раз, выгружая старые при необходимости.
 Использует детерминированный хеш (xxhash) для устойчивости между запусками.
+Добавлена асинхронная предзагрузка всех шардов через asyncio.gather.
 """
 
 import logging
@@ -10,28 +11,29 @@ import pickle
 import asyncio
 from pathlib import Path
 from collections import OrderedDict
-from typing import List, Dict
+from typing import List, Dict, Set
 from pybloom_live import ScalableBloomFilter
 import xxhash
 
 logger = logging.getLogger(__name__)
 
-BLOOM_VERSION = 2  # Версия фильтра
+BLOOM_VERSION = 2
 
 
 class ShardedBloomDeduplicator:
     def __init__(self, num_shards: int = 16, capacity: int = 100000, error_rate: float = 0.001,
-                 cache_dir: str = "bloom_shards", max_shards_in_memory: int = 4):
+                 cache_dir: str = "bloom_shards", max_shards_in_memory: int = 8):
         self.num_shards = num_shards
         self.capacity = capacity
         self.error_rate = error_rate
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.max_shards_in_memory = max_shards_in_memory
-        self.shards = {}
-        # Используем OrderedDict для LRU
+        self.max_shards_in_memory = max(max_shards_in_memory, 4)
+        self.shards: Dict[int, ScalableBloomFilter] = {}
         self._access_order = OrderedDict()
         self._locks = {i: asyncio.Semaphore(1) for i in range(num_shards)}
+        self._preload_lock = asyncio.Lock()
+        self._preloaded = False
 
     def _get_shard_index(self, config: str) -> int:
         h = int(xxhash.xxh64(config.encode()).hexdigest(), 16)
@@ -43,12 +45,10 @@ class ShardedBloomDeduplicator:
     async def _load_shard(self, shard_idx: int):
         async with self._locks[shard_idx]:
             if shard_idx in self.shards:
-                # Обновляем порядок доступа
                 self._access_order.move_to_end(shard_idx)
                 return
 
             if len(self.shards) >= self.max_shards_in_memory:
-                # Выгружаем самый старый
                 oldest = next(iter(self._access_order))
                 del self._access_order[oldest]
                 await self._save_shard(oldest)
@@ -64,7 +64,7 @@ class ShardedBloomDeduplicator:
                     data = await asyncio.to_thread(load_pickle)
                     self.shards[shard_idx] = data
                     self._access_order[shard_idx] = None
-                    logger.info(f"Loaded bloom shard {shard_idx} from {shard_file}")
+                    logger.debug(f"Loaded bloom shard {shard_idx} from {shard_file}")
                 except Exception as e:
                     logger.warning(f"Failed to load shard {shard_idx}: {e}. Creating new.")
                     self.shards[shard_idx] = ScalableBloomFilter(
@@ -88,9 +88,25 @@ class ShardedBloomDeduplicator:
                 with open(shard_file, 'wb') as f:
                     pickle.dump(self.shards[shard_idx], f)
             await asyncio.to_thread(save_pickle)
-            logger.debug(f"Saved bloom shard {shard_idx} to {shard_file}")
         except Exception as e:
             logger.error(f"Failed to save shard {shard_idx}: {e}")
+
+    async def preload_shards(self, configs: List[str]):
+        """Асинхронная предзагрузка всех шардов, которые могут понадобиться."""
+        async with self._preload_lock:
+            if self._preloaded:
+                return
+            needed_shards = set()
+            for cfg in configs:
+                needed_shards.add(self._get_shard_index(cfg))
+            if not needed_shards:
+                self._preloaded = True
+                return
+            logger.info(f"Preloading {len(needed_shards)} bloom shards...")
+            tasks = [self._load_shard(idx) for idx in needed_shards]
+            await asyncio.gather(*tasks)
+            self._preloaded = True
+            logger.info(f"Preloaded {len(self.shards)} bloom shards")
 
     async def contains(self, config: str) -> bool:
         shard_idx = self._get_shard_index(config)
@@ -98,7 +114,12 @@ class ShardedBloomDeduplicator:
         return config in self.shards[shard_idx]
 
     async def contains_batch(self, configs: List[str]) -> Dict[str, bool]:
-        """Пакетная проверка наличия в фильтре."""
+        """Пакетная проверка наличия в фильтре с предзагрузкой."""
+        if not configs:
+            return {}
+        # Предзагружаем все нужные шарды
+        await self.preload_shards(configs)
+
         result = {}
         shard_map = {}
         for cfg in configs:
@@ -106,7 +127,9 @@ class ShardedBloomDeduplicator:
             shard_map.setdefault(shard_idx, []).append(cfg)
 
         for shard_idx, cfgs in shard_map.items():
-            await self._load_shard(shard_idx)
+            # Убеждаемся, что шард загружен (если не был предзагружен)
+            if shard_idx not in self.shards:
+                await self._load_shard(shard_idx)
             bloom = self.shards.get(shard_idx)
             if bloom:
                 for cfg in cfgs:
@@ -122,9 +145,32 @@ class ShardedBloomDeduplicator:
         self.shards[shard_idx].add(config)
         self._access_order.move_to_end(shard_idx)
 
+    async def add_batch(self, configs: List[str]):
+        """Пакетное добавление с предзагрузкой."""
+        if not configs:
+            return
+        # Предзагружаем все нужные шарды
+        await self.preload_shards(configs)
+
+        shard_map = {}
+        for cfg in configs:
+            shard_idx = self._get_shard_index(cfg)
+            shard_map.setdefault(shard_idx, []).append(cfg)
+
+        for shard_idx, cfgs in shard_map.items():
+            if shard_idx not in self.shards:
+                await self._load_shard(shard_idx)
+            bloom = self.shards[shard_idx]
+            for cfg in cfgs:
+                bloom.add(cfg)
+            self._access_order.move_to_end(shard_idx)
+
     async def save(self):
+        tasks = []
         for idx in list(self.shards.keys()):
-            await self._save_shard(idx)
+            tasks.append(self._save_shard(idx))
+        if tasks:
+            await asyncio.gather(*tasks)
 
     async def reset(self):
         for shard_idx in range(self.num_shards):
@@ -136,6 +182,7 @@ class ShardedBloomDeduplicator:
                 shard_file = self._get_shard_file(shard_idx)
                 if shard_file.exists():
                     shard_file.unlink()
+        self._preloaded = False
         logger.info("Reset all bloom shards")
 
 
