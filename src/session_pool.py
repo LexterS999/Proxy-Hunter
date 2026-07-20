@@ -1,22 +1,16 @@
 """
-Единый пул aiohttp ClientSession для всего приложения.
-Предотвращает создание множества соединений и улучшает переиспользование keep-alive.
-Добавлена блокировка и корректное закрытие старых соединений.
+Единый пул aiohttp ClientSession с aiodns для быстрого резолвинга.
 """
 
 import aiohttp
 import asyncio
 import logging
 from typing import Optional
+import aiodns
 
 logger = logging.getLogger(__name__)
 
 class SessionPool:
-    """
-    Синглтон для переиспользования одной aiohttp ClientSession.
-    Используется в fetch_configs.py и active_checker.py.
-    """
-
     _instance = None
     _session: Optional[aiohttp.ClientSession] = None
     _connector: Optional[aiohttp.TCPConnector] = None
@@ -36,15 +30,17 @@ class SessionPool:
     ) -> aiohttp.ClientSession:
         async with self._lock:
             if self._session is None or self._session.closed:
-                # Закрываем старые объекты перед созданием новых
                 await self._cleanup_old()
 
+                # Используем aiodns для асинхронного DNS
+                resolver = aiodns.DefaultResolver()
                 self._connector = aiohttp.TCPConnector(
                     limit=connector_limit,
                     limit_per_host=per_host_limit,
                     ttl_dns_cache=300,
                     enable_cleanup_closed=True,
-                    force_close=True
+                    force_close=True,
+                    resolver=resolver
                 )
                 timeout = aiohttp.ClientTimeout(total=timeout_total)
                 default_headers = {
@@ -61,7 +57,7 @@ class SessionPool:
                     headers=default_headers
                 )
                 logger.info(
-                    f"Created shared ClientSession with limit={connector_limit}, "
+                    f"Created shared ClientSession with aiodns, limit={connector_limit}, "
                     f"per_host_limit={per_host_limit}"
                 )
             return self._session
