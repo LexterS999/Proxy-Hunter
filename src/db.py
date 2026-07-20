@@ -1,6 +1,6 @@
 """
 Модуль для работы с SQLite-базой данных истории.
-Хранит статистику запусков, каналов, профилей, признаков и историю зондов.
+Добавлена таблица model_versions для отслеживания метрик обученных моделей.
 """
 
 import sqlite3
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 DB_PATH = "configs/history.db"
 COMPRESS_LEVEL = 6
-SCHEMA_VERSION = 3  # Увеличена версия для новых таблиц
+SCHEMA_VERSION = 4  # увеличена для новой таблицы
 
 
 def _compress(data: Any) -> bytes:
@@ -135,7 +135,6 @@ class HistoryDB:
                     FOREIGN KEY(run_id) REFERENCES runs(id)
                 )
             ''')
-            # Новые таблицы для улучшенного анализа
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS profile_features (
                     profile_key TEXT PRIMARY KEY,
@@ -196,6 +195,17 @@ class HistoryDB:
                     path_used TEXT,
                     attempt_number INTEGER,
                     total_attempts INTEGER
+                )
+            ''')
+            # Новая таблица для версий моделей
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS model_versions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    version TEXT,
+                    rmse REAL,
+                    mae REAL,
+                    trained_on TEXT,
+                    created_at TEXT
                 )
             ''')
             # Индексы
@@ -218,14 +228,12 @@ class HistoryDB:
             logger.info(f"SQLite history database initialized (schema version {SCHEMA_VERSION})")
 
     def _upgrade_schema(self, conn, old_version: int):
-        """Обновление схемы БД."""
         cursor = conn.cursor()
         if old_version < 1:
             pass
         if old_version < 2:
             pass
         if old_version < 3:
-            # Добавляем новые таблицы
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS profile_features (
                     profile_key TEXT PRIMARY KEY,
@@ -291,6 +299,17 @@ class HistoryDB:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_probe_profile ON probe_history(profile_key)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_probe_timestamp ON probe_history(timestamp)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_probe_success ON probe_history(success)")
+        if old_version < 4:
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS model_versions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    version TEXT,
+                    rmse REAL,
+                    mae REAL,
+                    trained_on TEXT,
+                    created_at TEXT
+                )
+            ''')
             cursor.execute("UPDATE metadata SET value=? WHERE key='schema_version'", (str(SCHEMA_VERSION),))
             conn.commit()
             logger.info(f"Schema upgraded to version {SCHEMA_VERSION}")
@@ -304,6 +323,7 @@ class HistoryDB:
         finally:
             conn.close()
 
+    # ... (все остальные методы остаются без изменений, кроме добавления новых)
     def add_run(self, stats: Dict) -> int:
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -536,10 +556,28 @@ class HistoryDB:
             return None
         return sum(valid_scores) / len(valid_scores)
 
-    # ========== Новые методы для улучшенного анализа ==========
+    # ========== Новые методы для модели ==========
+
+    def save_model_version(self, version: str, rmse: float, mae: float, trained_on: str):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO model_versions (version, rmse, mae, trained_on, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (version, rmse, mae, trained_on, datetime.now().isoformat()))
+            conn.commit()
+            logger.info(f"Model version saved: {version} (RMSE={rmse:.2f}, MAE={mae:.2f})")
+
+    def get_best_model(self) -> Optional[Dict]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM model_versions ORDER BY rmse ASC LIMIT 1')
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    # ========== Существующие методы для probe/features ==========
 
     def update_profile_features(self, features: Dict):
-        """Сохраняет или обновляет признаки профиля."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             columns = ', '.join(features.keys())
@@ -613,7 +651,6 @@ class HistoryDB:
             ''', (cutoff,))
             rows = cursor.fetchall()
             return [dict(row) for row in rows]
-
 
 _db = None
 
