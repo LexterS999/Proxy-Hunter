@@ -9,6 +9,7 @@ import logging
 import time
 import socket
 import re
+import ssl
 from typing import Dict, List, Optional, Tuple
 from collections import OrderedDict, deque
 from urllib.parse import urlparse, parse_qs
@@ -40,14 +41,14 @@ class CachedActiveChecker:
                  test_url: str = "https://www.google.com/generate_204",
                  max_latency: float = None,
                  history: Dict = None,
-                 cache_ttl: int = 3600):  # 1 час
+                 cache_ttl: int = 3600):
         self.timeout = timeout or TCP_TIMEOUT
         self.max_workers = max_workers or ACTIVE_CHECKER_WORKERS
         self.test_url = test_url
         self.max_latency = max_latency or MAX_LATENCY_MS
         self.history = history or {}
         self.cache_ttl = cache_ttl
-        self._cache = {}  # config -> (timestamp, result)
+        self._cache = {}
         self._session = None
         self._connector = None
         self._limiter = ConcurrencyLimiter(
@@ -55,10 +56,10 @@ class CachedActiveChecker:
             per_host_limit=PER_HOST_LIMIT
         )
         self._tcp_cache = OrderedDict()
-        self._cache_max_size = 5000
+        self._tcp_cache_max_size = 5000
+        self._tcp_cache_alpha = 0.3  # для скользящего среднего
 
     def _should_skip(self, config: str) -> bool:
-        """Фильтрация по истории."""
         if not self.history:
             return False
         from profile_scorer import ProfileScorer
@@ -100,56 +101,74 @@ class CachedActiveChecker:
 
     @retry_with_backoff(attempts=3, base_delay=0.2, max_delay=1.0, deadline=5.0,
                         retryable_exceptions=(asyncio.TimeoutError, ConnectionError, OSError, ConnectionResetError))
-    async def _tcp_latency_with_retry(self, host: str, port: int) -> float:
-        return await self._tcp_latency_raw(host, port)
+    async def _tcp_latency_with_retry(self, host: str, port: int, use_tls: bool = False) -> float:
+        return await self._tcp_latency_raw(host, port, use_tls)
 
-    async def _tcp_latency_raw(self, host: str, port: int) -> float:
+    async def _tcp_latency_raw(self, host: str, port: int, use_tls: bool = False) -> float:
         start = time.time()
         try:
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(host, port, ssl=False),
-                timeout=self.timeout
-            )
+            if use_tls:
+                # TLS-рукопожатие
+                context = ssl.create_default_context()
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(host, port, ssl=context),
+                    timeout=self.timeout
+                )
+            else:
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(host, port, ssl=False),
+                    timeout=self.timeout
+                )
             writer.close()
             await writer.wait_closed()
             return (time.time() - start) * 1000
         except Exception:
             return -1.0
 
-    async def _tcp_latency(self, host: str, port: int) -> float:
-        key = (host, port)
+    async def _tcp_latency(self, host: str, port: int, use_tls: bool = False) -> float:
+        key = (host, port, use_tls)
         if key in self._tcp_cache:
             self._tcp_cache.move_to_end(key)
             return self._tcp_cache[key]
 
-        # <-- ОБЕРНУЛИ В try/except, чтобы любые исключения превращались в -1.0
         try:
-            latency = await self._tcp_latency_with_retry(host, port)
+            latency = await self._tcp_latency_with_retry(host, port, use_tls)
         except Exception:
             latency = -1.0
 
-        if len(self._tcp_cache) >= self._cache_max_size:
+        # Скользящее среднее
+        if key in self._tcp_cache:
+            old = self._tcp_cache[key]
+            if old > 0 and latency > 0:
+                latency = self._tcp_cache_alpha * latency + (1 - self._tcp_cache_alpha) * old
+
+        if len(self._tcp_cache) >= self._tcp_cache_max_size:
             self._tcp_cache.popitem(last=False)
         self._tcp_cache[key] = latency
         return latency
 
     async def _http_probe(self, host: str, port: int, use_tls: bool) -> float:
-        """Использует HEAD-запрос вместо Range."""
+        """Использует GET-запрос к generate_204, с ограничением редиректов."""
         try:
             session = await self._get_session()
             proto = 'https' if use_tls else 'http'
             url = f"{proto}://{host}:{port}"
+            # Используем GET с generate_204 или аналогичным
+            test_url = f"{url}/generate_204"
             start = time.time()
-            # HEAD-запрос
-            async with session.head(url, allow_redirects=True, timeout=HTTP_TIMEOUT) as resp:
-                if resp.status < 400:  # 2xx или 3xx
+            async with session.get(test_url, allow_redirects=False, timeout=HTTP_TIMEOUT) as resp:
+                if resp.status < 400:
                     return (time.time() - start) * 1000
             return -1.0
-        except Exception:
+        except Exception as e:
+            # Детализация ошибок
+            if isinstance(e, asyncio.TimeoutError):
+                logger.debug(f"HTTP probe timeout for {host}:{port}")
+            else:
+                logger.debug(f"HTTP probe error for {host}:{port}: {e}")
             return -1.0
 
     async def check_config(self, config: str) -> Dict:
-        # Проверяем кеш
         now = time.time()
         if config in self._cache:
             ts, result = self._cache[config]
@@ -174,7 +193,7 @@ class CachedActiveChecker:
 
         host, port, use_tls = server_info
 
-        tcp_latency = await self._limiter.run(host, self._tcp_latency(host, port))
+        tcp_latency = await self._limiter.run(host, self._tcp_latency(host, port, use_tls))
         if tcp_latency < 0:
             result['error'] = 'tcp_failed'
             self._cache[config] = (now, result)
@@ -204,16 +223,15 @@ class CachedActiveChecker:
         if not configs:
             return []
 
-        # Прогрев кеша TCP
         server_groups = {}
         for cfg in configs:
             info = self._extract_server_info(cfg)
             if info:
-                server_groups[(info[0], info[1])] = True
+                server_groups[(info[0], info[1], info[2])] = True
 
         warm_tasks = []
-        for (host, port) in server_groups.keys():
-            warm_tasks.append(self._limiter.run(host, self._tcp_latency(host, port)))
+        for (host, port, use_tls) in server_groups.keys():
+            warm_tasks.append(self._limiter.run(host, self._tcp_latency(host, port, use_tls)))
         if warm_tasks:
             await asyncio.gather(*warm_tasks, return_exceptions=True)
 
@@ -277,7 +295,6 @@ class CachedActiveChecker:
         except Exception as e:
             logger.debug(f"Parser extraction failed: {e}")
 
-        # fallback
         try:
             base = config.split('#')[0]
             parsed = urlparse(base)
@@ -309,10 +326,8 @@ class CachedActiveChecker:
         ]
 
     def clear_cache(self):
-        """Очищает кеш результатов."""
         self._cache.clear()
         logger.info("Cleared check cache")
 
 
-# Для обратной совместимости переименуем
 ActiveChecker = CachedActiveChecker
