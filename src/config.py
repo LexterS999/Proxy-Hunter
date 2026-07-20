@@ -5,15 +5,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from typing import Dict, List, Optional
 from datetime import datetime
 import re
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 from dataclasses import dataclass
 import logging
 from pathlib import Path
 from math import inf
+import copy
 
 from user_settings import (
     SOURCE_URLS, USE_MAXIMUM_POWER, SPECIFIC_CONFIG_COUNT, ENABLED_PROTOCOLS,
-    MAX_CONFIG_AGE_DAYS, CHANNEL_HEALTH_THRESHOLD
+    MAX_CONFIG_AGE_DAYS, CHANNEL_HEALTH_THRESHOLD, SCORE_WEIGHTS
 )
 from channel_quality_analyzer import ChannelQualityAnalyzer
 
@@ -56,6 +57,8 @@ class ChannelConfig:
     def calculate_overall_score(self):
         try:
             total_attempts = max(1, self.metrics.success_count + self.metrics.fail_count)
+            # Используем веса из SCORE_WEIGHTS
+            w = SCORE_WEIGHTS
             reliability_score = (self.metrics.success_count / total_attempts) * 35
             total_configs = max(1, self.metrics.total_configs)
             quality_score = (self.metrics.valid_configs / total_configs) * 25
@@ -81,6 +84,7 @@ class ProxyConfig:
         self._initialize_settings()
         self._set_smart_limits()
         self._analyzer = None
+        self._health_applied = False  # флаг для однократного применения
 
     def _initialize_protocols(self) -> Dict:
         return {
@@ -154,10 +158,15 @@ class ProxyConfig:
             if not parsed.scheme or not parsed.netloc:
                 raise ValueError("Invalid URL format")
             path = parsed.path.rstrip('/')
+            # Обработка параметров запроса
+            query = parsed.query
             if parsed.netloc.startswith('t.me/s/'):
                 channel_name = parsed.path.strip('/').lower()
                 return f"telegram:{channel_name}"
-            return f"{parsed.scheme}://{parsed.netloc}{path}"
+            base = f"{parsed.scheme}://{parsed.netloc}{path}"
+            if query:
+                base += f"?{query}"
+            return base
         except Exception as e:
             logger.error(f"URL normalization error: {str(e)}")
             raise
@@ -202,8 +211,11 @@ class ProxyConfig:
             return False
 
     def get_enabled_channels(self) -> List[ChannelConfig]:
-        channels = [channel for channel in self.SOURCE_URLS if channel.enabled]
-        self._apply_channel_health_filter()
+        # Применяем health-фильтр однократно
+        if not self._health_applied:
+            self._apply_channel_health_filter()
+            self._health_applied = True
+
         channels = [channel for channel in self.SOURCE_URLS if channel.enabled]
         if not channels:
             self.save_empty_config_file()
@@ -253,14 +265,17 @@ class ProxyConfig:
     def adjust_protocol_limits(self, channel: ChannelConfig):
         if self.use_maximum_power:
             return
+        # Создаём копию настроек для изменений
+        protocols_copy = copy.deepcopy(self.SUPPORTED_PROTOCOLS)
         for protocol in channel.metrics.protocol_counts:
-            if protocol in self.SUPPORTED_PROTOCOLS:
+            if protocol in protocols_copy:
                 current_count = channel.metrics.protocol_counts[protocol]
                 if current_count > 0:
-                    self.SUPPORTED_PROTOCOLS[protocol]["min_configs"] = min(
-                        self.SUPPORTED_PROTOCOLS[protocol]["min_configs"],
+                    protocols_copy[protocol]["min_configs"] = min(
+                        protocols_copy[protocol]["min_configs"],
                         current_count
                     )
+        self.SUPPORTED_PROTOCOLS = protocols_copy
 
     def save_empty_config_file(self) -> bool:
         try:
