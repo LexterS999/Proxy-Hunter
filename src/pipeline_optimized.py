@@ -10,7 +10,7 @@ import asyncio
 import uvloop
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
-from db import get_db, _compress, _decompress
+from db import get_db, _compress
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import logging
@@ -23,7 +23,7 @@ import signal
 import socket
 from pathlib import Path
 from typing import List, Dict, Optional, Set
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from logging.handlers import RotatingFileHandler
 
@@ -45,14 +45,15 @@ from session_pool import SessionPool
 from channel_quality_analyzer import ChannelQualityAnalyzer
 from config_identity import ConfigIdentity
 
-# Новые модули
 from feature_extractor import FeatureExtractor
 from probe_engine import IntelligentProbe
 from anomaly_detector import AnomalyDetector
 from channel_selector import ChannelSelector
 from async_db_writer import AsyncDBWriter
+from handle_errors import handle_errors
 
 logger = logging.getLogger(__name__)
+
 
 class OptimizedPipeline:
     def __init__(self, config: Optional[ProxyConfig] = None):
@@ -63,7 +64,7 @@ class OptimizedPipeline:
         self.scorer = ProfileScorer()
         self.output_file = 'configs/output_archive.txt'
         self.simple_file = 'configs/output_simple.txt'
-        self.parsed_cache_file = 'configs/parsed_cache.json'
+        self.parsed_cache_file = 'configs/parsed_cache.json'  # больше не используется
         self.name_mapping_file = 'configs/name_mapping.json'
         self.channel_stats_file = 'configs/channel_stats.json'
         self.channel_analyzer = None
@@ -75,36 +76,51 @@ class OptimizedPipeline:
         self.checker_cache = None
         self._health_applied = False
 
-        # Новые компоненты
         self.feature_extractor = FeatureExtractor()
         self.probe_engine = IntelligentProbe(timeout=5.0, max_attempts=3)
         self.anomaly_detector = AnomalyDetector()
         self.channel_selector = ChannelSelector()
         self.model = None
+        self.model_path = 'configs/quality_model.cbm'
+        self.model_mtime = None
         self.feature_cols = []
         self.cat_cols = []
         self._load_model()
-        self.async_writer = AsyncDBWriter()  # только создание, запуск позже
+        self.async_writer = AsyncDBWriter()
 
         self._setup_logging()
         self._check_dependencies()
         self._setup_signal_handlers()
 
     def _load_model(self):
-        """Загружает ML-модель, если она есть."""
-        model_path = 'configs/quality_model.cbm'
+        """Загружает ML-модель с проверкой изменения файла."""
         try:
-            data = joblib.load(model_path)
+            mtime = os.path.getmtime(self.model_path) if os.path.exists(self.model_path) else None
+            if self.model is not None and mtime == self.model_mtime:
+                return  # Модель уже загружена и не изменилась
+
+            data = joblib.load(self.model_path)
             self.model = data['model']
             self.feature_cols = data['features']
             self.cat_cols = data['categorical']
-            logger.info(f"✅ Quality model loaded from {model_path}")
+            self.model_mtime = mtime
+            logger.info(f"✅ Quality model loaded from {self.model_path}")
         except FileNotFoundError:
-            logger.warning(f"Model file {model_path} not found, using fallback scoring.")
+            logger.warning(f"Model file {self.model_path} not found, using fallback scoring.")
             self.model = None
+            self.model_mtime = None
         except Exception as e:
             logger.warning(f"Could not load quality model: {e}. Using fallback scoring.")
             self.model = None
+            self.model_mtime = None
+
+    def _reload_model_if_changed(self):
+        """Проверяет, не изменился ли файл модели, и перезагружает при необходимости."""
+        if os.path.exists(self.model_path):
+            current_mtime = os.path.getmtime(self.model_path)
+            if current_mtime != self.model_mtime:
+                logger.info("Model file changed, reloading...")
+                self._load_model()
 
     def _setup_logging(self):
         log_dir = Path('logs')
@@ -136,9 +152,9 @@ class OptimizedPipeline:
         except ImportError:
             missing.append("aiohttp")
         try:
-            import bs4
+            import lxml
         except ImportError:
-            missing.append("beautifulsoup4")
+            missing.append("lxml")
         try:
             import numpy
         except ImportError:
@@ -159,6 +175,10 @@ class OptimizedPipeline:
             import catboost
         except ImportError:
             missing.append("catboost")
+        try:
+            import aiosqlite
+        except ImportError:
+            missing.append("aiosqlite")
         if missing:
             logger.error(f"Missing required dependencies: {', '.join(missing)}")
             logger.error("Please install: pip install -r requirements.txt")
@@ -175,47 +195,14 @@ class OptimizedPipeline:
         return hashlib.md5(config.encode()).hexdigest()
 
     async def _load_parsed_cache_async(self) -> Dict:
-        if os.path.exists(self.parsed_cache_file):
-            try:
-                async with aiofiles.open(self.parsed_cache_file, 'r') as f:
-                    content = await f.read()
-                    if content:
-                        return json.loads(content)
-                    else:
-                        logger.warning(f"Parsed cache file {self.parsed_cache_file} is empty, starting fresh.")
-            except (json.JSONDecodeError, ValueError, OSError) as e:
-                logger.warning(f"Failed to load parsed cache: {e}, starting fresh.")
+        """Загружает кеш парсинга из SQLite."""
+        # Не загружаем всё сразу — используем пакетный доступ
         return {}
 
-    async def _save_parsed_cache_async(self, cache: Dict):
-        try:
-            Path(self.parsed_cache_file).parent.mkdir(parents=True, exist_ok=True)
-            import portalocker
-            async with aiofiles.open(self.parsed_cache_file, 'w') as f:
-                with open(self.parsed_cache_file, 'w') as sync_f:
-                    portalocker.lock(sync_f, portalocker.LOCK_EX)
-                    json.dump(cache, sync_f, indent=2)
-                    portalocker.unlock(sync_f)
-        except Exception as e:
-            logger.warning(f"Failed to save parsed cache: {e}")
-
-    async def _load_name_mapping_async(self) -> Dict[str, str]:
-        if os.path.exists(self.name_mapping_file):
-            try:
-                async with aiofiles.open(self.name_mapping_file, 'r', encoding='utf-8') as f:
-                    content = await f.read()
-                    return json.loads(content)
-            except Exception as e:
-                logger.warning(f"Failed to load name mapping: {e}")
-        return {}
-
-    async def _save_name_mapping_async(self, mapping: Dict[str, str]):
-        try:
-            Path(self.name_mapping_file).parent.mkdir(parents=True, exist_ok=True)
-            async with aiofiles.open(self.name_mapping_file, 'w', encoding='utf-8') as f:
-                await f.write(json.dumps(mapping, indent=2, ensure_ascii=False))
-        except Exception as e:
-            logger.error(f"Failed to save name mapping: {e}")
+    async def _save_parsed_cache_async(self, items: Dict[str, Dict]):
+        """Сохраняет кеш парсинга в SQLite пакетно."""
+        if items:
+            await self.db.set_parsed_cache_batch(items)
 
     def _get_config_key(self, config: str) -> str:
         return ConfigIdentity.get_key(config)
@@ -289,7 +276,15 @@ class OptimizedPipeline:
     def _safe_load_history(self) -> Dict:
         return {}
 
-    def _save_channel_stats(self, run_id: int):
+    async def _save_name_mapping_async(self, mapping: Dict[str, str]):
+        try:
+            Path(self.name_mapping_file).parent.mkdir(parents=True, exist_ok=True)
+            async with aiofiles.open(self.name_mapping_file, 'w', encoding='utf-8') as f:
+                await f.write(json.dumps(mapping, indent=2, ensure_ascii=False))
+        except Exception as e:
+            logger.error(f"Failed to save name mapping: {e}")
+
+    async def _save_channel_stats(self, run_id: int):
         try:
             for ch in self.config.SOURCE_URLS:
                 m = ch.metrics
@@ -304,8 +299,8 @@ class OptimizedPipeline:
                     'overall_score': m.overall_score,
                     'protocol_counts': m.protocol_counts or {}
                 }
-                self.db.update_channel(ch.url, metrics, enabled=ch.enabled)
-                self.db.add_channel_history(ch.url, run_id, metrics)
+                await self.db.update_channel(ch.url, metrics, enabled=ch.enabled)
+                await self.db.add_channel_history(ch.url, run_id, metrics)
             logger.info(f"✅ Channel stats saved to SQLite: {len(self.config.SOURCE_URLS)} channels")
         except Exception as e:
             logger.error(f"Failed to save channel stats: {e}")
@@ -323,14 +318,6 @@ class OptimizedPipeline:
                     logger.info(f"Channel {ch.url} disabled (state: inactive).")
                 else:
                     ch.enabled = True
-                    logger.debug(f"Channel {ch.url} enabled (state: {state}).")
-            report = self.channel_analyzer.get_health_report()
-            summary = report.get('summary', {})
-            logger.info(
-                f"📈 Channel health: active={summary.get('active', 0)}, "
-                f"recovering={summary.get('recovering', 0)}, "
-                f"inactive={summary.get('inactive', 0)} (total {summary.get('total', 0)})"
-            )
             self._health_applied = True
         except Exception as e:
             logger.warning(f"Failed to refresh channel health: {e}")
@@ -342,20 +329,21 @@ class OptimizedPipeline:
                 await self.deduplicator._bloom.save()
             except Exception as e:
                 logger.warning(f"Failed to save bloom filter state: {e}")
+        await self.db.close()
         logger.info("State saved.")
 
     def _parse_config(self, config: str) -> Optional[Dict]:
-        """Парсит конфигурацию и возвращает словарь с данными."""
-        from parse_fallback import FallbackParser
+        """Парсит конфигурацию с использованием кеша."""
         parsed, method = FallbackParser.parse_with_stats(config)
         if parsed:
             parsed['protocol'] = config.split('://')[0].lower()
         return parsed
 
+    @handle_errors(logger=logger, context="Pipeline run")
     async def run(self) -> bool:
         saga_state = {
             'step': 'start',
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
             'raw_configs': None,
             'valid_configs': None,
             'scored_configs': None,
@@ -381,7 +369,7 @@ class OptimizedPipeline:
                 return False
 
             run_stats = {
-                'timestamp': datetime.now().isoformat(),
+                'timestamp': datetime.now(timezone.utc).isoformat(),
                 'total_raw': len(raw_configs),
                 'total_valid': 0,
                 'total_final': 0,
@@ -394,8 +382,8 @@ class OptimizedPipeline:
                 'geo_distribution': {},
                 'anomalies': []
             }
-            run_id = self.db.add_run(run_stats)
-            self._save_channel_stats(run_id)
+            run_id = await self.db.add_run(run_stats)
+            await self._save_channel_stats(run_id)
             self._refresh_channel_health()
 
             if not raw_configs:
@@ -403,16 +391,19 @@ class OptimizedPipeline:
                 return False
             logger.info(f"✅ Raw configs: {len(raw_configs)}")
 
-            # Шаг 2: Парсинг и валидация
+            # Шаг 2: Парсинг и валидация с кешированием
             logger.info("🔍 Validating and extracting server info...")
-            parsed_cache = await self._load_parsed_cache_async()
+            # Загружаем кеш для всех конфигов пакетно
+            cache_keys = [self._get_cache_key(cfg) for cfg in raw_configs]
+            parsed_cache = await self.db.get_parsed_cache_batch(cache_keys)
+
             valid_configs = []
             parse_stats = {'strict': 0, 'heuristic': 0, 'failed': 0}
+            new_cache_items = {}
 
-            def parse_one(cfg):
+            def parse_one(cfg, cache_key):
                 try:
                     if self.validator.is_valid_config(cfg):
-                        cache_key = self._get_cache_key(cfg)
                         if cache_key in parsed_cache:
                             data = parsed_cache[cache_key]
                             if data:
@@ -423,7 +414,7 @@ class OptimizedPipeline:
                             data, method = FallbackParser.parse_with_stats(cfg)
                             if data is None:
                                 return (None, 'failed')
-                            parsed_cache[cache_key] = data
+                            new_cache_items[cache_key] = data
                             if data:
                                 return (cfg, method if method in ('strict', 'heuristic') else 'heuristic')
                             else:
@@ -434,8 +425,12 @@ class OptimizedPipeline:
             loop = asyncio.get_event_loop()
             batch_size = 1000
             for i in range(0, len(raw_configs), batch_size):
+                if self._shutdown_requested:
+                    await self.save_state()
+                    return False
                 batch = raw_configs[i:i+batch_size]
-                futures = [loop.run_in_executor(self._executor, parse_one, cfg) for cfg in batch]
+                batch_keys = [self._get_cache_key(cfg) for cfg in batch]
+                futures = [loop.run_in_executor(self._executor, parse_one, cfg, key) for cfg, key in zip(batch, batch_keys)]
                 for future in asyncio.as_completed(futures):
                     cfg, method = await future
                     if cfg:
@@ -444,10 +439,10 @@ class OptimizedPipeline:
                     else:
                         parse_stats['failed'] += 1
 
-            if self._shutdown_requested:
-                await self.save_state()
-                return False
-            await self._save_parsed_cache_async(parsed_cache)
+            # Сохраняем новые записи кеша в БД
+            if new_cache_items:
+                await self.db.set_parsed_cache_batch(new_cache_items)
+
             saga_state['step'] = 'validated'
             saga_state['valid_configs'] = len(valid_configs)
             logger.info(f"✅ Valid configs: {len(valid_configs)}")
@@ -471,13 +466,10 @@ class OptimizedPipeline:
                     info = self.quality_checker.extract_server_info(cfg)
                     if info and info.get('parsed'):
                         score_info = self.scorer.score_profile(cfg, info['parsed'], success=True)
-                        # Извлекаем признаки
                         key = self.feature_extractor.get_profile_key(cfg)
                         if key:
                             feats = self.feature_extractor.extract_features(key, cfg, parsed)
-                            # Асинхронно сохраняем признаки через writer
-                            # здесь пока синхронно, но позже заменим
-                            self.feature_extractor.update_features_db(feats)
+                            # Асинхронно сохраняем через async_writer
                             return {
                                 'config': cfg,
                                 'score': score_info['score'],
@@ -495,6 +487,9 @@ class OptimizedPipeline:
 
             with tqdm(total=len(valid_configs), desc="Scoring & extracting") as pbar:
                 for i in range(0, len(valid_configs), batch_size):
+                    if self._shutdown_requested:
+                        await self.save_state()
+                        return False
                     batch = valid_configs[i:i+batch_size]
                     futures = [loop.run_in_executor(self._executor, score_and_extract, cfg) for cfg in batch]
                     for future in asyncio.as_completed(futures):
@@ -505,9 +500,6 @@ class OptimizedPipeline:
                                 features_list.append(result['features'])
                         pbar.update(1)
 
-            if self._shutdown_requested:
-                await self.save_state()
-                return False
             saga_state['step'] = 'scored'
             saga_state['scored_configs'] = len(scored_configs)
             logger.info(f"✅ Scored {len(scored_configs)} configs")
@@ -516,7 +508,8 @@ class OptimizedPipeline:
                 logger.error("No configs scored.")
                 return False
 
-            # Шаг 4: ML-фильтрация (если модель доступна)
+            # Шаг 4: ML-фильтрация
+            self._reload_model_if_changed()
             if self.model is not None and len(features_list) > 10:
                 try:
                     df = pd.DataFrame(features_list)
@@ -532,7 +525,6 @@ class OptimizedPipeline:
                     for item in scored_configs:
                         item['ml_score'] = item['score']
 
-                # Фильтрация по ML-скору
                 min_ml_score = 30.0
                 filtered_by_ml = [item for item in scored_configs if item.get('ml_score', 0) >= min_ml_score]
                 logger.info(f"✅ ML filter (>{min_ml_score}): {len(scored_configs)} → {len(filtered_by_ml)}")
@@ -544,14 +536,13 @@ class OptimizedPipeline:
                 for item in scored_configs:
                     item['ml_score'] = item['score']
 
-            # Шаг 5: Аномалии (не удаляем, только логируем)
+            # Шаг 5: Аномалии
             anomaly_features = [f for f in features_list if self.anomaly_detector.predict(f)]
             logger.info(f"🔍 Detected {len(anomaly_features)} anomalous profiles")
 
-            # Запускаем асинхронный writer (внутри цикла событий)
             await self.async_writer.start()
 
-            # Шаг 6: Интеллектуальная активная проверка с per-host семафорами и адаптивными попытками
+            # Шаг 6: Интеллектуальное зондирование
             logger.info("🔄 Resolving DNS for unique hosts...")
             hosts = set()
             for item in scored_configs:
@@ -601,7 +592,6 @@ class OptimizedPipeline:
                 async with global_sem, host_sems[host]:
                     result = await self.probe_engine.probe(cfg, parsed, ml_score=ml_score)
                     result['profile_key'] = item.get('profile_key', self.feature_extractor.get_profile_key(cfg))
-                    # Асинхронно сохраняем результат в БД
                     await self.async_writer.enqueue({
                         'type': 'probe',
                         **result
@@ -611,7 +601,6 @@ class OptimizedPipeline:
             probe_tasks = [probe_with_limits(item) for item in scored_configs]
             probe_results = await asyncio.gather(*probe_tasks, return_exceptions=True)
 
-            # Обработка результатов
             good_configs = []
             for idx, res in enumerate(probe_results):
                 if isinstance(res, Exception):
@@ -647,7 +636,7 @@ class OptimizedPipeline:
                     await self.save_state()
                 return False
 
-            # Шаг 8: Архивация с именами
+            # Шаг 8: Архивация
             logger.info("💾 Archiving logic...")
             name_mapping = await self._load_name_mapping_async()
             new_configs_with_names = []
@@ -700,9 +689,9 @@ class OptimizedPipeline:
                 'p99_latency': 0,
                 'success_rate': len(good_configs) / len(scored_configs) if scored_configs else 0
             }
-            with self.db._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
+            async with self.db._transaction() as conn:
+                cursor = await conn.cursor()
+                await cursor.execute('''
                     UPDATE runs SET
                         total_raw = ?,
                         total_valid = ?,
@@ -730,7 +719,7 @@ class OptimizedPipeline:
                     _compress(final_stats.get('anomalies', [])),
                     run_id
                 ))
-                conn.commit()
+                await conn.commit()
             logger.info("✅ Run statistics updated.")
 
             elapsed = time.time() - start_time
@@ -751,10 +740,11 @@ class OptimizedPipeline:
             try:
                 await self.async_writer.stop()
                 await SessionPool().close()
+                await self.db.close()
                 if hasattr(self.deduplicator, '_bloom'):
                     await self.deduplicator._bloom.save()
             except Exception as e:
-                logger.warning(f"Error closing session pool or saving bloom: {e}")
+                logger.warning(f"Error closing resources: {e}")
             self._executor.shutdown(wait=False)
 
 
