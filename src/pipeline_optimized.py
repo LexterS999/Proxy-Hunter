@@ -1,12 +1,10 @@
 """
 pipeline_optimized.py - Оптимизированный пайплайн обработки прокси
 
-[CHANGE] логирование настраивается ТОЛЬКО здесь (точка входа).
-Из config.py и xray_balancer.py logging.basicConfig удалён.
+Логирование настраивается ТОЛЬКО здесь (точка входа).
 """
 
 import os
-import sys
 import asyncio
 import logging
 import uuid
@@ -28,21 +26,15 @@ from config import Config
 from config_parser import ConfigParser
 from config_validator import ConfigValidator
 from parse_fallback import FallbackParser
-from config_identity import ConfigIdentity
 from profile_scorer import ProfileScorer
 from active_checker import ActiveChecker
 from deep_deduplicate import DeepDeduplicator
 from xray_balancer import XrayBalancer
 from db import get_db
 
-# [CHANGE] удалён мёртвый импорт:
-#   from quality_analyzer_enhanced import EnhancedQualityAnalyzer
-# Модуль quality_analyzer_enhanced.py (JSON-хранилище) удалён —
-# единственным источником истории теперь является SQLite (db.py).
-
 
 # --------------------------------------------------------------------------- #
-#  [CHANGE] Worker верхнего уровня для параллельного парсинга (picklable)
+#  Worker верхнего уровня для параллельного парсинга (picklable)
 # --------------------------------------------------------------------------- #
 
 def _parse_worker(configs_chunk: List[str]) -> List[Optional[Dict]]:
@@ -67,7 +59,6 @@ class OptimizedPipeline:
         self.scorer = ProfileScorer()
         self.deduplicator = DeepDeduplicator()
         self.balancer = XrayBalancer()
-        # [CHANGE] ленивая инициализация БД через фабрику
         self.db = get_db()
         self.run_id = str(uuid.uuid4())[:8]
 
@@ -76,10 +67,16 @@ class OptimizedPipeline:
         logger.info(f"🚀 Запуск пайплайна (run_id={self.run_id})")
         start = datetime.now()
 
+        # Счётчики для сводки
+        total_raw = total_valid = total_final = 0
+        scored: List[Dict] = []
+        checked: List[Dict] = []
+
         try:
-            # Шаг 1: Сбор конфигов из каналов
+            # Шаг 1: Сбор
             raw_configs = await self._fetch_configs()
-            logger.info(f"📥 Собрано конфигов: {len(raw_configs)}")
+            total_raw = len(raw_configs)
+            logger.info(f"📥 Собрано конфигов: {total_raw}")
 
             if not raw_configs:
                 logger.warning("⚠️ Нет конфигов для обработки")
@@ -89,7 +86,7 @@ class OptimizedPipeline:
             parsed = self._parse_configs_parallel(raw_configs)
             logger.info(f"🔍 Распознано конфигов: {len(parsed)}")
 
-            # Шаг 3: Скоринг (с кешем и батчингом)
+            # Шаг 3: Скоринг (кеш + батчинг)
             scored = self._score_configs(parsed)
             logger.info(f"📊 Оценено конфигов: {len(scored)}")
 
@@ -99,16 +96,21 @@ class OptimizedPipeline:
 
             # Шаг 5: Активная проверка
             checked = await self._active_check(filtered)
-            logger.info(f"✅ Валидных после проверки: {len(checked)}")
+            total_valid = len(checked)
+            logger.info(f"✅ Валидных после проверки: {total_valid}")
 
             # Шаг 6: Дедупликация
             unique = await self._deduplicate(checked)
-            logger.info(f"🧹 Уникальных конфигов: {len(unique)}")
+            total_final = len(unique)
+            logger.info(f"🧹 Уникальных конфигов: {total_final}")
 
             # Шаг 7: Архивация и генерация Xray
             self._save_results(unique)
 
-            # [CHANGE] сбрасываем накопленные обновления профилей в БД одной транзакцией
+            # [CHANGE] Шаг 8: запись сводки запуска в таблицу runs
+            self._save_run_summary(total_raw, total_valid, total_final, scored, checked)
+
+            # Сбрасываем накопленные обновления профилей одной транзакцией
             self.scorer.flush()
 
             elapsed = (datetime.now() - start).total_seconds()
@@ -124,7 +126,6 @@ class OptimizedPipeline:
     # ------------------------------------------------------------------ #
 
     async def _fetch_configs(self) -> List[str]:
-        """Собирает конфиги из активных каналов."""
         try:
             from fetch_configs import AsyncConfigFetcher
             channels = self.config.get_enabled_channels()
@@ -149,10 +150,6 @@ class OptimizedPipeline:
     # ------------------------------------------------------------------ #
 
     def _parse_configs_parallel(self, configs: List[str]) -> List[Dict]:
-        """
-        [CHANGE] Параллельный парсинг через ProcessPoolExecutor (CPU-bound).
-        При недоступности multiprocessing — синхронный fallback.
-        """
         if not configs:
             return []
 
@@ -181,21 +178,14 @@ class OptimizedPipeline:
     # ------------------------------------------------------------------ #
 
     def _score_configs(self, parsed: List[Dict]) -> List[Dict]:
-        """
-        [CHANGE] Скоринг с предзагрузкой профилей пачкой и отложенной записью.
-        Устраняет N+1 запросов к SQLite.
-        """
         if not parsed:
             return []
-
-        # Предзагружаем профили одной пачкой
         fingerprints = [p.get('fingerprint', '') for p in parsed if p.get('fingerprint')]
         self.scorer.preload_profiles(fingerprints)
 
         scored = []
         for item in tqdm(parsed, desc="Скоринг"):
-            score = self.scorer.score_profile(item)
-            item['score'] = score
+            item['score'] = self.scorer.score_profile(item)
             scored.append(item)
         return scored
 
@@ -204,25 +194,17 @@ class OptimizedPipeline:
     # ------------------------------------------------------------------ #
 
     def _filter_by_score(self, scored: List[Dict]) -> List[Dict]:
-        """
-        [CHANGE] Реальный адаптивный порог из get_adaptive_thresholds().
-        Ранее min_score был захардкожен в 0.0 (фильтр ничего не фильтровал).
-        """
         if not scored:
             return []
-
         thresholds = self.scorer.get_adaptive_thresholds()
         min_score = thresholds.get('min_score', 0.3)
         logger.info(f"🎚️ Адаптивный порог скоринга: {min_score}")
 
         filtered = [item for item in scored if item.get('score', 0) >= min_score]
-
-        # Fallback: если всё отфильтровалось — берём верхнюю половину по скору
         if not filtered and scored:
             scored_sorted = sorted(scored, key=lambda x: x.get('score', 0), reverse=True)
             filtered = scored_sorted[:max(1, len(scored_sorted) // 2)]
             logger.warning("⚠️ Порог слишком строг — взята верхняя половина по скору")
-
         return filtered
 
     # ------------------------------------------------------------------ #
@@ -230,10 +212,8 @@ class OptimizedPipeline:
     # ------------------------------------------------------------------ #
 
     async def _active_check(self, configs: List[Dict]) -> List[Dict]:
-        """Активная проверка (TCP/HTTP)."""
         if not configs:
             return []
-
         checker = ActiveChecker()
         try:
             raw_configs = [c.get('raw', '') for c in configs]
@@ -241,17 +221,13 @@ class OptimizedPipeline:
 
             valid = []
             for item, result in zip(configs, results):
+                fp = item.get('fingerprint', '')
                 if isinstance(result, dict) and result.get('valid'):
                     item['latency'] = result.get('tcp_latency', -1)
-                    # Обновляем историю профиля
-                    fp = item.get('fingerprint', '')
                     if fp:
-                        self.scorer.update_profile_history(
-                            fp, success=True, latency=item['latency']
-                        )
+                        self.scorer.update_profile_history(fp, success=True, latency=item['latency'])
                     valid.append(item)
                 else:
-                    fp = item.get('fingerprint', '')
                     if fp:
                         self.scorer.update_profile_history(fp, success=False)
             return valid
@@ -263,7 +239,6 @@ class OptimizedPipeline:
     # ------------------------------------------------------------------ #
 
     async def _deduplicate(self, configs: List[Dict]) -> List[Dict]:
-        """Глубокая дедупликация."""
         if not configs:
             return []
         raw_configs = [c.get('raw', '') for c in configs]
@@ -276,29 +251,67 @@ class OptimizedPipeline:
     # ------------------------------------------------------------------ #
 
     def _save_results(self, configs: List[Dict]):
-        """Сохраняет архив, простой список и Xray-конфиг."""
         try:
             os.makedirs('configs', exist_ok=True)
             raw_configs = [c.get('raw', '') for c in configs if c.get('raw')]
 
-            # Архив с именами
-            archive_path = self.config.ARCHIVE_FILE
-            with open(archive_path, 'w', encoding='utf-8') as f:
+            with open(self.config.ARCHIVE_FILE, 'w', encoding='utf-8') as f:
                 for i, cfg in enumerate(raw_configs, 1):
                     f.write(f"# Config {i}\n{cfg}\n")
 
-            # Простой список
-            simple_path = self.config.SIMPLE_FILE
-            with open(simple_path, 'w', encoding='utf-8') as f:
+            with open(self.config.SIMPLE_FILE, 'w', encoding='utf-8') as f:
                 f.write('\n'.join(raw_configs))
 
-            logger.info(f"💾 Сохранено: {archive_path}, {simple_path}")
-
-            # Xray-конфиг с балансировкой
+            logger.info(f"💾 Сохранено: {self.config.ARCHIVE_FILE}, {self.config.SIMPLE_FILE}")
             self.balancer.generate_config(configs)
-
         except Exception as e:
             logger.error(f"❌ Ошибка сохранения: {e}")
+
+    # ------------------------------------------------------------------ #
+    #  [CHANGE] Шаг 8: Сводка запуска (таблица runs)
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _percentile(data: List[float], p: float) -> float:
+        """Вычисляет перцентиль без numpy (линейная интерполяция)."""
+        if not data:
+            return 0.0
+        data = sorted(data)
+        k = (len(data) - 1) * (p / 100.0)
+        f = int(k)
+        c = min(f + 1, len(data) - 1)
+        if f == c:
+            return float(data[f])
+        return float(data[f] + (data[c] - data[f]) * (k - f))
+
+    def _save_run_summary(self, total_raw: int, total_valid: int, total_final: int,
+                          scored: List[Dict], checked: List[Dict]):
+        """Записывает агрегированную сводку запуска в таблицу runs."""
+        try:
+            latencies = [c.get('latency', 0) for c in checked if c.get('latency', 0) > 0]
+            avg_score = (sum(c.get('score', 0) for c in scored) / len(scored)) if scored else 0.0
+            success_rate = (total_final / total_valid * 100) if total_valid else 0.0
+
+            protocols: Dict[str, int] = {}
+            for c in checked:
+                proto = c.get('protocol', 'unknown')
+                protocols[proto] = protocols.get(proto, 0) + 1
+
+            self.db.add_run_summary(
+                run_id=self.run_id,
+                total_raw=total_raw,
+                total_valid=total_valid,
+                total_final=total_final,
+                avg_score=round(avg_score, 4),
+                p50_latency=self._percentile(latencies, 50),
+                p95_latency=self._percentile(latencies, 95),
+                p99_latency=self._percentile(latencies, 99),
+                success_rate=round(success_rate, 2),
+                protocols=protocols,
+            )
+            logger.info("📊 Сводка запуска сохранена в БД")
+        except Exception as e:
+            logger.warning(f"⚠️ Не удалось сохранить сводку запуска: {e}")
 
 
 async def main():
