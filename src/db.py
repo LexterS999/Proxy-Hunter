@@ -1,7 +1,8 @@
 """
-db.py - SQLite хранилище истории и профилей
+db.py - SQLite хранилище истории, профилей и сводок запусков
 """
 
+import json
 import sqlite3
 import logging
 from functools import lru_cache
@@ -24,27 +25,22 @@ logger = logging.getLogger(__name__)
 def _compress(data: Any) -> bytes:
     """Сжимает данные (msgpack + zstd)."""
     if not _HAS_COMPRESSION:
-        import json
         return json.dumps(data, ensure_ascii=False).encode('utf-8')
     try:
         packed = msgpack.packb(data, use_bin_type=True)
         return zstd.ZstdCompressor().compress(packed)
     except Exception:
-        import json
         return json.dumps(data, ensure_ascii=False).encode('utf-8')
 
 
 def _decompress(data: bytes) -> Any:
     """
-    [CHANGE] Распаковка БЕЗ lru_cache.
-    Ранее @lru_cache кэшировал большие blob'ы и возвращал тот же изменяемый
-    объект (dict/list) — мутация результата ломала кеш. Теперь каждый вызов
-    возвращает свежий объект.
+    Распаковка БЕЗ lru_cache (ранее кеш возвращал разделяемый изменяемый объект,
+    мутация которого ломала кеш). Каждый вызов возвращает свежий объект.
     """
     if not data:
         return None
     if not _HAS_COMPRESSION:
-        import json
         try:
             return json.loads(data.decode('utf-8'))
         except Exception:
@@ -52,7 +48,6 @@ def _decompress(data: bytes) -> Any:
     try:
         return msgpack.unpackb(zstd.ZstdDecompressor().decompress(data), raw=False)
     except Exception:
-        import json
         try:
             return json.loads(data.decode('utf-8'))
         except Exception:
@@ -60,7 +55,7 @@ def _decompress(data: bytes) -> Any:
 
 
 class HistoryDB:
-    """SQLite хранилище истории запусков и профилей конфигов (синглтон)."""
+    """SQLite хранилище истории, профилей и сводок (синглтон)."""
 
     _instance = None
 
@@ -83,7 +78,7 @@ class HistoryDB:
         return conn
 
     def _init_db(self):
-        """Создаёт таблицы (если не существуют)."""
+        """Создаёт таблицы и применяет миграции."""
         conn = self._get_connection()
         try:
             with conn:
@@ -102,6 +97,7 @@ class HistoryDB:
                         channel_url TEXT PRIMARY KEY,
                         success_rate REAL DEFAULT 0,
                         total_configs INTEGER DEFAULT 0,
+                        enabled INTEGER DEFAULT 1,
                         last_run TEXT,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
@@ -112,11 +108,34 @@ class HistoryDB:
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
 
-                    CREATE INDEX IF NOT EXISTS idx_history_channel
-                        ON history(channel_url);
-                    CREATE INDEX IF NOT EXISTS idx_history_run
-                        ON history(run_id);
+                    CREATE TABLE IF NOT EXISTS runs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        run_id TEXT,
+                        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        total_raw INTEGER DEFAULT 0,
+                        total_valid INTEGER DEFAULT 0,
+                        total_final INTEGER DEFAULT 0,
+                        avg_score REAL DEFAULT 0,
+                        p50_latency REAL DEFAULT 0,
+                        p95_latency REAL DEFAULT 0,
+                        p99_latency REAL DEFAULT 0,
+                        success_rate REAL DEFAULT 0,
+                        protocols TEXT,
+                        geo_distribution TEXT,
+                        anomalies TEXT
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_history_channel ON history(channel_url);
+                    CREATE INDEX IF NOT EXISTS idx_history_run ON history(run_id);
+                    CREATE INDEX IF NOT EXISTS idx_runs_timestamp ON runs(timestamp);
                 """)
+
+                # [CHANGE] Миграция: добавляем колонку enabled, если БД создана
+                # старой версией (из кеша) и колонки ещё нет.
+                try:
+                    conn.execute("ALTER TABLE channels ADD COLUMN enabled INTEGER DEFAULT 1")
+                except sqlite3.OperationalError:
+                    pass  # колонка уже существует
         finally:
             conn.close()
 
@@ -138,7 +157,6 @@ class HistoryDB:
             conn.close()
 
     def get_channel_stats(self, channel_url: str, limit: int = 100) -> List[Dict]:
-        """Возвращает последние записи истории для канала."""
         conn = self._get_connection()
         try:
             rows = conn.execute(
@@ -165,7 +183,6 @@ class HistoryDB:
             conn.close()
 
     def update_channel(self, channel_url: str, **kwargs):
-        """Создаёт или обновляет запись канала."""
         conn = self._get_connection()
         try:
             with conn:
@@ -190,6 +207,21 @@ class HistoryDB:
         finally:
             conn.close()
 
+    # [CHANGE] управление активностью каналов
+    def set_channel_enabled(self, channel_url: str, enabled: bool):
+        self.update_channel(channel_url, enabled=1 if enabled else 0)
+
+    def get_inactive_channels(self) -> List[str]:
+        """Возвращает URL каналов с enabled = 0."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT channel_url FROM channels WHERE enabled = 0"
+            ).fetchall()
+            return [r['channel_url'] for r in rows]
+        finally:
+            conn.close()
+
     # ------------------------------------------------------------------ #
     #  Profiles (одиночные)
     # ------------------------------------------------------------------ #
@@ -200,9 +232,7 @@ class HistoryDB:
             row = conn.execute(
                 "SELECT data FROM profiles WHERE fingerprint = ?", (fingerprint,)
             ).fetchone()
-            if row:
-                return _decompress(row['data']) or {}
-            return {}
+            return (_decompress(row['data']) or {}) if row else {}
         finally:
             conn.close()
 
@@ -220,14 +250,10 @@ class HistoryDB:
             conn.close()
 
     # ------------------------------------------------------------------ #
-    #  [CHANGE] Profiles (батчинг) — устраняет N+1 запросов
+    #  Profiles (батчинг) — устраняет N+1 запросов
     # ------------------------------------------------------------------ #
 
     def get_profiles_batch(self, fingerprints: List[str]) -> Dict[str, Dict]:
-        """
-        Пакетная загрузка профилей. SQLite ограничивает число параметров (~999),
-        поэтому бьём на чанки по 900.
-        """
         if not fingerprints:
             return {}
         conn = self._get_connection()
@@ -247,10 +273,6 @@ class HistoryDB:
             conn.close()
 
     def update_profiles_batch(self, updates: List[Tuple[str, Dict]]):
-        """
-        Пакетная запись профилей в одной транзакции (executemany).
-        updates: список (fingerprint, data).
-        """
         if not updates:
             return
         conn = self._get_connection()
@@ -266,11 +288,47 @@ class HistoryDB:
         finally:
             conn.close()
 
+    # ------------------------------------------------------------------ #
+    #  [CHANGE] Сводки запусков (таблица runs)
+    # ------------------------------------------------------------------ #
+
+    def add_run_summary(self, run_id: str, total_raw: int = 0, total_valid: int = 0,
+                        total_final: int = 0, avg_score: float = 0.0,
+                        p50_latency: float = 0.0, p95_latency: float = 0.0,
+                        p99_latency: float = 0.0, success_rate: float = 0.0,
+                        protocols: Optional[Dict] = None,
+                        geo_distribution: Optional[Dict] = None,
+                        anomalies: Optional[List] = None):
+        conn = self._get_connection()
+        try:
+            with conn:
+                conn.execute(
+                    "INSERT INTO runs (run_id, total_raw, total_valid, total_final, "
+                    "avg_score, p50_latency, p95_latency, p99_latency, success_rate, "
+                    "protocols, geo_distribution, anomalies) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (run_id, total_raw, total_valid, total_final, avg_score,
+                     p50_latency, p95_latency, p99_latency, success_rate,
+                     json.dumps(protocols or {}),
+                     json.dumps(geo_distribution or {}),
+                     json.dumps(anomalies or []))
+                )
+        finally:
+            conn.close()
+
+    def get_latest_run_summary(self) -> Optional[Dict]:
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1"
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
 
 # --------------------------------------------------------------------------- #
-#  [CHANGE] Ленивая инициализация синглтона.
-#  Ранее в конце модуля было `_db = HistoryDB()`, что создавало БД при ЛЮБОМ
-#  импорте db (побочный эффект). Теперь экземпляр создаётся только при вызове.
+#  Ленивая инициализация синглтона (без побочных эффектов при импорте)
 # --------------------------------------------------------------------------- #
 
 @lru_cache(maxsize=1)
