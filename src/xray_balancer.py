@@ -5,6 +5,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import json
 import ipaddress
 import logging
+import socket
 from typing import Dict, Optional
 
 import config_parser as parser
@@ -21,30 +22,27 @@ class ConfigToXray:
 
     @staticmethod
     def is_valid_address(address: str) -> bool:
-        """Проверяет, является ли строка корректным IPv4, IPv6 или доменным именем."""
         if not address:
             return False
-        # Проверка на IP
         try:
             ipaddress.ip_address(address)
             return True
         except ValueError:
             pass
-        # Проверка на домен (RFC 1123)
-        # Простая проверка: содержит точку и буквы/цифры/дефис
-        if '.' in address and len(address) < 255:
-            import re
-            # разрешены буквы, цифры, дефис, точка
-            if re.match(r'^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)*$', address):
-                return True
-        return False
+        # Проверка через socket.getaddrinfo с таймаутом
+        try:
+            socket.setdefaulttimeout(0.5)
+            socket.getaddrinfo(address, 443, socket.AF_UNSPEC, socket.SOCK_STREAM)
+            return True
+        except socket.gaierror:
+            return False
+        except Exception:
+            return False
 
     @staticmethod
     def get_xray_template() -> Dict:
         return {
-            "log": {
-                "loglevel": "warning"
-            },
+            "log": {"loglevel": "warning"},
             "remarks": "👽 Anonymous Multi Balanced",
             "dns": {
                 "servers": [
@@ -52,39 +50,19 @@ class ConfigToXray:
                     "https://cloudflare-dns.com/dns-query",
                     {
                         "address": "1.1.1.2",
-                        "domains": [
-                            "domain:ir",
-                            "geosite:category-ir"
-                        ],
+                        "domains": ["domain:ir", "geosite:category-ir"],
                         "skipFallback": True,
                         "tag": "domestic-dns"
                     }
                 ]
             },
-            "fakedns": [
-                {
-                    "ipPool": "198.18.0.0/15",
-                    "poolSize": 10000
-                }
-            ],
+            "fakedns": [{"ipPool": "198.18.0.0/15", "poolSize": 10000}],
             "inbounds": [
                 {
                     "port": 10808,
                     "protocol": "socks",
-                    "settings": {
-                        "auth": "noauth",
-                        "udp": True,
-                        "userLevel": 8
-                    },
-                    "sniffing": {
-                        "destOverride": [
-                            "http",
-                            "tls",
-                            "fakedns"
-                        ],
-                        "enabled": True,
-                        "routeOnly": False
-                    },
+                    "settings": {"auth": "noauth", "udp": True, "userLevel": 8},
+                    "sniffing": {"destOverride": ["http", "tls", "fakedns"], "enabled": True, "routeOnly": False},
                     "tag": "socks"
                 }
             ],
@@ -92,88 +70,26 @@ class ConfigToXray:
                 "enableConcurrency": True,
                 "probeInterval": "3m",
                 "probeUrl": "https://www.gstatic.com/generate_204",
-                "subjectSelector": [
-                    "proxy-"
-                ]
+                "subjectSelector": ["proxy-"]
             },
             "outbounds": [],
             "policy": {
-                "levels": {
-                    "8": {
-                        "connIdle": 300,
-                        "downlinkOnly": 1,
-                        "handshake": 4,
-                        "uplinkOnly": 1
-                    }
-                },
-                "system": {
-                    "statsOutboundUplink": True,
-                    "statsOutboundDownlink": True
-                }
+                "levels": {"8": {"connIdle": 300, "downlinkOnly": 1, "handshake": 4, "uplinkOnly": 1}},
+                "system": {"statsOutboundUplink": True, "statsOutboundDownlink": True}
             },
             "routing": {
                 "balancers": [
-                    {
-                        "selector": [
-                            "proxy-"
-                        ],
-                        "strategy": {
-                            "type": "leastPing"
-                        },
-                        "tag": "proxy-round"
-                    }
+                    {"selector": ["proxy-"], "strategy": {"type": "leastPing"}, "tag": "proxy-round"}
                 ],
                 "domainStrategy": "AsIs",
                 "rules": [
-                    {
-                        "inboundTag": [
-                            "socks"
-                        ],
-                        "outboundTag": "dns-out",
-                        "port": "53",
-                        "type": "field"
-                    },
-                    {
-                        "ip": [
-                            "geoip:private"
-                        ],
-                        "outboundTag": "direct",
-                        "type": "field"
-                    },
-                    {
-                        "domain": [
-                            "geosite:private"
-                        ],
-                        "outboundTag": "direct",
-                        "type": "field"
-                    },
-                    {
-                        "domain": [
-                            "domain:ir",
-                            "geosite:category-ir"
-                        ],
-                        "outboundTag": "direct",
-                        "type": "field"
-                    },
-                    {
-                        "ip": [
-                            "geoip:ir"
-                        ],
-                        "outboundTag": "direct",
-                        "type": "field"
-                    },
-                    {
-                        "inboundTag": [
-                            "domestic-dns"
-                        ],
-                        "outboundTag": "direct",
-                        "type": "field"
-                    },
-                    {
-                        "balancerTag": "proxy-round",
-                        "network": "tcp,udp",
-                        "type": "field"
-                    }
+                    {"inboundTag": ["socks"], "outboundTag": "dns-out", "port": "53", "type": "field"},
+                    {"ip": ["geoip:private"], "outboundTag": "direct", "type": "field"},
+                    {"domain": ["geosite:private"], "outboundTag": "direct", "type": "field"},
+                    {"domain": ["domain:ir", "geosite:category-ir"], "outboundTag": "direct", "type": "field"},
+                    {"ip": ["geoip:ir"], "outboundTag": "direct", "type": "field"},
+                    {"inboundTag": ["domestic-dns"], "outboundTag": "direct", "type": "field"},
+                    {"balancerTag": "proxy-round", "network": "tcp,udp", "type": "field"}
                 ]
             }
         }
@@ -187,20 +103,16 @@ class ConfigToXray:
         outbound = {
             "protocol": "vmess",
             "settings": {
-                "vnext": [
-                    {
-                        "address": data.get('add'),
-                        "port": int(data.get('port')),
-                        "users": [
-                            {
-                                "id": data.get('id'),
-                                "alterId": int(data.get('aid', 0)),
-                                "security": data.get('scy', 'auto'),
-                                "level": 8
-                            }
-                        ]
-                    }
-                ]
+                "vnext": [{
+                    "address": data.get('add'),
+                    "port": int(data.get('port')),
+                    "users": [{
+                        "id": data.get('id'),
+                        "alterId": int(data.get('aid', 0)),  # <-- добавлено
+                        "security": data.get('scy', 'auto'),
+                        "level": 8
+                    }]
+                }]
             },
             "streamSettings": transport_builder.build_xray_settings(data)
         }
@@ -215,20 +127,16 @@ class ConfigToXray:
         outbound = {
             "protocol": "vless",
             "settings": {
-                "vnext": [
-                    {
-                        "address": data['address'],
-                        "port": data['port'],
-                        "users": [
-                            {
-                                "id": data['uuid'],
-                                "flow": data.get('flow', ''),
-                                "encryption": "none",
-                                "level": 8
-                            }
-                        ]
-                    }
-                ]
+                "vnext": [{
+                    "address": data['address'],
+                    "port": data['port'],
+                    "users": [{
+                        "id": data['uuid'],
+                        "flow": data.get('flow', ''),
+                        "encryption": "none",
+                        "level": 8
+                    }]
+                }]
             },
             "streamSettings": transport_builder.build_xray_settings(data)
         }
@@ -243,14 +151,12 @@ class ConfigToXray:
         outbound = {
             "protocol": "trojan",
             "settings": {
-                "servers": [
-                    {
-                        "address": data['address'],
-                        "port": data['port'],
-                        "password": data['password'],
-                        "level": 8
-                    }
-                ]
+                "servers": [{
+                    "address": data['address'],
+                    "port": data['port'],
+                    "password": data['password'],
+                    "level": 8
+                }]
             },
             "streamSettings": transport_builder.build_xray_settings(data)
         }
@@ -265,19 +171,15 @@ class ConfigToXray:
         return {
             "protocol": "shadowsocks",
             "settings": {
-                "servers": [
-                    {
-                        "address": data['address'],
-                        "port": data['port'],
-                        "method": data['method'],
-                        "password": data['password'],
-                        "level": 8
-                    }
-                ]
+                "servers": [{
+                    "address": data['address'],
+                    "port": data['port'],
+                    "method": data['method'],
+                    "password": data['password'],
+                    "level": 8
+                }]
             },
-            "streamSettings": {
-                "network": "tcp"
-            }
+            "streamSettings": {"network": "tcp"}
         }
 
     def process_configs(self):
@@ -301,6 +203,11 @@ class ConfigToXray:
             line_lower = line.lower()
             outbound = None
             data = None
+
+            # Пропускаем Hysteria2 (не поддерживается Xray)
+            if line_lower.startswith(('hysteria2://', 'hy2://')):
+                logger.debug(f"Skipping Hysteria2 config (not supported by Xray): {line[:30]}...")
+                continue
 
             try:
                 if line_lower.startswith('vmess://'):
@@ -329,6 +236,9 @@ class ConfigToXray:
         if not temp_outbounds:
             logger.error("No valid configs found to convert.")
             return
+
+        # Сортировка по протоколу для стабильности
+        temp_outbounds.sort(key=lambda x: x.get('protocol', 'unknown'))
 
         temp_outbounds.extend([
             {"protocol": "freedom", "settings": {}, "tag": "direct"},
