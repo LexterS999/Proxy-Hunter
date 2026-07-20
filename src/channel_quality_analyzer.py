@@ -39,7 +39,6 @@ class ChannelQualityAnalyzer:
     """
 
     def __init__(self):
-        self.db = get_db()
         self._whitelist = set(CHANNEL_WHITELIST)
         self._is_first_run = self._check_first_run()
         self._last_check_cache = {}
@@ -47,22 +46,24 @@ class ChannelQualityAnalyzer:
     def _check_first_run(self) -> bool:
         import asyncio
         try:
-            last_run = asyncio.run(self.db.get_last_run())
+            # Получаем объект БД и выполняем запрос
+            db = asyncio.run(get_db())
+            last_run = asyncio.run(db.get_last_run())
             return last_run is None
         except Exception:
             return True
 
-    def _get_channel_history_scores(self, url: str, days: int = HISTORY_DAYS) -> List[Dict]:
-        import asyncio
+    async def _get_channel_history_scores(self, url: str, days: int = HISTORY_DAYS) -> List[Dict]:
+        db = await get_db()
         try:
-            return asyncio.run(self.db.get_channel_history_scores(url, days, MAX_HISTORY_SCORES))
+            return await db.get_channel_history_scores(url, days, MAX_HISTORY_SCORES)
         except Exception as e:
             logger.warning(f"Failed to get channel history for {url}: {e}")
             return []
 
-    def get_channel_score(self, url: str) -> float:
+    async def get_channel_score(self, url: str) -> float:
         """Вычисляет взвешенное скользящее среднее."""
-        history = self._get_channel_history_scores(url, days=7)
+        history = await self._get_channel_history_scores(url, days=7)
         if not history:
             return 0
         scores = [h['score'] for h in history if h['score'] > 0]
@@ -71,7 +72,7 @@ class ChannelQualityAnalyzer:
         weights = np.exp(np.linspace(-1, 0, len(scores)))
         return np.average(scores, weights=weights)
 
-    def _get_channel_state(self, url: str) -> str:
+    async def _get_channel_state(self, url: str) -> str:
         if url in self._whitelist:
             return 'active'
 
@@ -84,32 +85,32 @@ class ChannelQualityAnalyzer:
             if (datetime.now(timezone.utc) - last_check).days < 3:
                 return 'inactive'
 
-        score = self.get_channel_score(url)
+        score = await self.get_channel_score(url)
         if score >= HEALTH_THRESHOLD:
             return 'active'
         else:
             self._last_check_cache[url] = datetime.now(timezone.utc)
             return 'inactive'
 
-    def is_channel_healthy(self, channel_url: str) -> bool:
-        state = self._get_channel_state(channel_url)
+    async def is_channel_healthy(self, channel_url: str) -> bool:
+        state = await self._get_channel_state(channel_url)
         return state == 'active'
 
-    def get_channel_state(self, channel_url: str) -> str:
-        return self._get_channel_state(channel_url)
+    async def get_channel_state(self, channel_url: str) -> str:
+        return await self._get_channel_state(channel_url)
 
-    def get_unhealthy_channels(self, channel_urls: List[str]) -> List[str]:
+    async def get_unhealthy_channels(self, channel_urls: List[str]) -> List[str]:
         unhealthy = []
         for url in channel_urls:
-            if self._get_channel_state(url) == 'inactive':
+            if await self._get_channel_state(url) == 'inactive':
                 unhealthy.append(url)
         return unhealthy
 
-    def update_health(self, channel_urls: List[str], run_id: int = None):
+    async def update_health(self, channel_urls: List[str], run_id: int = None):
         try:
             from config import ProxyConfig
             config = ProxyConfig()
-            import asyncio
+            db = await get_db()
             for ch in config.SOURCE_URLS:
                 if ch.url in channel_urls:
                     m = ch.metrics
@@ -124,20 +125,20 @@ class ChannelQualityAnalyzer:
                         'overall_score': m.overall_score,
                         'protocol_counts': m.protocol_counts or {}
                     }
-                    asyncio.create_task(self.db.update_channel(ch.url, metrics, enabled=ch.enabled))
+                    await db.update_channel(ch.url, metrics, enabled=ch.enabled)
                     if run_id is not None:
-                        asyncio.create_task(self.db.add_channel_history(ch.url, run_id, metrics))
+                        await db.add_channel_history(ch.url, run_id, metrics)
             logger.info(f"Channel health updated for {len(channel_urls)} channels.")
         except Exception as e:
             logger.error(f"Failed to update channel health: {e}")
 
-    def get_health_report(self) -> Dict:
-        import asyncio
-        channels = asyncio.run(self.db.get_all_channels())
+    async def get_health_report(self) -> Dict:
+        db = await get_db()
+        channels = await db.get_all_channels()
         states = {'active': 0, 'inactive': 0}
         total = len(channels)
         for ch in channels:
-            state = self._get_channel_state(ch['url'])
+            state = await self._get_channel_state(ch['url'])
             states[state] = states.get(state, 0) + 1
         return {
             'channels': channels,
@@ -148,10 +149,10 @@ class ChannelQualityAnalyzer:
             }
         }
 
-    def prune_bad_channels(self, channel_urls: List[str]) -> List[str]:
+    async def prune_bad_channels(self, channel_urls: List[str]) -> List[str]:
         healthy = []
         for url in channel_urls:
-            state = self._get_channel_state(url)
+            state = await self._get_channel_state(url)
             if state == 'inactive':
                 logger.info(f"Channel {url} is inactive, removing.")
             else:
