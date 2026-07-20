@@ -376,7 +376,3 @@ class HistoryDB:
         if not valid_scores:
             return None
         return sum(valid_scores) / len(valid_scores)
-
-
-# Инициализация
-_db = HistoryDB()
