@@ -1,450 +1,307 @@
 """
-Модуль парсинга прокси-конфигураций с поддержкой fallback-стратегий.
-Использует строгий парсинг через библиотечные функции и эвристический парсинг
-как резервный вариант.
-Добавлена валидация портов с учётом протокола.
+config_parser.py - Парсер прокси-конфигураций различных протоколов
 """
 
-import json
 import base64
+import json
 import re
 import logging
-import shutil
-from typing import Dict, Optional, Tuple, Any, List
-from urllib.parse import urlparse, parse_qs, unquote
-import binascii
 from functools import lru_cache
-
-from parse_fallback import FallbackParser
+from typing import Dict, Any, Optional
+from urllib.parse import urlparse, parse_qs, unquote
 
 logger = logging.getLogger(__name__)
 
-VALID_SS_METHODS = {
-    'aes-128-gcm', 'aes-192-gcm', 'aes-256-gcm',
-    'chacha20-ietf-poly1305', 'xchacha20-ietf-poly1305',
-    '2022-blake3-aes-128-gcm', '2022-blake3-aes-256-gcm',
-    'aes-128-cfb', 'aes-192-cfb', 'aes-256-cfb',
-    'aes-128-ctr', 'aes-192-ctr', 'aes-256-ctr',
-    'chacha20', 'chacha20-ietf', 'rc4-md5'
-}
 
-VALID_VLESS_FLOWS = {'', 'xtls-rprx-origin', 'xtls-rprx-direct', 'xtls-rprx-vision'}
-VALID_VLESS_SECURITY = {'none', 'tls', 'reality', 'xtls'}
-VALID_TRANSPORT_TYPES = {'tcp', 'kcp', 'ws', 'http', 'h2', 'quic', 'grpc', 'httpupgrade', 'splithttp', 'xhttp', 'raw'}
-
-# Определение допустимых портов для протоколов
-PORT_RANGES = {
-    'tcp': range(1, 65536),
-    'udp': range(1, 65536),
-    'wireguard': [51820, 51821, 51822] + list(range(1, 65536)),
-    'quic': [443, 8443] + list(range(1, 65536)),
-    'vmess': range(1, 65536),
-    'vless': range(1, 65536),
-    'trojan': range(1, 65536),
-    'ss': range(1, 65536),
-    'hysteria2': range(1, 65536),
-    'tuic': range(1, 65536),
-}
-
-def validate_port_for_protocol(port: int, protocol: str) -> bool:
-    """Проверяет, что порт допустим для данного протокола."""
-    if not isinstance(port, int) or port < 1 or port > 65535:
-        return False
-    valid_ranges = PORT_RANGES.get(protocol, range(1, 65536))
-    if isinstance(valid_ranges, list):
-        return port in valid_ranges
-    return port in valid_ranges
-
-# Для обратной совместимости
-def validate_port(port: int) -> bool:
-    """Устаревшая функция, использует 'tcp' как протокол по умолчанию."""
-    return validate_port_for_protocol(port, 'tcp')
-
-def is_base64(s: str) -> bool:
-    if not s or len(s) < 4:
-        return False
+# [CHANGE] удалён PORT_RANGES, который создавал list(range(1, 65536)) при импорте
+# (расход памяти + бессмысленная "валидация" — весь диапазон == любой порт).
+def _valid_port(port: Any) -> bool:
+    """Лёгкая проверка порта без создания больших списков."""
     try:
-        s = s.rstrip('=')
-        return bool(re.match(r'^[A-Za-z0-9+/\-_]+$', s)) and len(s) % 4 in (0, 2, 3)
-    except Exception:
+        return isinstance(port, int) and 1 <= port <= 65535
+    except (ValueError, TypeError):
         return False
 
-@lru_cache(maxsize=2048)
-def safe_b64decode(s: str) -> Optional[str]:
-    if not s:
-        return None
-    try:
-        s = s.replace('-', '+').replace('_', '/')
-        padding = '=' * (-len(s) % 4)
-        decoded = base64.b64decode(s + padding, validate=True)
-        return decoded.decode('utf-8', errors='strict')
-    except (binascii.Error, UnicodeDecodeError, ValueError) as e:
-        logger.debug(f"Base64 decode error (strict): {e}")
-    # fallback
-    try:
-        s_original = s.replace('-', '+').replace('_', '/')
-        decoded = base64.b64decode(s_original)
-        return decoded.decode('utf-8', errors='ignore')
-    except (binascii.Error, UnicodeDecodeError, ValueError) as e:
-        logger.debug(f"Base64 decode error (fallback): {e}")
-        return None
 
-def safe_json_loads(text: str) -> Optional[Dict]:
-    """Безопасный парсинг JSON с восстановлением повреждённых данных."""
-    try:
-        return json.loads(text, strict=False, parse_constant=lambda x: None)
-    except json.JSONDecodeError:
-        cleaned = re.sub(r'\bNaN\b', 'null', text)
-        cleaned = re.sub(r'\bInfinity\b', 'null', cleaned)
-        try:
-            return json.loads(cleaned)
-        except:
-            return None
+class ConfigParser:
+    """Парсер прокси-конфигов"""
 
-def decode_vmess(config: str) -> Optional[Dict]:
-    """Декодирует VMess-конфигурацию с fallback-стратегией."""
-    if not config or not isinstance(config, str) or not config.startswith('vmess://'):
-        return None
+    SUPPORTED_PROTOCOLS = ['vmess', 'vless', 'trojan', 'ss', 'hysteria2', 'hy2',
+                           'wireguard', 'tuic']
 
-    # Пробуем стандартный парсинг
-    try:
-        encoded = config[8:].strip()
-        if not encoded:
-            return None
+    def __init__(self):
+        self.stats = {
+            'total': 0,
+            'parsed': 0,
+            'failed': 0,
+            'by_protocol': {}
+        }
 
-        decoded = safe_b64decode(encoded)
-        if not decoded:
-            return None
-
-        data = safe_json_loads(decoded)
+    @lru_cache(maxsize=2048)
+    def safe_b64decode(self, data: str) -> Optional[str]:
+        """Безопасное base64-декодирование"""
         if not data:
             return None
-
-        required_fields = ['add', 'port', 'id']
-        if not all(field in data and data[field] for field in required_fields):
+        try:
+            s = data.strip().replace('-', '+').replace('_', '/')
+            padding = 4 - len(s) % 4
+            if padding != 4:
+                s += '=' * padding
+            return base64.b64decode(s).decode('utf-8', errors='ignore')
+        except Exception:
             return None
+
+    def parse_config(self, config: str) -> Optional[Dict[str, Any]]:
+        """Парсит строку конфига в структурированный dict"""
+        if not config or not isinstance(config, str):
+            return None
+
+        config = config.strip()
+        self.stats['total'] += 1
 
         try:
-            port = int(data['port'])
-            if not validate_port_for_protocol(port, 'vmess'):
-                logger.debug(f"VMess invalid port: {port}")
-                return None
-            data['port'] = port
-        except (ValueError, TypeError) as e:
-            logger.debug(f"VMess port conversion error: {e}")
-            return None
-
-        data['name'] = data.get('ps', data.get('name', ''))
-        data['net'] = data.get('net', 'tcp').lower()
-        data['tls'] = data.get('tls', 'none').lower()
-
-        if data['net'] not in VALID_TRANSPORT_TYPES:
-            data['net'] = 'tcp'
-
-        return data
-    except Exception as e:
-        logger.debug(f"VMess standard parse failed: {e}")
-    
-    # Пробуем fallback-парсинг
-    return FallbackParser.parse_vmess_fallback(config)
-
-def parse_vless(config: str) -> Optional[Dict]:
-    """Парсит VLESS-конфигурацию с fallback-стратегией."""
-    if not config or not isinstance(config, str) or not config.startswith('vless://'):
-        return None
-
-    # Стандартный парсинг
-    try:
-        url = urlparse(config)
-        if not url.hostname or not url.username:
-            return FallbackParser.parse_vless_fallback(config)
-
-        port = url.port or 443
-        if not validate_port_for_protocol(port, 'vless'):
-            logger.debug(f"VLESS invalid port: {port}")
-            return FallbackParser.parse_vless_fallback(config)
-
-        params = parse_qs(url.query)
-        security = params.get('security', ['none'])[0].lower()
-        if security not in VALID_VLESS_SECURITY:
-            security = 'none'
-
-        flow = params.get('flow', [''])[0].lower()
-        if flow and flow not in VALID_VLESS_FLOWS:
-            flow = ''
-
-        transport_type = params.get('type', ['tcp'])[0].lower()
-        if transport_type not in VALID_TRANSPORT_TYPES:
-            transport_type = 'tcp'
-
-        return {
-            'uuid': url.username,
-            'address': url.hostname,
-            'port': port,
-            'flow': flow,
-            'sni': params.get('sni', [url.hostname])[0],
-            'type': transport_type,
-            'path': params.get('path', [''])[0],
-            'host': params.get('host', [url.hostname])[0],
-            'security': security,
-            'alpn': params.get('alpn', [''])[0],
-            'fp': params.get('fp', [''])[0],
-            'pbk': params.get('pbk', [''])[0],
-            'sid': params.get('sid', [''])[0],
-            'spx': params.get('spx', [''])[0],
-            'name': unquote(url.fragment) if url.fragment else ''
-        }
-    except Exception as e:
-        logger.debug(f"VLESS standard parse failed: {e}")
-    
-    return FallbackParser.parse_vless_fallback(config)
-
-def parse_trojan(config: str) -> Optional[Dict]:
-    """Парсит Trojan-конфигурацию с fallback-стратегией."""
-    if not config or not isinstance(config, str) or not config.startswith('trojan://'):
-        return None
-
-    try:
-        url = urlparse(config)
-        if not url.hostname or not url.username:
-            return FallbackParser.parse_trojan_fallback(config)
-
-        port = url.port or 443
-        if not validate_port_for_protocol(port, 'trojan'):
-            logger.debug(f"Trojan invalid port: {port}")
-            return FallbackParser.parse_trojan_fallback(config)
-
-        params = parse_qs(url.query)
-        transport_type = params.get('type', ['tcp'])[0].lower()
-        if transport_type not in VALID_TRANSPORT_TYPES:
-            transport_type = 'tcp'
-
-        return {
-            'password': url.username,
-            'address': url.hostname,
-            'port': port,
-            'sni': params.get('sni', [url.hostname])[0],
-            'alpn': params.get('alpn', [''])[0],
-            'type': transport_type,
-            'path': params.get('path', [''])[0],
-            'host': params.get('host', [url.hostname])[0],
-            'security': params.get('security', ['tls'])[0],
-            'fp': params.get('fp', [''])[0],
-            'flow': params.get('flow', [''])[0],
-            'name': unquote(url.fragment) if url.fragment else ''
-        }
-    except Exception as e:
-        logger.debug(f"Trojan standard parse failed: {e}")
-    
-    return FallbackParser.parse_trojan_fallback(config)
-
-def parse_hysteria2(config: str) -> Optional[Dict]:
-    """Парсит Hysteria2-конфигурацию."""
-    if not config or not isinstance(config, str) or not config.startswith(('hysteria2://', 'hy2://')):
-        return None
-
-    try:
-        url = urlparse(config)
-        if not url.hostname:
-            return None
-
-        port = url.port or 443
-        if not validate_port_for_protocol(port, 'hysteria2'):
-            logger.debug(f"Hysteria2 invalid port: {port}")
-            return None
-
-        params = parse_qs(url.query)
-        password = url.username or params.get('password', [''])[0]
-        if not password:
-            return None
-
-        return {
-            'address': url.hostname,
-            'port': port,
-            'password': password,
-            'sni': params.get('sni', [url.hostname])[0],
-            'obfs': params.get('obfs', [''])[0],
-            'obfs-password': params.get('obfs-password', [''])[0],
-            'insecure': params.get('insecure', ['0'])[0],
-            'pinSHA256': params.get('pinSHA256', [''])[0],
-            'name': unquote(url.fragment) if url.fragment else ''
-        }
-    except Exception as e:
-        logger.debug(f"Hysteria2 parse failed: {e}")
-        return None
-
-def parse_shadowsocks(config: str) -> Optional[Dict]:
-    """Парсит Shadowsocks-конфигурацию с fallback-стратегией."""
-    if not config or not isinstance(config, str) or not config.startswith('ss://'):
-        return None
-
-    try:
-        fragment_index = config.find('#')
-        if fragment_index != -1:
-            url_part = config[:fragment_index]
-            fragment = config[fragment_index+1:]
-        else:
-            url_part = config
-            fragment = ''
-
-        url_part = url_part[5:]
-
-        if '@' in url_part:
-            credential_part, server_part = url_part.split('@', 1)
-
-            if ':' not in server_part:
-                return FallbackParser.parse_ss_fallback(config)
-
-            host, port_str = server_part.rsplit(':', 1)
-            host = host.strip('[]')
-            try:
-                port = int(port_str)
-                if not validate_port_for_protocol(port, 'ss'):
-                    logger.debug(f"SS invalid port: {port}")
-                    return FallbackParser.parse_ss_fallback(config)
-            except ValueError as e:
-                logger.debug(f"SS port conversion error: {e}")
-                return FallbackParser.parse_ss_fallback(config)
-
-            credential_decoded = unquote(credential_part)
-
-            if is_base64(credential_decoded):
-                method_pass = safe_b64decode(credential_decoded)
-                if not method_pass or ':' not in method_pass:
-                    return FallbackParser.parse_ss_fallback(config)
-                method, password = method_pass.split(':', 1)
+            lower = config.lower()
+            if lower.startswith('vmess://'):
+                result = self._parse_vmess(config)
+            elif lower.startswith('vless://'):
+                result = self._parse_vless(config)
+            elif lower.startswith('trojan://'):
+                result = self._parse_trojan(config)
+            elif lower.startswith('ss://'):
+                result = self._parse_shadowsocks(config)
+            elif lower.startswith('hysteria2://') or lower.startswith('hy2://'):
+                result = self._parse_hysteria2(config)
+            elif lower.startswith('wireguard://'):
+                result = self._parse_wireguard(config)
+            elif lower.startswith('tuic://'):
+                result = self._parse_tuic(config)
             else:
-                if ':' not in credential_decoded:
-                    return FallbackParser.parse_ss_fallback(config)
-                method, password = credential_decoded.split(':', 1)
-        else:
-            full_decoded = safe_b64decode(url_part)
-            if not full_decoded:
-                return FallbackParser.parse_ss_fallback(config)
+                self.stats['failed'] += 1
+                return None
 
-            if '@' not in full_decoded:
-                return FallbackParser.parse_ss_fallback(config)
+            if result:
+                self.stats['parsed'] += 1
+                proto = result.get('protocol', 'unknown')
+                self.stats['by_protocol'][proto] = self.stats['by_protocol'].get(proto, 0) + 1
+                return result
 
-            credential_part, server_part = full_decoded.split('@', 1)
-
-            if ':' not in server_part:
-                return FallbackParser.parse_ss_fallback(config)
-
-            host, port_str = server_part.rsplit(':', 1)
-            host = host.strip('[]')
-            try:
-                port = int(port_str)
-                if not validate_port_for_protocol(port, 'ss'):
-                    logger.debug(f"SS invalid port: {port}")
-                    return FallbackParser.parse_ss_fallback(config)
-            except ValueError as e:
-                logger.debug(f"SS port conversion error: {e}")
-                return FallbackParser.parse_ss_fallback(config)
-
-            if ':' not in credential_part:
-                return FallbackParser.parse_ss_fallback(config)
-
-            method, password = credential_part.split(':', 1)
-
-        if not method or not password:
-            return FallbackParser.parse_ss_fallback(config)
-
-        method = method.lower().strip()
-        if method not in VALID_SS_METHODS:
-            return FallbackParser.parse_ss_fallback(config)
-
-        return {
-            'method': method,
-            'password': password,
-            'address': host,
-            'port': port,
-            'plugin': '',
-            'name': unquote(fragment) if fragment else ''
-        }
-    except Exception as e:
-        logger.debug(f"Shadowsocks parse failed: {e}")
-        return FallbackParser.parse_ss_fallback(config)
-
-def parse_wireguard(config: str) -> Optional[Dict]:
-    """Парсит WireGuard-конфигурацию."""
-    if not config or not isinstance(config, str) or not config.startswith('wireguard://'):
-        return None
-
-    try:
-        url = urlparse(config)
-        if not url.hostname:
+            self.stats['failed'] += 1
+            return None
+        except Exception as e:
+            logger.debug(f"⚠️ Ошибка парсинга: {e}")
+            self.stats['failed'] += 1
             return None
 
-        port = url.port or 51820
-        if not validate_port_for_protocol(port, 'wireguard'):
-            logger.debug(f"WireGuard invalid port: {port}")
-            return None
-
-        params = parse_qs(url.query)
-        private_key = url.username or params.get('privatekey', [''])[0]
-        if not private_key:
-            return None
-
-        return {
-            'address': url.hostname,
-            'port': port,
-            'private_key': private_key,
-            'public_key': params.get('publickey', [''])[0],
-            'preshared_key': params.get('presharedkey', [''])[0],
-            'reserved': params.get('reserved', [''])[0],
-            'mtu': params.get('mtu', ['1420'])[0],
-            'local_address': params.get('address', [''])[0],
-            'peers': params.get('peer', []),
-            'name': unquote(url.fragment) if url.fragment else ''
-        }
-    except Exception as e:
-        logger.debug(f"WireGuard parse failed: {e}")
-        return None
-
-def parse_tuic(config: str) -> Optional[Dict]:
-    """Парсит TUIC-конфигурацию."""
-    if not config or not isinstance(config, str) or not config.startswith('tuic://'):
-        return None
-
-    try:
-        url = urlparse(config)
-        if not url.hostname:
-            return None
-
-        port = url.port or 443
-        if not validate_port_for_protocol(port, 'tuic'):
-            logger.debug(f"TUIC invalid port: {port}")
-            return None
-
-        if not url.username or ':' not in url.username:
-            return None
-
+    def _parse_vmess(self, config: str) -> Optional[Dict]:
         try:
-            uuid, password = url.username.split(':', 1)
-        except ValueError as e:
-            logger.debug(f"TUIC split error: {e}")
+            decoded = self.safe_b64decode(config[8:].strip())
+            if not decoded:
+                return None
+            obj = json.loads(decoded)
+
+            host = str(obj.get('add') or obj.get('host') or obj.get('server') or '')
+            try:
+                port = int(obj.get('port', 0) or 0)
+            except (ValueError, TypeError):
+                port = 0
+
+            # [CHANGE] лёгкая проверка порта
+            if not host or not _valid_port(port):
+                return None
+
+            return {
+                'protocol': 'vmess',
+                'address': host,
+                'port': port,
+                'uuid': str(obj.get('id', '') or ''),
+                'alter_id': int(obj.get('aid', 0) or 0),
+                'network': str(obj.get('net', 'tcp') or 'tcp'),
+                'security': str(obj.get('tls', '') or ''),
+                'sni': str(obj.get('sni', '') or ''),
+                'host_header': str(obj.get('host', '') or ''),
+                'path': str(obj.get('path', '') or ''),
+                'type': str(obj.get('type', '') or ''),
+                'fingerprint': self._make_fingerprint('vmess', host, port, obj.get('id', '')),
+                'raw': config,
+            }
+        except Exception:
             return None
 
-        params = parse_qs(url.query)
+    def _parse_vless(self, config: str) -> Optional[Dict]:
+        try:
+            parsed = urlparse(config)
+            host = parsed.hostname or ''
+            port = parsed.port or 0
+            uuid = unquote(parsed.username or '')
+            params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
 
-        return {
-            'address': url.hostname,
-            'port': port,
-            'uuid': uuid,
-            'password': password,
-            'congestion_control': params.get('congestion_control', ['bbr'])[0],
-            'udp_relay_mode': params.get('udp_relay_mode', ['native'])[0],
-            'alpn': params.get('alpn', ['h3'])[0],
-            'sni': params.get('sni', [url.hostname])[0],
-            'allow_insecure': params.get('allow_insecure', ['0'])[0],
-            'disable_sni': params.get('disable_sni', ['0'])[0],
-            'name': unquote(url.fragment) if url.fragment else ''
-        }
-    except Exception as e:
-        logger.debug(f"TUIC parse failed: {e}")
-        return None
+            if not host or not _valid_port(port) or not uuid:
+                return None
 
-# Экспортируем функции для обратной совместимости
-def parse_with_fallback(config: str) -> Tuple[Optional[Dict], str]:
-    """Парсит конфигурацию с возвратом метода парсинга."""
-    return FallbackParser.parse_with_stats(config)
+            return {
+                'protocol': 'vless',
+                'address': host,
+                'port': port,
+                'uuid': uuid,
+                'network': params.get('type', 'tcp'),
+                'security': params.get('security', ''),
+                'sni': params.get('sni', ''),
+                'flow': params.get('flow', ''),
+                'pbk': params.get('pbk', ''),
+                'sid': params.get('sid', ''),
+                'fp': params.get('fp', ''),
+                'path': params.get('path', ''),
+                'fingerprint': self._make_fingerprint('vless', host, port, uuid),
+                'raw': config,
+            }
+        except Exception:
+            return None
+
+    def _parse_trojan(self, config: str) -> Optional[Dict]:
+        try:
+            parsed = urlparse(config)
+            host = parsed.hostname or ''
+            port = parsed.port or 0
+            password = unquote(parsed.username or '')
+            params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+
+            if not host or not _valid_port(port) or not password:
+                return None
+
+            return {
+                'protocol': 'trojan',
+                'address': host,
+                'port': port,
+                'password': password,
+                'sni': params.get('sni', ''),
+                'network': params.get('type', 'tcp'),
+                'fingerprint': self._make_fingerprint('trojan', host, port, password),
+                'raw': config,
+            }
+        except Exception:
+            return None
+
+    def _parse_shadowsocks(self, config: str) -> Optional[Dict]:
+        try:
+            body = config[5:].strip()
+            # Формат: base64(method:password)@host:port  или  ss://base64(method:password@host:port)
+            if '@' in body:
+                userinfo, hostport = body.rsplit('@', 1)
+                decoded = self.safe_b64decode(userinfo) or userinfo
+                if ':' in decoded:
+                    method, password = decoded.split(':', 1)
+                else:
+                    method, password = '', decoded
+                host, _, port_s = hostport.partition(':')
+                port = int(port_s) if port_s.isdigit() else 0
+            else:
+                decoded = self.safe_b64decode(body)
+                if not decoded or '@' not in decoded:
+                    return None
+                userinfo, hostport = decoded.rsplit('@', 1)
+                method, password = userinfo.split(':', 1) if ':' in userinfo else ('', userinfo)
+                host, _, port_s = hostport.partition(':')
+                port = int(port_s) if port_s.isdigit() else 0
+
+            if not host or not _valid_port(port):
+                return None
+
+            return {
+                'protocol': 'shadowsocks',
+                'address': host,
+                'port': port,
+                'method': method,
+                'password': password,
+                'fingerprint': self._make_fingerprint('ss', host, port, password),
+                'raw': config,
+            }
+        except Exception:
+            return None
+
+    def _parse_hysteria2(self, config: str) -> Optional[Dict]:
+        try:
+            parsed = urlparse(config)
+            host = parsed.hostname or ''
+            port = parsed.port or 0
+            password = unquote(parsed.username or '')
+            params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+
+            if not host or not _valid_port(port):
+                return None
+
+            return {
+                'protocol': 'hysteria2',
+                'address': host,
+                'port': port,
+                'password': password,
+                'sni': params.get('sni', ''),
+                'insecure': params.get('insecure', '0'),
+                'fingerprint': self._make_fingerprint('hysteria2', host, port, password),
+                'raw': config,
+            }
+        except Exception:
+            return None
+
+    def _parse_wireguard(self, config: str) -> Optional[Dict]:
+        try:
+            parsed = urlparse(config)
+            host = parsed.hostname or ''
+            port = parsed.port or 0
+            private_key = unquote(parsed.username or '')
+            params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+
+            if not host or not _valid_port(port):
+                return None
+
+            return {
+                'protocol': 'wireguard',
+                'address': host,
+                'port': port,
+                'private_key': private_key,
+                'public_key': params.get('publickey', ''),
+                'reserved': params.get('reserved', ''),
+                'mtu': params.get('mtu', '1420'),
+                'fingerprint': self._make_fingerprint('wireguard', host, port, private_key),
+                'raw': config,
+            }
+        except Exception:
+            return None
+
+    def _parse_tuic(self, config: str) -> Optional[Dict]:
+        try:
+            parsed = urlparse(config)
+            host = parsed.hostname or ''
+            port = parsed.port or 0
+            uuid = unquote(parsed.username or '')
+            password = unquote(parsed.password or '')
+            params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+
+            if not host or not _valid_port(port):
+                return None
+
+            return {
+                'protocol': 'tuic',
+                'address': host,
+                'port': port,
+                'uuid': uuid,
+                'password': password,
+                'sni': params.get('sni', ''),
+                'congestion_control': params.get('congestion_control', 'bbr'),
+                'fingerprint': self._make_fingerprint('tuic', host, port, uuid),
+                'raw': config,
+            }
+        except Exception:
+            return None
+
+    @staticmethod
+    def _make_fingerprint(protocol: str, host: str, port: int, cred: str) -> str:
+        """Отпечаток для дедупликации (детерминированный)."""
+        try:
+            import xxhash
+            return xxhash.xxh64(f"{protocol}:{host}:{port}:{cred}".encode()).hexdigest()
+        except ImportError:
+            import hashlib
+            return hashlib.sha256(f"{protocol}:{host}:{port}:{cred}".encode()).hexdigest()[:16]
+
+    def get_stats(self) -> Dict:
+        return self.stats.copy()
