@@ -528,12 +528,19 @@ class OptimizedPipeline:
                 logger.debug(f"Score/extract failed: {e}")
             return None
 
+        # ВАЖНО: score_and_extract — это вложенная функция (closure), которая
+        # обращается к self (self._parse_config, self.quality_checker, self.scorer,
+        # self.feature_extractor). Такие closures нельзя сериализовать (pickle),
+        # поэтому передавать их в ProcessPoolExecutor нельзя — это и вызывало
+        # "AttributeError: Can't get local object 'OptimizedPipeline._score.<locals>.score_and_extract'".
+        # Выполняем задачу в ThreadPoolExecutor (self._executor): пиклинг не требуется,
+        # т.к. поток работает в том же процессе и имеет доступ к self напрямую.
         with tqdm(total=len(valid_configs), desc="Scoring & extracting") as pbar:
             for i in range(0, len(valid_configs), batch_size):
                 if self._shutdown_requested:
                     return []
                 batch = valid_configs[i:i+batch_size]
-                futures = [loop.run_in_executor(self._process_executor, score_and_extract, cfg) for cfg in batch]
+                futures = [loop.run_in_executor(self._executor, score_and_extract, cfg) for cfg in batch]
                 for future in asyncio.as_completed(futures):
                     result = await future
                     if result:
