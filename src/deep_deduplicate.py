@@ -6,6 +6,7 @@ import re
 import json
 import logging
 import os
+import ipaddress
 import xxhash
 from typing import Dict, List, Set, Optional, Tuple
 from collections import defaultdict
@@ -13,6 +14,7 @@ from collections import defaultdict
 import config_parser
 from parse_fallback import FallbackParser
 from bloom_async import ShardedBloomDeduplicator
+from config_identity import ConfigIdentity
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +25,8 @@ class DeepDeduplicator:
         self.fingerprint_to_config = {}
         self.best_configs = {}
         self._bloom = ShardedBloomDeduplicator(cache_dir="bloom_shards")
-        # Упрощённый индекс: множество ключей сервер+порт+протокол+креденшл
-        self._index: Set[str] = set()
+        # Индекс по подсети (/24 для IPv4, префикс /48 для IPv6)
+        self._subnet_index: Dict[str, Set[str]] = defaultdict(set)
         self._server_cache = {}
 
     def generate_fingerprint(self, config: str) -> Optional[Dict]:
@@ -101,26 +103,37 @@ class DeepDeduplicator:
         """Упрощённый ключ: сервер:порт:протокол:креденшл (хеш)"""
         return f"{fp_data['server']}:{fp_data['port']}:{fp_data['protocol']}:{fp_data['credential']}"
 
-    def is_similar_server(self, fp1: Dict, fp2: Dict, threshold: int = 6) -> bool:
-        """Упрощённая проверка: сравниваем IP-префиксы (первые threshold октетов)"""
+    def _get_subnet_key(self, server: str, port: int, protocol: str) -> str:
+        """Возвращает ключ подсети для группировки (IPv4 /24, IPv6 /48)."""
+        try:
+            ip = ipaddress.ip_address(server)
+            if ip.version == 4:
+                # /24
+                network = ipaddress.ip_network(f"{server}/24", strict=False)
+                return f"{network}:{protocol}"
+            elif ip.version == 6:
+                # /48
+                network = ipaddress.ip_network(f"{server}/48", strict=False)
+                return f"{network}:{protocol}"
+        except ValueError:
+            # Доменное имя — используем как есть
+            return f"{server}:{protocol}"
+        return f"{server}:{protocol}"
+
+    def is_similar_server(self, fp1: Dict, fp2: Dict) -> bool:
+        """Сравнивает по подсети и порту (в пределах 5)."""
         if not fp1 or not fp2:
             return False
         if fp1.get('protocol') != fp2.get('protocol'):
             return False
         server1, server2 = fp1.get('server'), fp2.get('server')
         port1, port2 = fp1.get('port'), fp2.get('port')
-        if server1 == server2 and port1 == port2:
-            return True
         if abs(port1 - port2) > 5:
             return False
-        # Проверка префикса IP (первые threshold октетов)
-        parts1 = server1.split('.')
-        parts2 = server2.split('.')
-        if len(parts1) >= threshold and len(parts2) >= threshold:
-            prefix1 = '.'.join(parts1[:threshold])
-            prefix2 = '.'.join(parts2[:threshold])
-            return prefix1 == prefix2
-        return False
+        # Сравниваем подсети
+        subnet1 = self._get_subnet_key(server1, port1, fp1['protocol'])
+        subnet2 = self._get_subnet_key(server2, port2, fp2['protocol'])
+        return subnet1 == subnet2
 
     async def deduplicate_configs_async(self, configs: List[str], quality_scores: Dict[str, float] = None) -> List[str]:
         if quality_scores is None:
@@ -129,6 +142,7 @@ class DeepDeduplicator:
         groups = defaultdict(list)
         fingerprint_data = {}
 
+        # Собираем группы по fingerprint
         for config in configs:
             # Быстрая проверка через Bloom
             if await self._bloom.contains(config):
@@ -147,21 +161,19 @@ class DeepDeduplicator:
 
         best_configs = []
         seen_fingerprints = set()
-        seen_similar = set()
+        seen_subnets = set()  # для O(1) проверки схожести
 
         for fingerprint, group in groups.items():
             if fingerprint in seen_fingerprints:
                 continue
-            # Проверяем схожесть с уже отобранными
-            similar = False
-            for seen in list(seen_similar):
-                fp1 = fingerprint_data.get(group[0])
-                fp2 = fingerprint_data.get(seen)
-                if self.is_similar_server(fp1, fp2):
-                    similar = True
-                    break
-            if similar:
-                continue
+            # Проверяем, есть ли уже конфиг в этой подсети
+            sample_config = group[0]
+            sample_fp = fingerprint_data.get(sample_config)
+            if sample_fp:
+                subnet_key = self._get_subnet_key(sample_fp['server'], sample_fp['port'], sample_fp['protocol'])
+                if subnet_key in seen_subnets:
+                    continue
+                seen_subnets.add(subnet_key)
 
             # Выбираем лучший по качеству
             best = max(group, key=lambda c: quality_scores.get(c, 0))
@@ -171,12 +183,9 @@ class DeepDeduplicator:
                 self._index.add(index_key)
                 best_configs.append(best)
                 seen_fingerprints.add(fingerprint)
-                seen_similar.add(best)
             else:
-                # Если не удалось сгенерировать, добавляем первый
                 best_configs.append(group[0])
                 seen_fingerprints.add(fingerprint)
-                seen_similar.add(group[0])
 
         logger.info(f"Deep deduplication: {len(configs)} → {len(best_configs)} configs")
         return best_configs
