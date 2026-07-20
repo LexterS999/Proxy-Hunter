@@ -100,16 +100,44 @@ class CachedActiveChecker:
         self._tcp_cache_alpha = 0.3
 
     def _should_skip(self, config: str) -> bool:
-        # ... (без изменений)
-        pass
+        if not self.history:
+            return False
+        from profile_scorer import ProfileScorer
+        scorer = ProfileScorer()
+        try:
+            parsed = self._extract_parsed(config)
+            if not parsed:
+                return False
+            key = scorer.get_profile_key(config, parsed)
+            profile = self.history.get('profiles', {}).get(key, {})
+            if profile.get('is_active') is False:
+                return True
+            if profile.get('overall_score', 100) < 30:
+                return True
+        except Exception:
+            pass
+        return False
 
     def _extract_parsed(self, config: str) -> Optional[Dict]:
-        # ... (без изменений)
-        pass
+        import config_parser as parser
+        if config.startswith('vless://'):
+            return parser.parse_vless(config)
+        elif config.startswith('vmess://'):
+            return parser.decode_vmess(config)
+        elif config.startswith('trojan://'):
+            return parser.parse_trojan(config)
+        elif config.startswith('ss://'):
+            return parser.parse_shadowsocks(config)
+        return None
 
     async def _get_session(self) -> aiohttp.ClientSession:
-        # ... (без изменений)
-        pass
+        pool = SessionPool()
+        self._session = await pool.get_session(
+            connector_limit=200,
+            per_host_limit=50,
+            timeout_total=HTTP_TIMEOUT * 2
+        )
+        return self._session
 
     @retry_with_backoff(attempts=3, base_delay=0.2, max_delay=1.0, deadline=5.0,
                         retryable_exceptions=(asyncio.TimeoutError, ConnectionError, OSError, ConnectionResetError))
@@ -227,19 +255,110 @@ class CachedActiveChecker:
         return result
 
     async def check_batch(self, configs: List[str]) -> List[Dict]:
-        # ... (без изменений)
-        pass
+        if not configs:
+            return []
+
+        server_groups = {}
+        for cfg in configs:
+            info = self._extract_server_info(cfg)
+            if info:
+                server_groups[(info[0], info[1], info[2])] = True
+
+        warm_tasks = []
+        for (host, port, use_tls) in server_groups.keys():
+            warm_tasks.append(self._limiter.run(host, self._tcp_latency_with_retry(host, port, use_tls)))
+        if warm_tasks:
+            await asyncio.gather(*warm_tasks, return_exceptions=True)
+
+        sem = asyncio.Semaphore(self.max_workers * 2)
+
+        async def check_one(cfg: str):
+            async with sem:
+                return await self.check_config(cfg)
+
+        tasks = [check_one(cfg) for cfg in configs]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        final = []
+        for idx, res in enumerate(results):
+            if isinstance(res, Exception):
+                final.append({
+                    'config': configs[idx],
+                    'valid': False,
+                    'latency': -1.0,
+                    'success': False,
+                    'error': str(res)
+                })
+            else:
+                final.append(res)
+
+        return final
 
     async def close(self):
         pass
 
     def _extract_server_info(self, config: str) -> Optional[Tuple[str, int, bool]]:
-        # ... (без изменений)
-        pass
+        try:
+            import config_parser as parser
+            if config.startswith('vmess://'):
+                data = parser.decode_vmess(config)
+                if data and data.get('add') and data.get('port'):
+                    host = data.get('add')
+                    port = int(data.get('port'))
+                    tls = data.get('tls', '').lower() in ('tls', 'xtls', 'reality')
+                    return (host, port, tls)
+            elif config.startswith('vless://'):
+                data = parser.parse_vless(config)
+                if data and data.get('address') and data.get('port'):
+                    host = data.get('address')
+                    port = int(data.get('port'))
+                    tls = data.get('security', '').lower() in ('tls', 'reality')
+                    return (host, port, tls)
+            elif config.startswith('trojan://'):
+                data = parser.parse_trojan(config)
+                if data and data.get('address') and data.get('port'):
+                    host = data.get('address')
+                    port = int(data.get('port'))
+                    tls = data.get('security', 'tls').lower() in ('tls', 'reality')
+                    return (host, port, tls)
+            elif config.startswith('ss://'):
+                data = parser.parse_shadowsocks(config)
+                if data and data.get('address') and data.get('port'):
+                    host = data.get('address')
+                    port = int(data.get('port'))
+                    return (host, port, False)
+        except Exception as e:
+            logger.debug(f"Parser extraction failed: {e}")
+
+        try:
+            base = config.split('#')[0]
+            parsed = urlparse(base)
+            if parsed.hostname:
+                host = parsed.hostname
+                port = parsed.port or 443
+                params = parse_qs(parsed.query)
+                security = params.get('security', [''])[0].lower()
+                tls = security in ('tls', 'reality', 'xtls') or parsed.scheme in ('https', 'trojan')
+                return (host, port, tls)
+        except Exception:
+            pass
+
+        match = re.search(r'@([^:]+):(\d+)', config)
+        if match:
+            host = match.group(1)
+            port = int(match.group(2))
+            tls = 'security=tls' in config or 'security=reality' in config or 'sni=' in config
+            return (host, port, tls)
+
+        return None
 
     def filter_by_latency(self, results: List[Dict], max_latency: float = None) -> List[str]:
-        # ... (без изменений)
-        pass
+        if max_latency is None:
+            max_latency = self.max_latency
+        return [
+            r['config'] for r in results
+            if r.get('valid', False) and 0 <= r.get('latency', -1) <= max_latency
+        ]
 
     def clear_cache(self):
         self._cache.clear()
