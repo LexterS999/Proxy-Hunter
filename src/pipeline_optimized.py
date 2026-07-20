@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 Оптимизированный пайплайн Proxy-Hunter с улучшенной оценкой,
-активной проверкой (асинхронной), кешированием, graceful shutdown,
-и использованием aiofiles для всех файловых операций.
+интеллектуальным зондированием, ML-фильтрацией и кешированием.
 """
 
 import sys
@@ -28,6 +27,9 @@ from concurrent.futures import ThreadPoolExecutor
 from logging.handlers import RotatingFileHandler
 
 import aiofiles
+import numpy as np
+import pandas as pd
+import joblib
 from tqdm import tqdm
 
 from config import ProxyConfig
@@ -42,12 +44,16 @@ from session_pool import SessionPool
 from channel_quality_analyzer import ChannelQualityAnalyzer
 from config_identity import ConfigIdentity
 
-# Настройка логирования с ротацией
+# Новые модули
+from feature_extractor import FeatureExtractor
+from probe_engine import IntelligentProbe
+from anomaly_detector import AnomalyDetector
+from channel_selector import ChannelSelector
+
 logger = logging.getLogger(__name__)
 
 class OptimizedPipeline:
     def __init__(self, config: Optional[ProxyConfig] = None):
-        # Dependency Injection
         self.config = config or ProxyConfig()
         self.validator = ConfigValidator()
         self.deduplicator = DeepDeduplicator()
@@ -65,20 +71,41 @@ class OptimizedPipeline:
         self.ARCHIVE_RETENTION_DAYS = 7
         self._executor = ThreadPoolExecutor(max_workers=4)
         self.checker_cache = None
-        self._health_applied = False  # флаг для однократного применения health-фильтра
+        self._health_applied = False
+
+        # Новые компоненты
+        self.feature_extractor = FeatureExtractor()
+        self.probe_engine = IntelligentProbe(timeout=5.0, max_attempts=3)
+        self.anomaly_detector = AnomalyDetector()
+        self.channel_selector = ChannelSelector()
+        self.model = None
+        self.feature_cols = []
+        self.cat_cols = []
+        self._load_model()
 
         self._setup_logging()
         self._check_dependencies()
         self._setup_signal_handlers()
 
+    def _load_model(self):
+        """Загружает ML-модель, если она есть."""
+        try:
+            data = joblib.load('configs/quality_model.cbm')
+            self.model = data['model']
+            self.feature_cols = data['features']
+            self.cat_cols = data['categorical']
+            logger.info("✅ Quality model loaded successfully")
+        except Exception as e:
+            self.model = None
+            logger.warning(f"Could not load quality model: {e}. Using fallback scoring.")
+
     def _setup_logging(self):
-        """Настройка RotatingFileHandler для логирования."""
         log_dir = Path('logs')
         log_dir.mkdir(exist_ok=True)
         log_file = log_dir / 'pipeline.log'
         handler = RotatingFileHandler(
             str(log_file),
-            maxBytes=10*1024*1024,  # 10 MB
+            maxBytes=10*1024*1024,
             backupCount=5,
             encoding='utf-8'
         )
@@ -87,7 +114,6 @@ class OptimizedPipeline:
             datefmt='%Y-%m-%d %H:%M:%S'
         ))
         logger.addHandler(handler)
-        # Также добавляем вывод в stdout
         console = logging.StreamHandler()
         console.setFormatter(logging.Formatter(
             '%(asctime)s - %(levelname)s - %(message)s',
@@ -122,6 +148,10 @@ class OptimizedPipeline:
             import aiofiles
         except ImportError:
             missing.append("aiofiles")
+        try:
+            import catboost
+        except ImportError:
+            missing.append("catboost")
         if missing:
             logger.error(f"Missing required dependencies: {', '.join(missing)}")
             logger.error("Please install: pip install -r requirements.txt")
@@ -153,10 +183,8 @@ class OptimizedPipeline:
     async def _save_parsed_cache_async(self, cache: Dict):
         try:
             Path(self.parsed_cache_file).parent.mkdir(parents=True, exist_ok=True)
-            # Используем portalocker для блокировки
             import portalocker
             async with aiofiles.open(self.parsed_cache_file, 'w') as f:
-                # portalocker работает с синхронными файлами, поэтому используем синхронный режим
                 with open(self.parsed_cache_file, 'w') as sync_f:
                     portalocker.lock(sync_f, portalocker.LOCK_EX)
                     json.dump(cache, sync_f, indent=2)
@@ -276,7 +304,6 @@ class OptimizedPipeline:
             logger.error(f"Failed to save channel stats: {e}")
 
     def _refresh_channel_health(self):
-        """Однократное применение health-фильтра."""
         if self._health_applied:
             return
         try:
@@ -310,8 +337,15 @@ class OptimizedPipeline:
                 logger.warning(f"Failed to save bloom filter state: {e}")
         logger.info("State saved.")
 
+    def _parse_config(self, config: str) -> Optional[Dict]:
+        """Парсит конфигурацию и возвращает словарь с данными."""
+        from parse_fallback import FallbackParser
+        parsed, method = FallbackParser.parse_with_stats(config)
+        if parsed:
+            parsed['protocol'] = config.split('://')[0].lower()
+        return parsed
+
     async def run(self) -> bool:
-        # Паттерн Saga: временные метки для каждого шага
         saga_state = {
             'step': 'start',
             'timestamp': datetime.now().isoformat(),
@@ -326,7 +360,7 @@ class OptimizedPipeline:
         try:
             start_time = time.time()
             logger.info("=" * 60)
-            logger.info("🚀 Starting Proxy-Hunter Pipeline (optimized, async, SQLite, no GeoIP)")
+            logger.info("🚀 Starting Proxy-Hunter Pipeline (optimized, async, with ML)")
             logger.info("=" * 60)
 
             # Шаг 1: Сбор
@@ -362,7 +396,7 @@ class OptimizedPipeline:
                 return False
             logger.info(f"✅ Raw configs: {len(raw_configs)}")
 
-            # Шаг 2: Парсинг и валидация (параллельно)
+            # Шаг 2: Парсинг и валидация
             logger.info("🔍 Validating and extracting server info...")
             parsed_cache = await self._load_parsed_cache_async()
             valid_configs = []
@@ -380,7 +414,6 @@ class OptimizedPipeline:
                                 return (None, 'failed')
                         else:
                             data, method = FallbackParser.parse_with_stats(cfg)
-                            # Явная обработка None
                             if data is None:
                                 return (None, 'failed')
                             parsed_cache[cache_key] = data
@@ -417,38 +450,50 @@ class OptimizedPipeline:
                 logger.error("No valid configs found.")
                 return False
 
-            # Шаг 3: Оценка (параллельно)
-            logger.info("⚡ Scoring profiles...")
+            # Шаг 3: Оценка и извлечение признаков
+            logger.info("⚡ Scoring profiles and extracting features...")
             scored_configs = []
+            features_list = []
             scored_lock = asyncio.Lock()
 
-            def score_one(cfg):
+            def score_and_extract(cfg):
                 try:
+                    parsed = self._parse_config(cfg)
+                    if not parsed:
+                        return None
                     info = self.quality_checker.extract_server_info(cfg)
                     if info and info.get('parsed'):
                         score_info = self.scorer.score_profile(cfg, info['parsed'], success=True)
-                        return {
-                            'config': cfg,
-                            'score': score_info['score'],
-                            'stability': score_info['stability'],
-                            'lifetime': score_info['lifetime'],
-                            'is_datacenter': False,
-                            'server_type': 'UNK',
-                            'parsed': info['parsed']
-                        }
-                except Exception:
-                    pass
+                        # Извлекаем признаки
+                        key = self.feature_extractor.get_profile_key(cfg)
+                        if key:
+                            feats = self.feature_extractor.extract_features(key, cfg, parsed)
+                            self.feature_extractor.update_features_db(feats)
+                            return {
+                                'config': cfg,
+                                'score': score_info['score'],
+                                'stability': score_info['stability'],
+                                'lifetime': score_info['lifetime'],
+                                'is_datacenter': False,
+                                'server_type': 'UNK',
+                                'parsed': parsed,
+                                'features': feats,
+                                'profile_key': key
+                            }
+                except Exception as e:
+                    logger.debug(f"Score/extract failed: {e}")
                 return None
 
-            with tqdm(total=len(valid_configs), desc="Scoring configs") as pbar:
+            with tqdm(total=len(valid_configs), desc="Scoring & extracting") as pbar:
                 for i in range(0, len(valid_configs), batch_size):
                     batch = valid_configs[i:i+batch_size]
-                    futures = [loop.run_in_executor(self._executor, score_one, cfg) for cfg in batch]
+                    futures = [loop.run_in_executor(self._executor, score_and_extract, cfg) for cfg in batch]
                     for future in asyncio.as_completed(futures):
                         result = await future
                         if result:
                             async with scored_lock:
                                 scored_configs.append(result)
+                                features_list.append(result['features'])
                         pbar.update(1)
 
             if self._shutdown_requested:
@@ -462,75 +507,88 @@ class OptimizedPipeline:
                 logger.error("No configs scored.")
                 return False
 
-            # Шаг 4: Фильтр по скору (адаптивный)
-            thresholds = self.db.get_metadata('adaptive_thresholds', {})
-            min_score = thresholds.get('score_min', 20.0)
-            filtered = [item for item in scored_configs if item['score'] >= min_score]
-            logger.info(f"✅ After adaptive min_score filter ({min_score:.1f}): {len(filtered)}")
-            if len(filtered) < 10:
-                min_score = max(5.0, min_score * 0.5)
-                filtered = [item for item in scored_configs if item['score'] >= min_score]
-                logger.info(f"✅ After lowered filter ({min_score:.1f}): {len(filtered)}")
-            if self._shutdown_requested or not filtered:
-                await self.save_state()
-                return False
-            saga_state['step'] = 'filtered'
-            saga_state['filtered_configs'] = len(filtered)
+            # Шаг 4: ML-фильтрация (если модель доступна)
+            if self.model is not None and len(features_list) > 10:
+                try:
+                    df = pd.DataFrame(features_list)
+                    for col in self.cat_cols:
+                        if col in df.columns:
+                            df[col] = df[col].astype(str)
+                    X = df[self.feature_cols + self.cat_cols]
+                    predictions = self.model.predict(X)
+                    for i, item in enumerate(scored_configs):
+                        item['ml_score'] = predictions[i] if i < len(predictions) else 50.0
+                except Exception as e:
+                    logger.warning(f"ML prediction failed: {e}, using fallback")
+                    for item in scored_configs:
+                        item['ml_score'] = item['score']
 
-            # Шаг 5: Активная проверка (с кешированием)
-            logger.info("🔌 Active checking (TCP, HTTP HEAD, async, cached)...")
-            history = self._safe_load_history()
-            if self.checker_cache is None:
-                self.checker_cache = ActiveChecker(
-                    timeout=5.0,
-                    max_workers=None,
-                    max_latency=10000.0,
-                    history=history,
-                    cache_ttl=3600
-                )
-            checker = self.checker_cache
+                # Фильтрация по ML-скору
+                min_ml_score = 30.0
+                filtered_by_ml = [item for item in scored_configs if item.get('ml_score', 0) >= min_ml_score]
+                logger.info(f"✅ ML filter (>{min_ml_score}): {len(scored_configs)} → {len(filtered_by_ml)}")
+                scored_configs = filtered_by_ml
+                if not scored_configs:
+                    logger.error("No configs passed ML filter.")
+                    return False
+            else:
+                for item in scored_configs:
+                    item['ml_score'] = item['score']
 
-            configs_to_check = [item['config'] for item in filtered]
-            check_results = await checker.check_batch(configs_to_check)
+            # Шаг 5: Аномалии
+            anomaly_features = [f for f in features_list if self.anomaly_detector.predict(f)]
+            logger.info(f"🔍 Detected {len(anomaly_features)} anomalous profiles")
 
-            if self._shutdown_requested:
-                await self.save_state()
-                return False
+            # Шаг 6: Интеллектуальная активная проверка
+            logger.info("🔌 Intelligent probing (multi-attempt, protocol-aware)...")
+            probe_results = []
+            valid_configs_to_probe = [item['config'] for item in scored_configs]
 
-            await SessionPool().close()
+            sem = asyncio.Semaphore(50)  # ограничение параллелизма
 
-            good_configs = [
-                r['config'] for r in check_results
-                if r.get('valid', False) and r.get('latency', -1) > 0
-            ]
+            async def probe_one(item):
+                async with sem:
+                    cfg = item['config']
+                    parsed = item.get('parsed')
+                    if not parsed:
+                        parsed = self._parse_config(cfg)
+                    if parsed:
+                        result = await self.probe_engine.probe(cfg, parsed)
+                        result['profile_key'] = item.get('profile_key', self.feature_extractor.get_profile_key(cfg))
+                        return result
+                    return {'success': False, 'error': 'parse_failed'}
+
+            probe_tasks = [probe_one(item) for item in scored_configs]
+            probe_results = await asyncio.gather(*probe_tasks, return_exceptions=True)
+
+            # Обработка результатов
+            good_configs = []
+            for idx, res in enumerate(probe_results):
+                if isinstance(res, Exception):
+                    logger.debug(f"Probe exception: {res}")
+                    continue
+                if res.get('success'):
+                    good_configs.append(scored_configs[idx]['config'])
+                # Сохраняем историю зонда
+                self.db.add_probe_history(res)
+
             logger.info(f"✅ Active check: {len(good_configs)} configs passed")
             saga_state['step'] = 'checked'
             saga_state['good_configs'] = len(good_configs)
 
             if not good_configs:
                 error_counts = {}
-                for r in check_results:
-                    err = r.get('error', 'unknown')
-                    error_counts[err] = error_counts.get(err, 0) + 1
+                for res in probe_results:
+                    if isinstance(res, dict):
+                        err = res.get('error', 'unknown')
+                        error_counts[err] = error_counts.get(err, 0) + 1
                 logger.error("❌ No configs passed active check!")
                 logger.error(f"   Error breakdown: {error_counts}")
-                for i, r in enumerate(check_results[:5]):
-                    logger.error(f"   Sample {i+1}: error={r.get('error')}, config={r.get('config', '')[:80]}")
                 return False
 
-            # Обновляем скоры
-            for result in check_results:
-                if result.get('valid', False) and result.get('latency', -1) > 0:
-                    latency_ms = result['latency']
-                    latency_bonus = max(0, min(20, 20 * (1 - latency_ms / 3000)))
-                    for item in filtered:
-                        if item['config'] == result['config']:
-                            item['score'] = min(100, item['score'] + latency_bonus)
-                            break
-
-            # Шаг 6: Дедупликация
-            logger.info("🧹 Deep deduplication (new configs)...")
-            quality_scores = {item['config']: item['score'] for item in filtered if item['config'] in good_configs}
+            # Шаг 7: Дедупликация
+            logger.info("🧹 Deep deduplication...")
+            quality_scores = {item['config']: item.get('ml_score', item['score']) for item in scored_configs if item['config'] in good_configs}
             deduped = await self.deduplicator.deduplicate_configs_async(good_configs, quality_scores)
             logger.info(f"✅ After dedup: {len(deduped)}")
             saga_state['step'] = 'deduped'
@@ -541,10 +599,9 @@ class OptimizedPipeline:
                     await self.save_state()
                 return False
 
-            # Шаг 7: Архивация с именами
-            logger.info("💾 Archiving logic (with name mapping)...")
+            # Шаг 8: Архивация с именами
+            logger.info("💾 Archiving logic...")
             name_mapping = await self._load_name_mapping_async()
-
             new_configs_with_names = []
             for cfg in deduped:
                 key = self._get_config_key(cfg)
@@ -571,7 +628,7 @@ class OptimizedPipeline:
             logger.info(f"✅ Archive saved: {len(merged_configs)} configs in {self.output_file}")
             logger.info(f"✅ Simple output saved: {len(new_configs_with_names)} configs in {self.simple_file}")
 
-            # Шаг 8: Xray конфиг
+            # Шаг 9: Xray конфиг
             logger.info("📦 Generating Xray balanced config...")
             try:
                 from xray_balancer import ConfigToXray
@@ -580,20 +637,20 @@ class OptimizedPipeline:
             except Exception as e:
                 logger.warning(f"Xray balancer failed: {e}")
 
-            # Шаг 9: Обновление статистики
+            # Шаг 10: Обновление статистики
             logger.info("📊 Updating run statistics in SQLite...")
             final_stats = {
                 'total_raw': len(raw_configs),
                 'total_valid': len(valid_configs),
                 'total_final': len(merged_configs),
-                'avg_score': sum(item['score'] for item in filtered) / len(filtered) if filtered else 0,
+                'avg_score': sum(item.get('ml_score', item['score']) for item in scored_configs) / len(scored_configs) if scored_configs else 0,
                 'protocols': {},
                 'geo_distribution': {},
                 'anomalies': [],
                 'p50_latency': 0,
                 'p95_latency': 0,
                 'p99_latency': 0,
-                'success_rate': len(good_configs) / len(filtered) if filtered else 0
+                'success_rate': len(good_configs) / len(scored_configs) if scored_configs else 0
             }
             with self.db._get_connection() as conn:
                 cursor = conn.cursor()
@@ -645,7 +702,6 @@ class OptimizedPipeline:
         finally:
             try:
                 await SessionPool().close()
-                # Сохраняем Bloom-фильтр при завершении
                 if hasattr(self.deduplicator, '_bloom'):
                     await self.deduplicator._bloom.save()
             except Exception as e:
