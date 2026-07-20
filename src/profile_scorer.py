@@ -10,7 +10,7 @@ import numpy as np
 from typing import Dict, Optional, Tuple, List
 from datetime import datetime
 
-from db import HistoryDB
+from db import get_db
 from user_settings import SCORE_WEIGHTS
 
 logger = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ class ProfileScorer:
         key = self.get_profile_key(config, parsed)
         now = datetime.now().isoformat()
 
-        profile = self.db.get_profile(key)
+        profile = self._get_cached_profile(key)
         if not profile:
             profile = {
                 'key': key,
@@ -83,17 +83,7 @@ class ProfileScorer:
                 'overall_score': 0.0
             }
         else:
-            if isinstance(profile.get('latencies'), bytes):
-                import zlib
-                try:
-                    profile['latencies'] = json.loads(zlib.decompress(profile['latencies']).decode())
-                except:
-                    profile['latencies'] = []
-            if isinstance(profile.get('timestamps'), bytes):
-                try:
-                    profile['timestamps'] = json.loads(zlib.decompress(profile['timestamps']).decode())
-                except:
-                    profile['timestamps'] = []
+            # Если профиль из кеша, он уже распакован
             profile['last_seen'] = now
 
         if success:
@@ -113,7 +103,7 @@ class ProfileScorer:
         profile['stability'] = self.calculate_stability(profile)
         profile['lifetime'] = self.calculate_lifetime_prediction(profile)
 
-        self.db.update_profile(key, profile)
+        self._update_profile_cached(key, profile)
 
     def calculate_stability(self, profile: Dict) -> float:
         latencies = profile.get('latencies', [])
@@ -205,7 +195,7 @@ class ProfileScorer:
                       latency: float = 0) -> Dict:
         self.update_profile_history(config, parsed, success, latency)
         key = self.get_profile_key(config, parsed)
-        profile = self.db.get_profile(key)
+        profile = self._get_cached_profile(key)
         if not profile:
             return {'score': 50, 'stability': 0.5, 'lifetime': 24, 'is_datacenter': False, 'server_type': 'UNK'}
 
