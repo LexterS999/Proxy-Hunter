@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import List, Dict, Optional, Set
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
+from logging.handlers import RotatingFileHandler
 
 import aiofiles
 from tqdm import tqdm
@@ -41,18 +42,13 @@ from session_pool import SessionPool
 from channel_quality_analyzer import ChannelQualityAnalyzer
 from config_identity import ConfigIdentity
 
-# Настройка логирования (только в точке входа)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
+# Настройка логирования с ротацией
 logger = logging.getLogger(__name__)
 
-
 class OptimizedPipeline:
-    def __init__(self):
-        self.config = ProxyConfig()
+    def __init__(self, config: Optional[ProxyConfig] = None):
+        # Dependency Injection
+        self.config = config or ProxyConfig()
         self.validator = ConfigValidator()
         self.deduplicator = DeepDeduplicator()
         self.quality_checker = ConfigQualityChecker(timeout=0, max_workers=1)
@@ -67,13 +63,38 @@ class OptimizedPipeline:
         self._state = {}
         self.db = get_db()
         self.ARCHIVE_RETENTION_DAYS = 7
-        self._executor = ThreadPoolExecutor(max_workers=4)  # для CPU-bound задач
-
-        # Кеш для ActiveChecker (будет создан позже)
+        self._executor = ThreadPoolExecutor(max_workers=4)
         self.checker_cache = None
+        self._health_applied = False  # флаг для однократного применения health-фильтра
 
+        self._setup_logging()
         self._check_dependencies()
         self._setup_signal_handlers()
+
+    def _setup_logging(self):
+        """Настройка RotatingFileHandler для логирования."""
+        log_dir = Path('logs')
+        log_dir.mkdir(exist_ok=True)
+        log_file = log_dir / 'pipeline.log'
+        handler = RotatingFileHandler(
+            str(log_file),
+            maxBytes=10*1024*1024,  # 10 MB
+            backupCount=5,
+            encoding='utf-8'
+        )
+        handler.setFormatter(logging.Formatter(
+            '%(asctime)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        ))
+        logger.addHandler(handler)
+        # Также добавляем вывод в stdout
+        console = logging.StreamHandler()
+        console.setFormatter(logging.Formatter(
+            '%(asctime)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        ))
+        logger.addHandler(console)
+        logger.setLevel(logging.INFO)
 
     def _check_dependencies(self):
         missing = []
@@ -132,8 +153,14 @@ class OptimizedPipeline:
     async def _save_parsed_cache_async(self, cache: Dict):
         try:
             Path(self.parsed_cache_file).parent.mkdir(parents=True, exist_ok=True)
+            # Используем portalocker для блокировки
+            import portalocker
             async with aiofiles.open(self.parsed_cache_file, 'w') as f:
-                await f.write(json.dumps(cache, indent=2))
+                # portalocker работает с синхронными файлами, поэтому используем синхронный режим
+                with open(self.parsed_cache_file, 'w') as sync_f:
+                    portalocker.lock(sync_f, portalocker.LOCK_EX)
+                    json.dump(cache, sync_f, indent=2)
+                    portalocker.unlock(sync_f)
         except Exception as e:
             logger.warning(f"Failed to save parsed cache: {e}")
 
@@ -156,7 +183,6 @@ class OptimizedPipeline:
             logger.error(f"Failed to save name mapping: {e}")
 
     def _get_config_key(self, config: str) -> str:
-        # Используем единый модуль
         return ConfigIdentity.get_key(config)
 
     def _generate_name(self, config: str) -> str:
@@ -250,6 +276,9 @@ class OptimizedPipeline:
             logger.error(f"Failed to save channel stats: {e}")
 
     def _refresh_channel_health(self):
+        """Однократное применение health-фильтра."""
+        if self._health_applied:
+            return
         try:
             self.channel_analyzer = ChannelQualityAnalyzer()
             urls = [ch.url for ch in self.config.SOURCE_URLS]
@@ -268,6 +297,7 @@ class OptimizedPipeline:
                 f"recovering={summary.get('recovering', 0)}, "
                 f"inactive={summary.get('inactive', 0)} (total {summary.get('total', 0)})"
             )
+            self._health_applied = True
         except Exception as e:
             logger.warning(f"Failed to refresh channel health: {e}")
 
@@ -281,6 +311,18 @@ class OptimizedPipeline:
         logger.info("State saved.")
 
     async def run(self) -> bool:
+        # Паттерн Saga: временные метки для каждого шага
+        saga_state = {
+            'step': 'start',
+            'timestamp': datetime.now().isoformat(),
+            'raw_configs': None,
+            'valid_configs': None,
+            'scored_configs': None,
+            'filtered_configs': None,
+            'good_configs': None,
+            'deduped_configs': None,
+            'merged_configs': None
+        }
         try:
             start_time = time.time()
             logger.info("=" * 60)
@@ -291,6 +333,8 @@ class OptimizedPipeline:
             logger.info("📡 Fetching configurations...")
             fetcher = AsyncConfigFetcher(self.config)
             raw_configs = await fetcher.fetch_all()
+            saga_state['step'] = 'fetched'
+            saga_state['raw_configs'] = len(raw_configs)
             if self._shutdown_requested:
                 await self.save_state()
                 return False
@@ -336,6 +380,9 @@ class OptimizedPipeline:
                                 return (None, 'failed')
                         else:
                             data, method = FallbackParser.parse_with_stats(cfg)
+                            # Явная обработка None
+                            if data is None:
+                                return (None, 'failed')
                             parsed_cache[cache_key] = data
                             if data:
                                 return (cfg, method if method in ('strict', 'heuristic') else 'heuristic')
@@ -343,7 +390,6 @@ class OptimizedPipeline:
                                 return (None, 'failed')
                 except Exception:
                     return (None, 'failed')
-                return (None, 'failed')
 
             loop = asyncio.get_event_loop()
             batch_size = 1000
@@ -362,6 +408,8 @@ class OptimizedPipeline:
                 await self.save_state()
                 return False
             await self._save_parsed_cache_async(parsed_cache)
+            saga_state['step'] = 'validated'
+            saga_state['valid_configs'] = len(valid_configs)
             logger.info(f"✅ Valid configs: {len(valid_configs)}")
             logger.info(f"   Parse stats: strict={parse_stats['strict']}, heuristic={parse_stats['heuristic']}, failed={parse_stats['failed']}")
 
@@ -406,6 +454,8 @@ class OptimizedPipeline:
             if self._shutdown_requested:
                 await self.save_state()
                 return False
+            saga_state['step'] = 'scored'
+            saga_state['scored_configs'] = len(scored_configs)
             logger.info(f"✅ Scored {len(scored_configs)} configs")
 
             if not scored_configs:
@@ -424,6 +474,8 @@ class OptimizedPipeline:
             if self._shutdown_requested or not filtered:
                 await self.save_state()
                 return False
+            saga_state['step'] = 'filtered'
+            saga_state['filtered_configs'] = len(filtered)
 
             # Шаг 5: Активная проверка (с кешированием)
             logger.info("🔌 Active checking (TCP, HTTP HEAD, async, cached)...")
@@ -452,6 +504,8 @@ class OptimizedPipeline:
                 if r.get('valid', False) and r.get('latency', -1) > 0
             ]
             logger.info(f"✅ Active check: {len(good_configs)} configs passed")
+            saga_state['step'] = 'checked'
+            saga_state['good_configs'] = len(good_configs)
 
             if not good_configs:
                 error_counts = {}
@@ -479,6 +533,8 @@ class OptimizedPipeline:
             quality_scores = {item['config']: item['score'] for item in filtered if item['config'] in good_configs}
             deduped = await self.deduplicator.deduplicate_configs_async(good_configs, quality_scores)
             logger.info(f"✅ After dedup: {len(deduped)}")
+            saga_state['step'] = 'deduped'
+            saga_state['deduped_configs'] = len(deduped)
 
             if self._shutdown_requested or not deduped:
                 if self._shutdown_requested:
@@ -506,6 +562,8 @@ class OptimizedPipeline:
                     merged_configs.append(cfg)
 
             logger.info(f"🔄 Merged archive: {len(archive_configs)} old + {len(new_configs_with_names)} new → {len(merged_configs)} unique")
+            saga_state['step'] = 'archived'
+            saga_state['merged_configs'] = len(merged_configs)
 
             await self._save_archive_with_names_async(merged_configs, name_mapping)
             await self._save_simple_async(new_configs_with_names, name_mapping)
@@ -587,8 +645,11 @@ class OptimizedPipeline:
         finally:
             try:
                 await SessionPool().close()
+                # Сохраняем Bloom-фильтр при завершении
+                if hasattr(self.deduplicator, '_bloom'):
+                    await self.deduplicator._bloom.save()
             except Exception as e:
-                logger.warning(f"Error closing session pool: {e}")
+                logger.warning(f"Error closing session pool or saving bloom: {e}")
             self._executor.shutdown(wait=False)
 
 
