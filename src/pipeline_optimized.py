@@ -84,7 +84,7 @@ class OptimizedPipeline:
         self.feature_cols = []
         self.cat_cols = []
         self._load_model()
-        self.async_writer = AsyncDBWriter()
+        self.async_writer = AsyncDBWriter()  # только создание, запуск позже
 
         self._setup_logging()
         self._check_dependencies()
@@ -547,6 +547,9 @@ class OptimizedPipeline:
             # Шаг 5: Аномалии (не удаляем, только логируем)
             anomaly_features = [f for f in features_list if self.anomaly_detector.predict(f)]
             logger.info(f"🔍 Detected {len(anomaly_features)} anomalous profiles")
+
+            # Запускаем асинхронный writer (внутри цикла событий)
+            await self.async_writer.start()
 
             # Шаг 6: Интеллектуальная активная проверка с per-host семафорами и адаптивными попытками
             logger.info("🔄 Resolving DNS for unique hosts...")
