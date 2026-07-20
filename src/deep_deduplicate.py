@@ -28,6 +28,7 @@ class DeepDeduplicator:
         # Индекс по подсети (/24 для IPv4, префикс /48 для IPv6)
         self._subnet_index: Dict[str, Set[str]] = defaultdict(set)
         self._server_cache = {}
+        self._index = set()  # <-- ДОБАВЛЕНО
 
     def generate_fingerprint(self, config: str) -> Optional[Dict]:
         try:
