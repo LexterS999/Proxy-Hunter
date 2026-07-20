@@ -122,7 +122,7 @@ class BatchWriter:
 
 class Container:
     def __init__(self):
-        self.db = get_db()
+        self.db = None  # будет инициализирован асинхронно
         self.config = ProxyConfig()
         self.fetcher = AsyncConfigFetcher(self.config)
         self.deduplicator = DeepDeduplicator()
@@ -134,6 +134,10 @@ class Container:
         self.anomaly_detector = AnomalyDetector()
         self.channel_analyzer = ChannelQualityAnalyzer()
         self.async_writer = AsyncDBWriter()
+
+    async def init_db(self):
+        self.db = await get_db()
+        return self.db
 
     def get_pipeline(self):
         return OptimizedPipeline(
@@ -692,7 +696,8 @@ class OptimizedPipeline:
         finally:
             await self.async_writer.stop()
             await SessionPool().close()
-            await self.db.close()
+            if self.db is not None:
+                await self.db.close()
             self._process_executor.shutdown(wait=False)
             self._executor.shutdown(wait=False)
 
@@ -707,12 +712,13 @@ class OptimizedPipeline:
         pass
 
 
-def main():
+async def main():
     container = Container()
+    await container.init_db()
     pipeline = container.get_pipeline()
-    success = asyncio.run(pipeline.run())
+    success = await pipeline.run()
     sys.exit(0 if success else 1)
 
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())
