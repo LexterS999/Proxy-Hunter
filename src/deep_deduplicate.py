@@ -22,15 +22,6 @@ from config_identity import ConfigIdentity
 
 logger = logging.getLogger(__name__)
 
-# Попытка импортировать aiodns
-try:
-    import aiodns
-    resolver = aiodns.DNSResolver()
-    AIODNS_AVAILABLE = True
-except ImportError:
-    AIODNS_AVAILABLE = False
-    resolver = None
-
 # ============================
 # ScalableBloomFilter
 # ============================
@@ -165,12 +156,22 @@ class DeepDeduplicator:
         return False
 
     async def _resolve_hostname_async(self, hostname: str) -> Optional[str]:
-        if AIODNS_AVAILABLE:
-            try:
-                result = await resolver.query(hostname, 'A')
+        """
+        Разрешает имя хоста в IP-адрес.
+        Использует aiodns (с созданием DNSResolver на лету) или socket.gethostbyname.
+        """
+        try:
+            import aiodns
+            loop = asyncio.get_running_loop()
+            resolver = aiodns.DNSResolver(loop=loop)
+            result = await resolver.query(hostname, 'A')
+            if result:
                 return result[0].host
-            except:
-                pass
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
         try:
             return socket.gethostbyname(hostname)
         except:
