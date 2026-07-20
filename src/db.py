@@ -1,6 +1,6 @@
 """
 Модуль для работы с SQLite-базой данных истории.
-Использует aiosqlite с созданием нового соединения для каждой операции.
+Асинхронный синглтон, автоматическая очистка старых данных.
 """
 
 import sqlite3
@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 DB_PATH = "configs/history.db"
 COMPRESS_LEVEL = 6
 SCHEMA_VERSION = 5
+CLEANUP_DAYS = 30  # Очищать данные старше 30 дней
 
 
 def _compress(data: Any) -> bytes:
@@ -43,25 +44,41 @@ def _now_utc() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-class HistoryDB:
+class AsyncHistoryDB:
+    """Асинхронный синглтон для работы с БД."""
     _instance = None
+    _lock = asyncio.Lock()
+    _initialized = False
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance._init_sync()
         return cls._instance
 
-    def _init_sync(self):
-        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-            cursor = conn.cursor()
-            self._init_schema(cursor)
-            conn.commit()
+    async def __aenter__(self):
+        await self._init_async()
+        return self
 
-    def _init_schema(self, cursor):
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+    async def _init_async(self):
+        if self._initialized:
+            return
+        async with self._lock:
+            if self._initialized:
+                return
+            os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+            async with aiosqlite.connect(DB_PATH) as conn:
+                await conn.execute("PRAGMA journal_mode=WAL")
+                await conn.execute("PRAGMA synchronous=NORMAL")
+                cursor = await conn.cursor()
+                await self._init_schema(cursor)
+                await conn.commit()
+                await self._clean_old_data(conn, days=CLEANUP_DAYS)
+            self._initialized = True
+
+    async def _init_schema(self, cursor):
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA synchronous=NORMAL")
 
@@ -230,6 +247,8 @@ class HistoryDB:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_probe_timestamp ON probe_history(timestamp)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_probe_success ON probe_history(success)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_parsed_cache_key ON parsed_cache(cache_key)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_probe_profile_timestamp ON probe_history(profile_key, timestamp)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_profile_key ON profiles(key)")
 
         if not cursor.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone():
             cursor.execute("INSERT INTO metadata (key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
@@ -250,11 +269,23 @@ class HistoryDB:
 
     @asynccontextmanager
     async def _transaction(self):
-        """Контекстный менеджер для транзакций с новым соединением."""
         async with aiosqlite.connect(DB_PATH) as conn:
             await conn.execute("PRAGMA journal_mode=WAL")
             await conn.execute("PRAGMA synchronous=NORMAL")
             yield conn
+
+    async def _clean_old_data(self, conn=None, days=30):
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        async def _clean(c):
+            await c.execute("DELETE FROM probe_history WHERE timestamp < ?", (cutoff,))
+            await c.execute("DELETE FROM channel_history WHERE timestamp < ?", (cutoff,))
+            await c.execute("DELETE FROM runs WHERE timestamp < ?", (cutoff,))
+            await c.commit()
+        if conn:
+            await _clean(conn)
+        else:
+            async with self._transaction() as c:
+                await _clean(c)
 
     async def add_run(self, stats: Dict) -> int:
         async with self._transaction() as conn:
@@ -283,7 +314,7 @@ class HistoryDB:
             return cursor.lastrowid
 
     async def get_recent_runs(self, limit: int = 10) -> List[Dict]:
-        async with aiosqlite.connect(DB_PATH) as conn:
+        async with self._transaction() as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('SELECT * FROM runs ORDER BY timestamp DESC LIMIT ?', (limit,))
@@ -303,15 +334,14 @@ class HistoryDB:
 
     async def update_channel(self, url: str, metrics: Dict, enabled: bool = True):
         async with self._transaction() as conn:
-            cursor = await conn.cursor()
-            await cursor.execute('''
+            await conn.execute('''
                 INSERT OR REPLACE INTO channels (url, enabled, metrics, last_updated)
                 VALUES (?, ?, ?, ?)
             ''', (url, 1 if enabled else 0, _compress(metrics), _now_utc()))
             await conn.commit()
 
     async def get_channel(self, url: str) -> Optional[Dict]:
-        async with aiosqlite.connect(DB_PATH) as conn:
+        async with self._transaction() as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('SELECT * FROM channels WHERE url = ?', (url,))
@@ -323,7 +353,7 @@ class HistoryDB:
             return None
 
     async def get_all_channels(self) -> List[Dict]:
-        async with aiosqlite.connect(DB_PATH) as conn:
+        async with self._transaction() as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('SELECT * FROM channels')
@@ -337,8 +367,7 @@ class HistoryDB:
 
     async def update_profile(self, key: str, profile_data: Dict):
         async with self._transaction() as conn:
-            cursor = await conn.cursor()
-            await cursor.execute('''
+            await conn.execute('''
                 INSERT OR REPLACE INTO profiles (
                     key, server, protocol, first_seen, last_seen,
                     success_count, fail_count, latencies, timestamps,
@@ -365,33 +394,31 @@ class HistoryDB:
         if not profiles:
             return
         async with self._transaction() as conn:
-            cursor = await conn.cursor()
-            for profile_data in profiles:
-                await cursor.execute('''
-                    INSERT OR REPLACE INTO profiles (
-                        key, server, protocol, first_seen, last_seen,
-                        success_count, fail_count, latencies, timestamps,
-                        is_active, stability, lifetime, overall_score
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    profile_data.get('key', ''),
-                    profile_data.get('server', ''),
-                    profile_data.get('protocol', ''),
-                    profile_data.get('first_seen', _now_utc()),
-                    profile_data.get('last_seen', _now_utc()),
-                    profile_data.get('success_count', 0),
-                    profile_data.get('fail_count', 0),
-                    _compress(profile_data.get('latencies', [])),
-                    _compress(profile_data.get('timestamps', [])),
-                    1 if profile_data.get('is_active', True) else 0,
-                    profile_data.get('stability', 0.0),
-                    profile_data.get('lifetime', 0.0),
-                    profile_data.get('overall_score', 0.0)
-                ))
+            await conn.executemany('''
+                INSERT OR REPLACE INTO profiles (
+                    key, server, protocol, first_seen, last_seen,
+                    success_count, fail_count, latencies, timestamps,
+                    is_active, stability, lifetime, overall_score
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', [(
+                p.get('key', ''),
+                p.get('server', ''),
+                p.get('protocol', ''),
+                p.get('first_seen', _now_utc()),
+                p.get('last_seen', _now_utc()),
+                p.get('success_count', 0),
+                p.get('fail_count', 0),
+                _compress(p.get('latencies', [])),
+                _compress(p.get('timestamps', [])),
+                1 if p.get('is_active', True) else 0,
+                p.get('stability', 0.0),
+                p.get('lifetime', 0.0),
+                p.get('overall_score', 0.0)
+            ) for p in profiles])
             await conn.commit()
 
     async def get_profile(self, key: str) -> Optional[Dict]:
-        async with aiosqlite.connect(DB_PATH) as conn:
+        async with self._transaction() as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('SELECT * FROM profiles WHERE key = ?', (key,))
@@ -405,7 +432,7 @@ class HistoryDB:
             return None
 
     async def get_all_profiles(self) -> List[Dict]:
-        async with aiosqlite.connect(DB_PATH) as conn:
+        async with self._transaction() as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('SELECT * FROM profiles')
@@ -422,13 +449,12 @@ class HistoryDB:
     async def clean_old_profiles(self, days: int = 7):
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         async with self._transaction() as conn:
-            cursor = await conn.cursor()
-            await cursor.execute("DELETE FROM profiles WHERE last_seen < ?", (cutoff,))
+            await conn.execute("DELETE FROM profiles WHERE last_seen < ?", (cutoff,))
             await conn.commit()
             logger.info(f"Cleaned profiles older than {days} days")
 
     async def get_metadata(self, key: str, default: Any = None) -> Any:
-        async with aiosqlite.connect(DB_PATH) as conn:
+        async with self._transaction() as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('SELECT value FROM metadata WHERE key = ?', (key,))
@@ -442,14 +468,12 @@ class HistoryDB:
 
     async def set_metadata(self, key: str, value: Any):
         async with self._transaction() as conn:
-            cursor = await conn.cursor()
-            await cursor.execute('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)', (key, json.dumps(value)))
+            await conn.execute('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)', (key, json.dumps(value)))
             await conn.commit()
 
     async def add_channel_history(self, url: str, run_id: int, metrics: Dict):
         async with self._transaction() as conn:
-            cursor = await conn.cursor()
-            await cursor.execute('''
+            await conn.execute('''
                 INSERT INTO channel_history (
                     url, run_id, total_configs, valid_configs, unique_configs,
                     avg_response_time, overall_score, protocol_counts, timestamp
@@ -468,7 +492,7 @@ class HistoryDB:
             await conn.commit()
 
     async def get_channel_history(self, url: str, limit: int = 10) -> List[Dict]:
-        async with aiosqlite.connect(DB_PATH) as conn:
+        async with self._transaction() as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('SELECT * FROM channel_history WHERE url = ? ORDER BY timestamp DESC LIMIT ?', (url, limit))
@@ -482,7 +506,7 @@ class HistoryDB:
 
     async def get_channel_history_scores(self, url: str, days: int = 7, limit: int = 100) -> List[Dict]:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        async with aiosqlite.connect(DB_PATH) as conn:
+        async with self._transaction() as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('''
@@ -501,10 +525,8 @@ class HistoryDB:
             return None
         return sum(valid_scores) / len(valid_scores)
 
-    # ========== Кеш парсинга ==========
-
     async def get_parsed_cache(self, cache_key: str) -> Optional[Dict]:
-        async with aiosqlite.connect(DB_PATH) as conn:
+        async with self._transaction() as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('SELECT parsed_data FROM parsed_cache WHERE cache_key = ?', (cache_key,))
@@ -517,7 +539,7 @@ class HistoryDB:
         if not keys:
             return {}
         result = {}
-        async with aiosqlite.connect(DB_PATH) as conn:
+        async with self._transaction() as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             placeholders = ','.join(['?'] * len(keys))
@@ -531,8 +553,7 @@ class HistoryDB:
 
     async def set_parsed_cache(self, cache_key: str, parsed_data: Dict):
         async with self._transaction() as conn:
-            cursor = await conn.cursor()
-            await cursor.execute('''
+            await conn.execute('''
                 INSERT OR REPLACE INTO parsed_cache (cache_key, parsed_data, created_at, updated_at)
                 VALUES (?, ?, ?, ?)
             ''', (cache_key, _compress(parsed_data), _now_utc(), _now_utc()))
@@ -542,20 +563,16 @@ class HistoryDB:
         if not items:
             return
         async with self._transaction() as conn:
-            cursor = await conn.cursor()
             for key, data in items.items():
-                await cursor.execute('''
+                await conn.execute('''
                     INSERT OR REPLACE INTO parsed_cache (cache_key, parsed_data, created_at, updated_at)
                     VALUES (?, ?, ?, ?)
                 ''', (key, _compress(data), _now_utc(), _now_utc()))
             await conn.commit()
 
-    # ========== Модели ==========
-
     async def save_model_version(self, version: str, rmse: float, mae: float, trained_on: str):
         async with self._transaction() as conn:
-            cursor = await conn.cursor()
-            await cursor.execute('''
+            await conn.execute('''
                 INSERT INTO model_versions (version, rmse, mae, trained_on, created_at)
                 VALUES (?, ?, ?, ?, ?)
             ''', (version, rmse, mae, trained_on, _now_utc()))
@@ -563,28 +580,25 @@ class HistoryDB:
             logger.info(f"Model version saved: {version} (RMSE={rmse:.2f}, MAE={mae:.2f})")
 
     async def get_best_model(self) -> Optional[Dict]:
-        async with aiosqlite.connect(DB_PATH) as conn:
+        async with self._transaction() as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('SELECT * FROM model_versions ORDER BY rmse ASC LIMIT 1')
             row = await cursor.fetchone()
             return dict(row) if row else None
 
-    # ========== Признаки и зонды ==========
-
     async def update_profile_features(self, features: Dict):
         async with self._transaction() as conn:
-            cursor = await conn.cursor()
             columns = ', '.join(features.keys())
             placeholders = ', '.join(['?'] * len(features))
-            await cursor.execute(f'''
+            await conn.execute(f'''
                 INSERT OR REPLACE INTO profile_features ({columns})
                 VALUES ({placeholders})
             ''', list(features.values()))
             await conn.commit()
 
     async def get_profile_features(self, profile_key: str) -> Optional[Dict]:
-        async with aiosqlite.connect(DB_PATH) as conn:
+        async with self._transaction() as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('SELECT * FROM profile_features WHERE profile_key = ?', (profile_key,))
@@ -593,8 +607,7 @@ class HistoryDB:
 
     async def add_probe_history(self, probe_data: Dict):
         async with self._transaction() as conn:
-            cursor = await conn.cursor()
-            await cursor.execute('''
+            await conn.execute('''
                 INSERT INTO probe_history (
                     profile_key, timestamp, success, latency,
                     tls_handshake_latency, http_first_byte, http_total,
@@ -624,7 +637,7 @@ class HistoryDB:
 
     async def get_probe_history(self, profile_key: str, since_hours: int = 24) -> List[Dict]:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=since_hours)).isoformat()
-        async with aiosqlite.connect(DB_PATH) as conn:
+        async with self._transaction() as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('''
@@ -637,7 +650,7 @@ class HistoryDB:
 
     async def get_recent_probes(self, since_hours: int = 24) -> List[Dict]:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=since_hours)).isoformat()
-        async with aiosqlite.connect(DB_PATH) as conn:
+        async with self._transaction() as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('''
@@ -649,15 +662,16 @@ class HistoryDB:
             return [dict(row) for row in rows]
 
     async def close(self):
-        # Ничего не делаем, так как соединения не хранятся
         pass
 
 
 _db = None
+_lock = asyncio.Lock()
 
-
-def get_db() -> HistoryDB:
+async def get_db() -> AsyncHistoryDB:
     global _db
-    if _db is None:
-        _db = HistoryDB()
-    return _db
+    async with _lock:
+        if _db is None:
+            _db = AsyncHistoryDB()
+            await _db._init_async()
+        return _db
