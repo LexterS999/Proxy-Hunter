@@ -9,7 +9,7 @@ import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Set
 
-from db import HistoryDB
+from db import get_db
 from user_settings import (
     CHANNEL_HEALTH_THRESHOLD,
     CHANNEL_MIN_CONFIGS,
@@ -43,7 +43,7 @@ class ChannelQualityAnalyzer:
     """
 
     def __init__(self):
-        self.db = HistoryDB()
+        self.db = get_db()
         self._whitelist = set(CHANNEL_WHITELIST)
         self._is_first_run = self._check_first_run()
 
