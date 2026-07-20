@@ -36,13 +36,13 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y unzip
+          sudo apt-get install -y unzip libc-ares-dev
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
           pip install -r requirements.txt
-          python -c "import aiofiles, xxhash, portalocker, catboost"
+          python -c "import aiofiles, xxhash, portalocker, catboost, aiodns"
 
       - name: Create necessary directories
         run: |
@@ -58,11 +58,13 @@ jobs:
 
       - name: Migrate database (create new tables if needed)
         run: |
-          if [ -f "migrate_db.py" ]; then
-            python migrate_db.py
-          else
-            echo "migrate_db.py not found, skipping migration"
-          fi
+          python -c "
+          import sys
+          sys.path.insert(0, 'src')
+          from db import get_db
+          db = get_db()
+          print('Database schema initialized (model_versions table included)')
+          "
 
       - name: Ensure required files exist
         run: |
@@ -181,6 +183,32 @@ jobs:
           else
             echo "train_model.py not found, skipping model training"
           fi
+
+      - name: Show model version metrics
+        run: |
+          python -c "
+          import sqlite3
+          DB_PATH = 'configs/history.db'
+          try:
+              conn = sqlite3.connect(DB_PATH)
+              cursor = conn.cursor()
+              cursor.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND name='model_versions'\")
+              if not cursor.fetchone():
+                  print('  No model_versions table yet')
+                  conn.close()
+                  exit(0)
+              cursor.execute('SELECT version, rmse, mae, trained_on, created_at FROM model_versions ORDER BY rmse ASC LIMIT 3')
+              rows = cursor.fetchall()
+              if rows:
+                  print('📈 Best model versions:')
+                  for row in rows:
+                      print(f'  {row[0]}: RMSE={row[1]:.2f}, MAE={row[2]:.2f} (trained on {row[3]})')
+              else:
+                  print('  No model versions recorded yet')
+              conn.close()
+          except Exception as e:
+              print(f'  Could not read model_versions: {e}')
+          "
 
       - name: Check output files
         id: check_output
