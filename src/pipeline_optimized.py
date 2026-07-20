@@ -25,6 +25,7 @@ from typing import List, Dict, Optional, Set
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 from logging.handlers import RotatingFileHandler
+from async_db_writer import AsyncDBWriter
 
 import aiofiles
 import numpy as np
@@ -72,8 +73,7 @@ class OptimizedPipeline:
         self._executor = ThreadPoolExecutor(max_workers=4)
         self.checker_cache = None
         self._health_applied = False
-
-        # Новые компоненты
+        self.async_writer = AsyncDBWriter()
         self.feature_extractor = FeatureExtractor()
         self.probe_engine = IntelligentProbe(timeout=5.0, max_attempts=3)
         self.anomaly_detector = AnomalyDetector()
@@ -82,7 +82,6 @@ class OptimizedPipeline:
         self.feature_cols = []
         self.cat_cols = []
         self._load_model()
-
         self._setup_logging()
         self._check_dependencies()
         self._setup_signal_handlers()
