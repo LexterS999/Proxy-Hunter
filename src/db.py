@@ -1,6 +1,7 @@
 """
 Модуль для работы с SQLite-базой данных истории.
 Асинхронный синглтон, автоматическая очистка старых данных.
+Все методы корректно используют await для aiosqlite.
 """
 
 import sqlite3
@@ -72,27 +73,30 @@ class AsyncHistoryDB:
             async with aiosqlite.connect(DB_PATH) as conn:
                 await conn.execute("PRAGMA journal_mode=WAL")
                 await conn.execute("PRAGMA synchronous=NORMAL")
-                cursor = await conn.cursor()
-                await self._init_schema(cursor)
+                await self._init_schema(conn)
                 await conn.commit()
                 await self._clean_old_data(conn, days=CLEANUP_DAYS)
             self._initialized = True
 
-    async def _init_schema(self, cursor):
-        cursor.execute("PRAGMA journal_mode=WAL")
-        cursor.execute("PRAGMA synchronous=NORMAL")
+    async def _init_schema(self, conn):
+        """Инициализация схемы БД с проверкой версии."""
+        cursor = await conn.cursor()
+        await cursor.execute("PRAGMA journal_mode=WAL")
+        await cursor.execute("PRAGMA synchronous=NORMAL")
 
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='metadata'")
-        if cursor.fetchone():
-            cursor.execute("SELECT value FROM metadata WHERE key='schema_version'")
-            row = cursor.fetchone()
-            if row:
-                version = int(row[0]) if row[0] else 0
+        await cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='metadata'")
+        row = await cursor.fetchone()
+        if row:
+            await cursor.execute("SELECT value FROM metadata WHERE key='schema_version'")
+            version_row = await cursor.fetchone()
+            if version_row:
+                version = int(version_row[0]) if version_row[0] else 0
                 if version < SCHEMA_VERSION:
                     logger.info(f"Upgrading schema from version {version} to {SCHEMA_VERSION}")
-                    self._upgrade_schema(cursor, version)
+                    await self._upgrade_schema(cursor, version)
 
-        cursor.execute('''
+        # Создание таблиц
+        await cursor.execute('''
             CREATE TABLE IF NOT EXISTS runs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
@@ -109,7 +113,7 @@ class AsyncHistoryDB:
                 anomalies BLOB
             )
         ''')
-        cursor.execute('''
+        await cursor.execute('''
             CREATE TABLE IF NOT EXISTS channels (
                 url TEXT PRIMARY KEY,
                 enabled INTEGER DEFAULT 1,
@@ -117,7 +121,7 @@ class AsyncHistoryDB:
                 last_updated TEXT
             )
         ''')
-        cursor.execute('''
+        await cursor.execute('''
             CREATE TABLE IF NOT EXISTS profiles (
                 key TEXT PRIMARY KEY,
                 server TEXT,
@@ -134,13 +138,13 @@ class AsyncHistoryDB:
                 overall_score REAL
             )
         ''')
-        cursor.execute('''
+        await cursor.execute('''
             CREATE TABLE IF NOT EXISTS metadata (
                 key TEXT PRIMARY KEY,
                 value TEXT
             )
         ''')
-        cursor.execute('''
+        await cursor.execute('''
             CREATE TABLE IF NOT EXISTS channel_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 url TEXT,
@@ -155,7 +159,7 @@ class AsyncHistoryDB:
                 FOREIGN KEY(run_id) REFERENCES runs(id)
             )
         ''')
-        cursor.execute('''
+        await cursor.execute('''
             CREATE TABLE IF NOT EXISTS profile_features (
                 profile_key TEXT PRIMARY KEY,
                 protocol TEXT,
@@ -196,7 +200,7 @@ class AsyncHistoryDB:
                 last_updated TEXT
             )
         ''')
-        cursor.execute('''
+        await cursor.execute('''
             CREATE TABLE IF NOT EXISTS probe_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 profile_key TEXT,
@@ -217,7 +221,7 @@ class AsyncHistoryDB:
                 total_attempts INTEGER
             )
         ''')
-        cursor.execute('''
+        await cursor.execute('''
             CREATE TABLE IF NOT EXISTS model_versions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 version TEXT,
@@ -227,7 +231,7 @@ class AsyncHistoryDB:
                 created_at TEXT
             )
         ''')
-        cursor.execute('''
+        await cursor.execute('''
             CREATE TABLE IF NOT EXISTS parsed_cache (
                 cache_key TEXT PRIMARY KEY,
                 parsed_data BLOB,
@@ -236,26 +240,31 @@ class AsyncHistoryDB:
             )
         ''')
 
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_history_url ON channel_history(url)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_history_timestamp ON channel_history(timestamp)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_history_run_id ON channel_history(run_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_profiles_server ON profiles(server)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_profiles_protocol ON profiles(protocol)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_profiles_last_seen ON profiles(last_seen)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_runs_timestamp ON runs(timestamp)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_probe_profile ON probe_history(profile_key)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_probe_timestamp ON probe_history(timestamp)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_probe_success ON probe_history(success)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_parsed_cache_key ON parsed_cache(cache_key)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_probe_profile_timestamp ON probe_history(profile_key, timestamp)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_profile_key ON profiles(key)")
+        # Индексы
+        await cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_history_url ON channel_history(url)")
+        await cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_history_timestamp ON channel_history(timestamp)")
+        await cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_history_run_id ON channel_history(run_id)")
+        await cursor.execute("CREATE INDEX IF NOT EXISTS idx_profiles_server ON profiles(server)")
+        await cursor.execute("CREATE INDEX IF NOT EXISTS idx_profiles_protocol ON profiles(protocol)")
+        await cursor.execute("CREATE INDEX IF NOT EXISTS idx_profiles_last_seen ON profiles(last_seen)")
+        await cursor.execute("CREATE INDEX IF NOT EXISTS idx_runs_timestamp ON runs(timestamp)")
+        await cursor.execute("CREATE INDEX IF NOT EXISTS idx_probe_profile ON probe_history(profile_key)")
+        await cursor.execute("CREATE INDEX IF NOT EXISTS idx_probe_timestamp ON probe_history(timestamp)")
+        await cursor.execute("CREATE INDEX IF NOT EXISTS idx_probe_success ON probe_history(success)")
+        await cursor.execute("CREATE INDEX IF NOT EXISTS idx_parsed_cache_key ON parsed_cache(cache_key)")
+        await cursor.execute("CREATE INDEX IF NOT EXISTS idx_probe_profile_timestamp ON probe_history(profile_key, timestamp)")
+        await cursor.execute("CREATE INDEX IF NOT EXISTS idx_profile_key ON profiles(key)")
 
-        if not cursor.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone():
-            cursor.execute("INSERT INTO metadata (key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
+        # Версия схемы
+        await cursor.execute("SELECT value FROM metadata WHERE key='schema_version'")
+        existing = await cursor.fetchone()
+        if not existing:
+            await cursor.execute("INSERT INTO metadata (key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
+        await conn.commit()
 
-    def _upgrade_schema(self, cursor, old_version: int):
+    async def _upgrade_schema(self, cursor, old_version: int):
         if old_version < 5:
-            cursor.execute('''
+            await cursor.execute('''
                 CREATE TABLE IF NOT EXISTS parsed_cache (
                     cache_key TEXT PRIMARY KEY,
                     parsed_data BLOB,
@@ -263,18 +272,20 @@ class AsyncHistoryDB:
                     updated_at TEXT
                 )
             ''')
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_parsed_cache_key ON parsed_cache(cache_key)")
-            cursor.execute("UPDATE metadata SET value=? WHERE key='schema_version'", (str(SCHEMA_VERSION),))
+            await cursor.execute("CREATE INDEX IF NOT EXISTS idx_parsed_cache_key ON parsed_cache(cache_key)")
+            await cursor.execute("UPDATE metadata SET value=? WHERE key='schema_version'", (str(SCHEMA_VERSION),))
             logger.info(f"Schema upgraded to version {SCHEMA_VERSION}")
 
     @asynccontextmanager
     async def _transaction(self):
+        """Контекстный менеджер для транзакций."""
         async with aiosqlite.connect(DB_PATH) as conn:
             await conn.execute("PRAGMA journal_mode=WAL")
             await conn.execute("PRAGMA synchronous=NORMAL")
             yield conn
 
     async def _clean_old_data(self, conn=None, days=30):
+        """Очистка старых данных."""
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         async def _clean(c):
             await c.execute("DELETE FROM probe_history WHERE timestamp < ?", (cutoff,))
