@@ -1,64 +1,51 @@
+"""
+config_quality.py - Оценка качества прокси-конфигов
+"""
+
+import re
 import logging
-from typing import Dict, Optional, Tuple
-from urllib.parse import urlparse
-import config_parser
+from typing import Tuple
+
+from config_identity import ConfigIdentity
 
 logger = logging.getLogger(__name__)
 
-class ConfigQualityChecker:
-    """Проверяет качество конфигураций без активных пингов."""
-    
-    def __init__(self, timeout: float = 3.0, max_workers: int = 30):
-        self.timeout = timeout
-        self.max_workers = max_workers
-    
-    def extract_server_info(self, config: str) -> Optional[Dict]:
-        """Извлекает информацию о сервере из конфигурации."""
-        try:
-            if config.startswith('vmess://'):
-                data = config_parser.decode_vmess(config)
-                if data:
-                    return {'host': data.get('add'), 'port': data.get('port'), 'protocol': 'vmess', 'parsed': data}
-            elif config.startswith('vless://'):
-                data = config_parser.parse_vless(config)
-                if data:
-                    return {'host': data.get('address'), 'port': data.get('port'), 'protocol': 'vless', 'parsed': data}
-            elif config.startswith('trojan://'):
-                data = config_parser.parse_trojan(config)
-                if data:
-                    return {'host': data.get('address'), 'port': data.get('port'), 'protocol': 'trojan', 'parsed': data}
-            elif config.startswith('ss://'):
-                data = config_parser.parse_shadowsocks(config)
-                if data:
-                    return {'host': data.get('address'), 'port': data.get('port'), 'protocol': 'ss', 'parsed': data}
-            return None
-        except Exception as e:
-            logger.debug(f"Failed to extract server info: {e}")
-            return None
-    
-    def check_config_quality(self, config: str) -> Dict:
-        """Возвращает базовую информацию о конфигурации без проверок."""
-        server_info = self.extract_server_info(config)
-        if not server_info:
-            return {'valid': False, 'latency': 9999.0, 'score': 0, 'error': 'no_server_info'}
-        return {
-            'valid': True,
-            'latency': 0,  # не используется
-            'score': 100,  # временно, будет пересчитано позже
-            'protocol': server_info['protocol'],
-            'server': server_info['host'],
-            'port': server_info['port'],
-            'parsed': server_info['parsed']
-        }
-    
-    def batch_check(self, configs: list, min_score: float = 25.0) -> list:
-        """Пакетная обработка — просто собирает данные."""
-        results = []
-        for config in configs:
-            result = self.check_config_quality(config)
-            if result.get('valid', False):
-                results.append({
-                    'config': config,
-                    'quality': result
-                })
-        return results
+
+class ConfigQuality:
+    """Оценка качества конфигов"""
+
+    @staticmethod
+    def extract_server_info(config: str) -> Tuple[str, str]:
+        """
+        [CHANGE] извлечение через единый ConfigIdentity; regex — fallback.
+        Ранее — собственная независимая реализация.
+        """
+        ep = ConfigIdentity.get_endpoint(config)
+        if ep.is_valid:
+            return ep.host, str(ep.port)
+
+        # Fallback regex
+        match = re.search(r'@([^:/\[\]]+):(\d+)', config)
+        if match:
+            return match.group(1), match.group(2)
+        return '', ''
+
+    @staticmethod
+    def assess(config: str) -> float:
+        """Быстрая оценка качества конфига (0..1) без сети."""
+        ep = ConfigIdentity.get_endpoint(config)
+        if not ep.is_valid:
+            return 0.0
+
+        score = 0.5
+        # Наличие TLS/Reality повышает оценку
+        if ep.security in ('tls', 'reality'):
+            score += 0.2
+        # Наличие credential
+        if ep.cred:
+            score += 0.2
+        # Предпочтительные транспорты
+        if ep.network in ('ws', 'grpc', 'httpupgrade', 'splithttp'):
+            score += 0.1
+
+        return round(max(0.0, min(1.0, score)), 3)
