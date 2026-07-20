@@ -36,13 +36,13 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y unzip libc-ares-dev libxml2-dev libxslt1-dev
+          sudo apt-get install -y unzip jq libc-ares-dev libxml2-dev libxslt1-dev
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          pip install -r requirements.txt
-          python -c "import aiofiles, xxhash, portalocker, catboost, aiodns, aiosqlite, lxml"
+          pip install --no-cache-dir -r requirements.txt
+          python -c "import aiofiles, xxhash, portalocker, catboost, aiodns, aiosqlite, lxml, uvloop"
 
       - name: Create necessary directories
         run: |
@@ -63,7 +63,6 @@ jobs:
           sys.path.insert(0, 'src')
           from db import get_db
           db = get_db()
-          # инициализация схемы выполняется синхронно при создании экземпляра
           print('Database schema initialized (parsed_cache, model_versions included)')
           "
 
@@ -71,7 +70,7 @@ jobs:
         run: |
           touch configs/output_archive.txt
           touch configs/output_simple.txt
-          echo '{}' > configs/parsed_cache.json  # для обратной совместимости
+          echo '{}' > configs/parsed_cache.json
           [ -f custom_channels.txt ] || touch custom_channels.txt
 
       - name: Rotate archive if older than 7 days
@@ -94,11 +93,16 @@ jobs:
         run: |
           bash install.sh --install-xray-only
 
+      - name: Debug environment (show Python path and modules)
+        run: |
+          python -c "import sys; print(sys.executable)"
+          python -c "import aiohttp, asyncio, uvloop; print('All core modules imported')"
+
       - name: Run optimized pipeline
         id: pipeline
         continue-on-error: true
         run: |
-          time python src/pipeline_optimized.py
+          time python -u src/pipeline_optimized.py
 
       - name: Remove inactive channels from custom_channels.txt
         run: |
