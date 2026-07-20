@@ -34,18 +34,55 @@ if [[ "$1" == "--install-xray-only" ]]; then
         armv7l)  XRAY_FILE="Xray-linux-arm32-v7a.zip" ;;
         *)       echo "Unsupported architecture: $ARCH"; exit 1 ;;
     esac
-    XRAY_VERSION=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep -oP '"tag_name": "\K(.*?)(?=")')
-    if [ -z "$XRAY_VERSION" ]; then
-        echo "Failed to get latest Xray version"
+
+    # Проверяем наличие jq, curl, unzip
+    if ! command -v curl &> /dev/null; then
+        echo "curl not found. Please install curl."
         exit 1
     fi
-    echo "Downloading Xray $XRAY_VERSION ($XRAY_FILE)..."
-    wget -q "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/${XRAY_FILE}" -O /tmp/xray.zip
+    if ! command -v unzip &> /dev/null; then
+        echo "unzip not found. Please install unzip."
+        exit 1
+    fi
+
+    # Пробуем получить последнюю версию через GitHub API
+    echo "Fetching latest Xray version..."
+    XRAY_VERSION=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r '.tag_name')
+    if [ -z "$XRAY_VERSION" ] || [ "$XRAY_VERSION" == "null" ]; then
+        echo "Failed to get latest Xray version via jq, trying fallback..."
+        # fallback: пробуем через grep -oP (если доступно)
+        if command -v grep &> /dev/null && grep -P "" <<< "test" &> /dev/null; then
+            XRAY_VERSION=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep -oP '"tag_name": "\K(.*?)(?=")')
+        fi
+        if [ -z "$XRAY_VERSION" ]; then
+            echo "Could not determine latest version. Using hardcoded fallback v1.8.23"
+            XRAY_VERSION="v1.8.23"
+        fi
+    fi
+    echo "Xray version: $XRAY_VERSION"
+
+    echo "Downloading $XRAY_FILE ..."
+    # Используем curl вместо wget для большей переносимости
+    curl -L -o /tmp/xray.zip "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/${XRAY_FILE}" || {
+        echo "Download failed. Please check your internet connection."
+        exit 1
+    }
+
     echo "Extracting Xray..."
     mkdir -p /tmp/xray
     unzip -q -o /tmp/xray.zip -d /tmp/xray
     chmod +x /tmp/xray/xray
-    sudo mv /tmp/xray/xray /usr/local/bin/
+
+    # Устанавливаем в /usr/local/bin (требует sudo)
+    if [ -w /usr/local/bin ]; then
+        mv /tmp/xray/xray /usr/local/bin/
+    else
+        sudo mv /tmp/xray/xray /usr/local/bin/ || {
+            echo "Failed to move xray to /usr/local/bin/. Please check permissions."
+            exit 1
+        }
+    fi
+
     rm -rf /tmp/xray /tmp/xray.zip
     xray version 2>&1 | head -1
     exit 0
@@ -193,7 +230,7 @@ install_dependencies_termux() {
     fix_dpkg_issues
     DEBIAN_FRONTEND=noninteractive pkg update -y 2>/dev/null || true
     DEBIAN_FRONTEND=noninteractive pkg upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" 2>/dev/null || true
-    DEBIAN_FRONTEND=noninteractive pkg install -y git python cronie curl unzip termux-api termux-services 2>/dev/null || true
+    DEBIAN_FRONTEND=noninteractive pkg install -y git python cronie curl unzip termux-api termux-services jq 2>/dev/null || true
     print_success "Termux dependencies installed!"
 }
 
@@ -201,16 +238,16 @@ install_dependencies_linux() {
     print_status "Installing Linux dependencies..."
     if check_command apt; then
         sudo apt update -y 2>/dev/null || true
-        sudo apt install -y git python3 python3-pip python3-venv cron wget curl unzip 2>/dev/null || true
+        sudo apt install -y git python3 python3-pip python3-venv cron wget curl unzip jq 2>/dev/null || true
     elif check_command pacman; then
         sudo pacman -Syu --noconfirm 2>/dev/null || true
-        sudo pacman -S --noconfirm git python python-pip cronie wget curl unzip 2>/dev/null || true
+        sudo pacman -S --noconfirm git python python-pip cronie wget curl unzip jq 2>/dev/null || true
     elif check_command yum; then
         sudo yum update -y 2>/dev/null || true
-        sudo yum install -y git python3 python3-pip cronie wget curl unzip 2>/dev/null || true
+        sudo yum install -y git python3 python3-pip cronie wget curl unzip jq 2>/dev/null || true
     elif check_command dnf; then
         sudo dnf update -y 2>/dev/null || true
-        sudo dnf install -y git python3 python3-pip cronie wget curl unzip 2>/dev/null || true
+        sudo dnf install -y git python3 python3-pip cronie wget curl unzip jq 2>/dev/null || true
     else
         print_error "Unsupported package manager!"
         exit 1
@@ -224,7 +261,7 @@ install_dependencies_macos() {
         print_status "Installing Homebrew..."
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" 2>/dev/null || true
     fi
-    brew install git python wget curl 2>/dev/null || true
+    brew install git python wget curl jq 2>/dev/null || true
     print_success "macOS dependencies installed!"
 }
 
@@ -248,14 +285,21 @@ install_xray() {
         *)       print_error "Unsupported architecture: $ARCH"; exit 1 ;;
     esac
 
-    XRAY_VERSION=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep -oP '"tag_name": "\K(.*?)(?=")')
-    if [ -z "$XRAY_VERSION" ]; then
-        print_error "Failed to get latest Xray version"
-        exit 1
+    # Получаем версию через jq или fallback
+    XRAY_VERSION=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r '.tag_name')
+    if [ -z "$XRAY_VERSION" ] || [ "$XRAY_VERSION" == "null" ]; then
+        print_warning "Could not fetch latest version via jq, trying fallback grep..."
+        if command -v grep &> /dev/null && grep -P "" <<< "test" &> /dev/null; then
+            XRAY_VERSION=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep -oP '"tag_name": "\K(.*?)(?=")')
+        fi
+        if [ -z "$XRAY_VERSION" ]; then
+            print_warning "Using hardcoded fallback version v1.8.23"
+            XRAY_VERSION="v1.8.23"
+        fi
     fi
 
     print_status "Downloading Xray $XRAY_VERSION ($XRAY_FILE)..."
-    wget -q "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/${XRAY_FILE}" -O /tmp/xray.zip || {
+    curl -L -o /tmp/xray.zip "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/${XRAY_FILE}" || {
         print_error "Download failed"
         exit 1
     }
@@ -264,10 +308,14 @@ install_xray() {
     mkdir -p /tmp/xray
     unzip -q -o /tmp/xray.zip -d /tmp/xray
     chmod +x /tmp/xray/xray
-    sudo mv /tmp/xray/xray /usr/local/bin/ 2>/dev/null || {
-        print_error "Failed to move xray to /usr/local/bin/ (permission denied?)"
-        exit 1
-    }
+    if [ -w /usr/local/bin ]; then
+        mv /tmp/xray/xray /usr/local/bin/
+    else
+        sudo mv /tmp/xray/xray /usr/local/bin/ || {
+            print_error "Failed to move xray to /usr/local/bin/ (permission denied?)"
+            exit 1
+        }
+    fi
     rm -rf /tmp/xray /tmp/xray.zip
 
     print_success "Xray installed successfully!"
