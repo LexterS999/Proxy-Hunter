@@ -44,22 +44,13 @@ class Settings:
             self._initialized = True
 
     def _load(self):
-        """Загружает настройки из окружения и файлов с валидацией."""
-        # --- Каналы ---
         self._source_urls = self._load_channels()
         self._source_urls = self._validate_urls(self._source_urls)
 
-        # --- Основные флаги ---
-        # USE_MAXIMUM_POWER: если True, собирает максимальное количество конфигов
         self.use_maximum_power = self._get_bool('PROXY_HUNTER_USE_MAXIMUM_POWER', True)
-
-        # SPECIFIC_CONFIG_COUNT: целевое количество конфигов при USE_MAXIMUM_POWER=False
         self.specific_config_count = self._get_int('PROXY_HUNTER_SPECIFIC_CONFIG_COUNT', 5000, min_val=1, max_val=50000)
-
-        # MAX_CONFIG_AGE_DAYS: максимальный возраст конфигурации в днях
         self.max_config_age_days = self._get_int('PROXY_HUNTER_MAX_CONFIG_AGE_DAYS', 14, min_val=1, max_val=90)
 
-        # --- Протоколы ---
         self.enabled_protocols = {
             "wireguard://": self._get_bool('PROXY_HUNTER_ENABLE_WIREGUARD', False),
             "hysteria2://": self._get_bool('PROXY_HUNTER_ENABLE_HYSTERIA2', True),
@@ -70,31 +61,16 @@ class Settings:
             "tuic://": self._get_bool('PROXY_HUNTER_ENABLE_TUIC', False),
         }
 
-        # --- Таймауты и лимиты ---
-        # TCP_TIMEOUT: таймаут TCP-соединения в секундах
         self.tcp_timeout = self._get_float('PROXY_HUNTER_TCP_TIMEOUT', 5.0, min_val=0.5, max_val=30.0)
-
-        # HTTP_TIMEOUT: таймаут HTTP-запроса в секундах
         self.http_timeout = self._get_float('PROXY_HUNTER_HTTP_TIMEOUT', 5.0, min_val=0.5, max_val=30.0)
-
-        # MAX_LATENCY_MS: максимальная допустимая задержка в миллисекундах
         self.max_latency_ms = self._get_float('PROXY_HUNTER_MAX_LATENCY', 6000.0, min_val=100.0, max_val=60000.0)
-
-        # ACTIVE_CHECKER_WORKERS: число параллельных проверок
         self.active_checker_workers = self._get_int('PROXY_HUNTER_ACTIVE_WORKERS', 100, min_val=1, max_val=500)
-
-        # PER_HOST_LIMIT: максимальное число параллельных соединений на хост
         self.per_host_limit = self._get_int('PROXY_HUNTER_PER_HOST_LIMIT', 10, min_val=1, max_val=50)
 
-        # --- Rate limiting ---
-        # TELEGRAM_CALLS_PER_SECOND: частота запросов к Telegram
         self.telegram_calls_per_second = self._get_float('PROXY_HUNTER_TELEGRAM_RATE', 1.5, min_val=0.1, max_val=10.0)
-
-        # MAX_RESPONSE_SIZE_BYTES: максимальный размер ответа от канала
         self.max_response_size_bytes = self._get_int('PROXY_HUNTER_MAX_RESPONSE_SIZE', 1048576,
                                                      min_val=65536, max_val=10485760)
 
-        # --- Повторные попытки ---
         self.channel_retry_attempts = self._get_int('PROXY_HUNTER_CHANNEL_RETRIES', 3, min_val=1, max_val=10)
         self.channel_retry_base_delay = self._get_float('PROXY_HUNTER_CHANNEL_RETRY_DELAY', 0.5, min_val=0.1, max_val=10.0)
         self.channel_retry_max_delay = self._get_float('PROXY_HUNTER_CHANNEL_RETRY_MAX_DELAY', 10.0,
@@ -102,36 +78,21 @@ class Settings:
         self.channel_retry_deadline = self._get_float('PROXY_HUNTER_CHANNEL_RETRY_DEADLINE', 60.0,
                                                       min_val=10.0, max_val=300.0)
 
-        # --- Оценка каналов ---
-        # CHANNEL_HEALTH_THRESHOLD: минимальный скор для здоровья канала (0-100)
         self.channel_health_threshold = self._get_float('PROXY_HUNTER_CHANNEL_HEALTH_THRESHOLD', 30.0,
                                                         min_val=0.0, max_val=100.0)
-
-        # CHANNEL_MIN_CONFIGS: минимальное число конфигов для здоровья канала
         self.channel_min_configs = self._get_int('PROXY_HUNTER_CHANNEL_MIN_CONFIGS', 3, min_val=1, max_val=100)
-
-        # CHANNEL_MIN_VALID_RATIO: минимальная доля валидных конфигов
         self.channel_min_valid_ratio = self._get_float('PROXY_HUNTER_CHANNEL_MIN_VALID_RATIO', 0.05,
                                                        min_val=0.0, max_val=1.0)
-
-        # CHANNEL_MIN_PROTOCOLS: минимальное число протоколов
         self.channel_min_protocols = self._get_int('PROXY_HUNTER_CHANNEL_MIN_PROTOCOLS', 1, min_val=1, max_val=10)
-
-        # CHANNEL_HISTORY_DAYS: период истории для анализа каналов
         self.channel_history_days = self._get_int('PROXY_HUNTER_CHANNEL_HISTORY_DAYS', 7, min_val=3, max_val=30)
-
-        # CHANNEL_RECOVERING_TREND_THRESHOLD: порог тренда для восстановления
         self.channel_recovering_trend_threshold = self._get_float('PROXY_HUNTER_RECOVERING_TREND_THRESHOLD',
                                                                   0.1, min_val=0.01, max_val=0.5)
-
-        # CHANNEL_MIN_RECENT_DAYS_FOR_TREND: минимальное число дней для тренда
         self.channel_min_recent_days_for_trend = self._get_int('PROXY_HUNTER_MIN_RECENT_DAYS_FOR_TREND',
                                                                2, min_val=1, max_val=7)
 
         whitelist_raw = os.getenv('PROXY_HUNTER_CHANNEL_WHITELIST', '')
         self.channel_whitelist = [url.strip() for url in whitelist_raw.split(',') if url.strip()]
 
-        # --- Веса для оценки ---
         self.score_weights = {
             'stability': self._get_float('PROXY_HUNTER_WEIGHT_STABILITY', 0.3, min_val=0, max_val=1),
             'success_rate': self._get_float('PROXY_HUNTER_WEIGHT_SUCCESS_RATE', 0.25, min_val=0, max_val=1),
@@ -144,7 +105,6 @@ class Settings:
             for k in self.score_weights:
                 self.score_weights[k] /= total
 
-        # --- Прочие ---
         self.decay_period_hours = self._get_float('PROXY_HUNTER_DECAY_PERIOD', 24.0, min_val=1, max_val=720)
         self.min_runs_for_adaptive_thresholds = self._get_int('PROXY_HUNTER_MIN_RUNS_ADAPTIVE', 9, min_val=3, max_val=50)
         self.anomaly_z_score_threshold = self._get_float('PROXY_HUNTER_ANOMALY_Z_SCORE', 2.5, min_val=1.0, max_val=5.0)
@@ -229,6 +189,24 @@ class Settings:
                 logger.warning(f"Invalid URL format: {u}, skipping")
         return valid
 
+    def generate_env_example(self):
+        lines = []
+        for attr in dir(self):
+            if attr.startswith('_') or attr in ('generate_env_example', 'reload', 'write_env_example'):
+                continue
+            value = getattr(self, attr)
+            if isinstance(value, (bool, int, float, str)):
+                description = attr.replace('_', ' ').capitalize()
+                lines.append(f"# {description}")
+                lines.append(f"{attr.upper()}={value}")
+                lines.append("")
+        return "\n".join(lines)
+
+    def write_env_example(self, path=".env.example"):
+        with open(path, 'w') as f:
+            f.write(self.generate_env_example())
+        logger.info(f".env.example written to {path}")
+
     def reload(self):
         self._load()
         logger.info("Settings reloaded.")
@@ -247,10 +225,6 @@ class Settings:
 
 
 _settings = Settings()
-
-# ============================================================================
-# ЭКСПОРТ ВСЕХ НАСТРОЕК
-# ============================================================================
 
 SOURCE_URLS = _settings.source_urls
 USE_MAXIMUM_POWER = _settings.use_maximum_power
@@ -289,7 +263,6 @@ ENCRYPTION_SALT = _settings.encryption_salt
 
 
 def reload_settings():
-    """Перезагружает настройки и обновляет глобальные переменные."""
     _settings.reload()
     global SOURCE_URLS, USE_MAXIMUM_POWER, SPECIFIC_CONFIG_COUNT, MAX_CONFIG_AGE_DAYS
     global ENABLED_PROTOCOLS, TCP_TIMEOUT, HTTP_TIMEOUT, MAX_LATENCY_MS, ACTIVE_CHECKER_WORKERS
@@ -335,3 +308,7 @@ def reload_settings():
     SAVE_INTERVAL_SECONDS = _settings.save_interval_seconds
     ENCRYPT_IPS = _settings.encrypt_ips
     ENCRYPTION_SALT = _settings.encryption_salt
+
+
+def generate_env_example():
+    _settings.write_env_example()
