@@ -1,15 +1,17 @@
 """
 Асинхронный Bloom‑фильтр с шардированием и LRU-кешем для шардов.
 Загружает в память только один шард за раз, выгружая старые при необходимости.
+Использует детерминированный хеш (xxhash) для устойчивости между запусками.
 """
 
 import logging
 import os
 import pickle
+import asyncio
 from pathlib import Path
 from functools import lru_cache
 from pybloom_live import ScalableBloomFilter
-import asyncio
+import xxhash
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +34,9 @@ class ShardedBloomDeduplicator:
         self._access_order = []  # список для LRU
 
     def _get_shard_index(self, config: str) -> int:
-        return abs(hash(config)) % self.num_shards
+        # Детерминированный хеш на основе xxhash
+        h = int(xxhash.xxh64(config.encode()).hexdigest(), 16)
+        return h % self.num_shards
 
     def _get_shard_file(self, shard_idx: int) -> Path:
         return self.cache_dir / f"bloom_shard_{shard_idx}.bin"
@@ -59,8 +63,11 @@ class ShardedBloomDeduplicator:
             shard_file = self._get_shard_file(shard_idx)
             if shard_file.exists():
                 try:
-                    with open(shard_file, 'rb') as f:
-                        data = pickle.load(f)
+                    # Используем asyncio.to_thread для блокирующего I/O
+                    def load_pickle():
+                        with open(shard_file, 'rb') as f:
+                            return pickle.load(f)
+                    data = await asyncio.to_thread(load_pickle)
                     self.shards[shard_idx] = data
                     logger.info(f"Loaded bloom shard {shard_idx} from {shard_file}")
                 except Exception as e:
@@ -82,8 +89,10 @@ class ShardedBloomDeduplicator:
             return
         shard_file = self._get_shard_file(shard_idx)
         try:
-            with open(shard_file, 'wb') as f:
-                pickle.dump(self.shards[shard_idx], f)
+            def save_pickle():
+                with open(shard_file, 'wb') as f:
+                    pickle.dump(self.shards[shard_idx], f)
+            await asyncio.to_thread(save_pickle)
             logger.debug(f"Saved bloom shard {shard_idx} to {shard_file}")
         except Exception as e:
             logger.error(f"Failed to save shard {shard_idx}: {e}")
