@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Обучение модели качества и живучести профилей.
-Создаёт фиктивную модель, если данных недостаточно.
+Вычисляет survival_hours и reliability из probe_history,
+обучает CatBoost, сохраняет метрики в БД и сравнивает с лучшей моделью.
 """
 
 import sqlite3
@@ -14,6 +15,7 @@ import joblib
 import logging
 import os
 from datetime import datetime, timedelta
+from db import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -23,33 +25,62 @@ MIN_SAMPLES = 10
 
 def load_training_data(db_path=DB_PATH, min_samples=MIN_SAMPLES):
     conn = sqlite3.connect(db_path)
+    # Получаем все профили с признаками
     query = '''
-        SELECT 
-            pf.*,
-            (SELECT AVG(latency) FROM probe_history WHERE profile_key = pf.profile_key AND success=1) as avg_latency,
-            (SELECT COUNT(*) FROM probe_history WHERE profile_key = pf.profile_key AND success=1) as total_success,
-            (SELECT COUNT(*) FROM probe_history WHERE profile_key = pf.profile_key) as total_probes,
-            (SELECT MAX(latency) FROM probe_history WHERE profile_key = pf.profile_key AND success=1) as max_latency,
-            (SELECT MIN(latency) FROM probe_history WHERE profile_key = pf.profile_key AND success=1) as min_latency
+        SELECT pf.*,
+               (SELECT AVG(latency) FROM probe_history WHERE profile_key = pf.profile_key AND success=1) as avg_latency,
+               (SELECT COUNT(*) FROM probe_history WHERE profile_key = pf.profile_key AND success=1) as total_success,
+               (SELECT COUNT(*) FROM probe_history WHERE profile_key = pf.profile_key) as total_probes,
+               (SELECT MAX(latency) FROM probe_history WHERE profile_key = pf.profile_key AND success=1) as max_latency,
+               (SELECT MIN(latency) FROM probe_history WHERE profile_key = pf.profile_key AND success=1) as min_latency
         FROM profile_features pf
         WHERE pf.count_7d >= ?
     '''
     df = pd.read_sql(query, conn, params=(min_samples,))
-    conn.close()
     if df.empty:
-        return None
-    # Целевые переменные
-    df['quality_score'] = df.apply(
-        lambda row: 100 * (row['success_7d'] / max(1, row['count_7d'])) * max(0, 1 - row['avg_latency_7d'] / 5000),
-        axis=1
-    )
-    # Для демонстрации используем proxy
-    df['survival_hours'] = np.random.uniform(1, 48, len(df))
-    df['reliability'] = df['success_7d'] / max(1, df['count_7d'])
-    return df
+        return None, None, None, None
+
+    # Вычисляем survival_hours
+    survival_list = []
+    for idx, row in df.iterrows():
+        key = row['profile_key']
+        probe_query = '''
+            SELECT timestamp, success FROM probe_history
+            WHERE profile_key = ? ORDER BY timestamp ASC
+        '''
+        probe_df = pd.read_sql(probe_query, conn, params=(key,))
+        if probe_df.empty:
+            survival_list.append(24.0)  # fallback
+            continue
+        failures = probe_df[probe_df['success'] == 0]
+        if failures.empty:
+            survival_list.append(24.0)
+            continue
+        first_fail_time = pd.to_datetime(failures.iloc[0]['timestamp'])
+        successes_before = probe_df[(probe_df['success'] == 1) & (pd.to_datetime(probe_df['timestamp']) < first_fail_time)]
+        if successes_before.empty:
+            survival_list.append(0.5)
+            continue
+        last_success_time = pd.to_datetime(successes_before.iloc[-1]['timestamp'])
+        survival_hours = (first_fail_time - last_success_time).total_seconds() / 3600
+        survival_list.append(max(0.1, survival_hours))
+
+    df['survival_hours'] = survival_list
+
+    # reliability – доля успешных за 7 дней
+    df['reliability'] = df['success_7d'] / df['count_7d'].clip(lower=1)
+
+    # quality_score – комбинированный
+    max_lat = df['avg_latency_7d'].max()
+    latency_score = 100 * (1 - df['avg_latency_7d'] / max_lat) if max_lat > 0 else 50
+    success_score = df['reliability'] * 100
+    stability_score = 100 * (1 - df['latency_cv_24h'].clip(upper=1))
+    df['quality_score'] = 0.4 * latency_score + 0.4 * success_score + 0.2 * stability_score
+
+    conn.close()
+    return df, df['quality_score'], df['survival_hours'], df['reliability']
 
 def create_default_model():
-    """Создаёт фиктивную модель для случаев, когда данных нет."""
     model = CatBoostRegressor(iterations=1, depth=1, verbose=False)
     X_dummy = np.array([[0.0]])
     y_dummy = np.array([50.0])
@@ -57,14 +88,17 @@ def create_default_model():
     data = {
         'model': model,
         'features': [],
-        'categorical': []
+        'categorical': [],
+        'rmse': 0.0,
+        'mae': 0.0,
+        'version': 'default'
     }
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
     joblib.dump(data, MODEL_PATH)
     logger.info(f"Default stub model created at {MODEL_PATH}")
 
 def train():
-    df = load_training_data()
+    df, quality, survival, reliability = load_training_data()
     if df is None:
         logger.warning("Not enough training data, creating default model.")
         create_default_model()
@@ -103,16 +137,27 @@ def train():
     mae = mean_absolute_error(y_test, model.predict(X_test))
     logger.info(f"Quality model RMSE: {rmse:.2f}, MAE: {mae:.2f}")
 
-    data = {
-        'model': model,
-        'features': features,
-        'categorical': categorical,
-        'rmse': rmse,
-        'mae': mae
-    }
-    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
-    joblib.dump(data, MODEL_PATH)
-    logger.info(f"Model saved to {MODEL_PATH}")
+    # Сохраняем метрики в БД
+    db = get_db()
+    version = f"catboost_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    db.save_model_version(version, rmse, mae, datetime.now().isoformat())
+
+    # Сравниваем с лучшей моделью
+    best = db.get_best_model()
+    if best is None or rmse < best['rmse']:
+        data = {
+            'model': model,
+            'features': features,
+            'categorical': categorical,
+            'rmse': rmse,
+            'mae': mae,
+            'version': version
+        }
+        os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+        joblib.dump(data, MODEL_PATH)
+        logger.info(f"✅ New best model saved (RMSE={rmse:.2f})")
+    else:
+        logger.info(f"ℹ️ Current model remains best (RMSE={best['rmse']:.2f})")
 
 if __name__ == '__main__':
     train()
