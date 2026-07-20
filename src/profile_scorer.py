@@ -17,7 +17,32 @@ logger = logging.getLogger(__name__)
 
 class ProfileScorer:
     def __init__(self):
-        self.db = HistoryDB()
+        self.db = get_db()
+        self._profile_cache = {}  # key -> profile dict
+        self._dirty_keys = set()
+        self._batch_size = 100
+
+    def _get_cached_profile(self, key: str) -> Optional[Dict]:
+        if key not in self._profile_cache:
+            profile = self.db.get_profile(key)
+            if profile:
+                self._profile_cache[key] = profile
+        return self._profile_cache.get(key)
+
+    def _update_profile_cached(self, key: str, updates: Dict):
+        if key not in self._profile_cache:
+            self._profile_cache[key] = self.db.get_profile(key) or {}
+        self._profile_cache[key].update(updates)
+        self._dirty_keys.add(key)
+        if len(self._dirty_keys) >= self._batch_size:
+            self._flush_profiles()
+
+    def _flush_profiles(self):
+        for key in list(self._dirty_keys):
+            profile = self._profile_cache.get(key)
+            if profile:
+                self.db.update_profile(key, profile)
+        self._dirty_keys.clear()
 
     def get_profile_key(self, config: str, parsed: Dict) -> str:
         protocol = config.split('://')[0].lower()
