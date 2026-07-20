@@ -8,7 +8,8 @@ import os
 import logging
 import numpy as np
 from typing import Dict, Optional, Tuple, List
-from datetime import datetime
+from datetime import datetime, timedelta
+import math
 
 from db import get_db
 from user_settings import SCORE_WEIGHTS
@@ -18,9 +19,15 @@ logger = logging.getLogger(__name__)
 class ProfileScorer:
     def __init__(self):
         self.db = get_db()
-        self._profile_cache = {}  # key -> profile dict
+        self._profile_cache = {}
         self._dirty_keys = set()
         self._batch_size = 100
+        self._last_flush = datetime.now()
+        self._flush_interval = 60  # секунд
+
+    def __del__(self):
+        """Гарантированная запись при завершении."""
+        self._flush_profiles()
 
     def _get_cached_profile(self, key: str) -> Optional[Dict]:
         if key not in self._profile_cache:
@@ -34,15 +41,22 @@ class ProfileScorer:
             self._profile_cache[key] = self.db.get_profile(key) or {}
         self._profile_cache[key].update(updates)
         self._dirty_keys.add(key)
-        if len(self._dirty_keys) >= self._batch_size:
+        # Периодический сброс
+        if len(self._dirty_keys) >= self._batch_size or (datetime.now() - self._last_flush).seconds > self._flush_interval:
             self._flush_profiles()
 
     def _flush_profiles(self):
+        if not self._dirty_keys:
+            return
+        profiles_to_save = []
         for key in list(self._dirty_keys):
             profile = self._profile_cache.get(key)
             if profile:
-                self.db.update_profile(key, profile)
+                profiles_to_save.append(profile)
+        if profiles_to_save:
+            self.db.update_profiles_batch(profiles_to_save)
         self._dirty_keys.clear()
+        self._last_flush = datetime.now()
 
     def get_profile_key(self, config: str, parsed: Dict) -> str:
         protocol = config.split('://')[0].lower()
@@ -83,7 +97,6 @@ class ProfileScorer:
                 'overall_score': 0.0
             }
         else:
-            # Если профиль из кеша, он уже распакован
             profile['last_seen'] = now
 
         if success:
@@ -107,13 +120,15 @@ class ProfileScorer:
 
     def calculate_stability(self, profile: Dict) -> float:
         latencies = profile.get('latencies', [])
+        if not latencies:
+            return 0.5
         if len(latencies) < 3:
             return 0.5
         mean = np.mean(latencies)
         if mean == 0:
             return 0.5
         std = np.std(latencies)
-        cv = std / mean
+        cv = std / mean if mean > 0 else 1
         stability = max(0, min(1, 1 - cv))
         total = profile['success_count'] + profile['fail_count']
         if total > 0:
@@ -122,12 +137,21 @@ class ProfileScorer:
         return round(stability, 4)
 
     def calculate_lifetime_prediction(self, profile: Dict) -> float:
+        """Использует байесовское оценивание для новых профилей."""
         timestamps = profile.get('timestamps', [])
-        if len(timestamps) < 2:
+        if not timestamps:
             return 24.0
+
         times = [datetime.fromisoformat(ts) for ts in timestamps if ts]
         if len(times) < 2:
-            return 24.0
+            # Байесовский априор для новых профилей
+            total = profile['success_count'] + profile['fail_count']
+            if total == 0:
+                return 24.0
+            # Предполагаем, что если есть хотя бы одна проверка, вероятность успеха высока
+            success_rate = profile['success_count'] / total
+            return max(1, 24 * success_rate)
+
         intervals = [(times[i] - times[i-1]).total_seconds() / 3600 for i in range(1, len(times))]
         avg_interval = sum(intervals) / len(intervals) if intervals else 0
         if avg_interval == 0:
@@ -139,11 +163,15 @@ class ProfileScorer:
 
     def calculate_config_quality(self, config: str, parsed: Dict) -> float:
         score = 1.0
+        protocol = config.split('://')[0].lower() if config else ''
+        if protocol not in ('vless', 'vmess', 'trojan', 'ss', 'hysteria2', 'tuic'):
+            # Штраф за неизвестный протокол
+            score -= 0.3
+
         if not parsed.get('address') and not parsed.get('add'):
             score -= 0.3
         if not parsed.get('port'):
             score -= 0.3
-        protocol = config.split('://')[0].lower() if config else ''
         if protocol == 'vless':
             if not parsed.get('uuid'):
                 score -= 0.3
@@ -175,9 +203,37 @@ class ProfileScorer:
         success_rate = profile['success_count'] / total if total > 0 else 0.5
         config_quality = self.calculate_config_quality('', parsed)
 
+        # Экспоненциальное затухание для старых проверок
+        timestamps = profile.get('timestamps', [])
+        if not timestamps:
+            return 50.0
+
+        # Полураспад 7 дней
+        half_life = 7 * 24 * 3600  # в секундах
+        now = datetime.now()
+        weights = []
+        for ts in timestamps:
+            try:
+                dt = datetime.fromisoformat(ts)
+                age = (now - dt).total_seconds()
+                weight = math.exp(-age / half_life)
+            except Exception:
+                weight = 0.5
+            weights.append(weight)
+
+        # Взвешенный успех
+        successes = profile['success_count']
+        fails = profile['fail_count']
+        if sum(weights) > 0:
+            # Приблизительная оценка: используем веса для коррекции
+            # Чем старше проверка, тем меньше вес
+            weighted_success = successes * (weights[-1] if weights else 1)
+            weighted_total = (successes + fails) * (weights[-1] if weights else 1)
+            success_rate = weighted_success / weighted_total if weighted_total > 0 else 0.5
+
         reputation = 0.5
 
-        if len(profile.get('timestamps', [])) < 2:
+        if len(timestamps) < 2:
             stability = 0.7
             lifetime = 24.0
             success_rate = 0.7
