@@ -1,6 +1,6 @@
 """
 Глубокая дедупликация с использованием xxHash и упрощённым индексом.
-Все методы асинхронные.
+Добавлен ScalableBloomFilter, упрощена логика is_similar_server.
 """
 
 import re
@@ -22,26 +22,57 @@ from config_identity import ConfigIdentity
 
 logger = logging.getLogger(__name__)
 
-_dns_cache = {}
-_dns_cache_time = {}
-_DNS_TTL = 300
+# Попытка импортировать aiodns
+try:
+    import aiodns
+    resolver = aiodns.DNSResolver()
+    AIODNS_AVAILABLE = True
+except ImportError:
+    AIODNS_AVAILABLE = False
+    resolver = None
 
+# ============================
+# ScalableBloomFilter
+# ============================
 
-@lru_cache(maxsize=1024)
-def _resolve_hostname(hostname: str) -> Optional[str]:
-    if not hostname:
-        return None
-    try:
-        ipaddress.ip_address(hostname)
-        return hostname
-    except ValueError:
-        pass
-    try:
-        ip = socket.gethostbyname(hostname)
-        return ip
-    except Exception:
-        return None
+try:
+    from pybloom_live import BloomFilter
+except ImportError:
+    class BloomFilter:
+        def __init__(self, capacity, error_rate):
+            self.capacity = capacity
+            self.error_rate = error_rate
+            self.data = set()
+        def add(self, item):
+            self.data.add(item)
+        def __contains__(self, item):
+            return item in self.data
+        def __len__(self):
+            return len(self.data)
 
+class ScalableBloomFilter:
+    def __init__(self, initial_capacity=100000, error_rate=0.001):
+        self.filters = [BloomFilter(initial_capacity, error_rate)]
+        self.error_rate = error_rate
+
+    def add(self, item):
+        for f in self.filters:
+            if item in f:
+                return
+        if len(self.filters[-1]) >= self.filters[-1].capacity:
+            new_cap = self.filters[-1].capacity * 2
+            self.filters.append(BloomFilter(new_cap, self.error_rate))
+        self.filters[-1].add(item)
+
+    def __contains__(self, item):
+        for f in self.filters:
+            if item in f:
+                return True
+        return False
+
+# ============================
+# Основной класс DeepDeduplicator
+# ============================
 
 class DeepDeduplicator:
     def __init__(self):
@@ -60,6 +91,7 @@ class DeepDeduplicator:
             'hysteria2': 2,
             'tuic': 3
         }
+        self._use_subnet_dedup = False
 
     def generate_fingerprint(self, config: str) -> Optional[Dict]:
         try:
@@ -119,29 +151,7 @@ class DeepDeduplicator:
         return f"{fp_data['server']}:{fp_data['port']}:{fp_data['protocol']}:{fp_data['credential']}"
 
     def _get_subnet_key(self, server: str, port: int, protocol: str) -> str:
-        try:
-            ip = ipaddress.ip_address(server)
-            if ip.version == 4:
-                network = ipaddress.ip_network(f"{server}/24", strict=False)
-                return f"{network}:{protocol}:{port}"
-            elif ip.version == 6:
-                network = ipaddress.ip_network(f"{server}/48", strict=False)
-                return f"{network}:{protocol}:{port}"
-        except ValueError:
-            resolved = _resolve_hostname(server)
-            if resolved:
-                try:
-                    ip = ipaddress.ip_address(resolved)
-                    if ip.version == 4:
-                        network = ipaddress.ip_network(f"{resolved}/24", strict=False)
-                        return f"{network}:{protocol}:{port}"
-                    elif ip.version == 6:
-                        network = ipaddress.ip_network(f"{resolved}/48", strict=False)
-                        return f"{network}:{protocol}:{port}"
-                except ValueError:
-                    pass
-            return f"{server}:{protocol}:{port}"
-        return f"{server}:{protocol}:{port}"
+        return f"{server}:{port}:{protocol}"
 
     def is_similar_server(self, fp1: Dict, fp2: Dict) -> bool:
         if not fp1 or not fp2:
@@ -150,11 +160,21 @@ class DeepDeduplicator:
             return False
         server1, server2 = fp1.get('server'), fp2.get('server')
         port1, port2 = fp1.get('port'), fp2.get('port')
-        if abs(port1 - port2) > 5:
-            return False
-        subnet1 = self._get_subnet_key(server1, port1, fp1['protocol'])
-        subnet2 = self._get_subnet_key(server2, port2, fp2['protocol'])
-        return subnet1 == subnet2
+        if port1 == port2 and server1 == server2:
+            return True
+        return False
+
+    async def _resolve_hostname_async(self, hostname: str) -> Optional[str]:
+        if AIODNS_AVAILABLE:
+            try:
+                result = await resolver.query(hostname, 'A')
+                return result[0].host
+            except:
+                pass
+        try:
+            return socket.gethostbyname(hostname)
+        except:
+            return None
 
     async def contains_batch(self, configs: List[str]) -> Dict[str, bool]:
         return await self._bloom.contains_batch(configs)
@@ -185,7 +205,7 @@ class DeepDeduplicator:
 
         best_configs = []
         seen_fingerprints = set()
-        seen_subnets = set()
+        seen_servers = set()
 
         for fingerprint, group in groups.items():
             if fingerprint in seen_fingerprints:
@@ -193,10 +213,10 @@ class DeepDeduplicator:
             sample_config = group[0]
             sample_fp = fingerprint_data.get(sample_config)
             if sample_fp:
-                subnet_key = self._get_subnet_key(sample_fp['server'], sample_fp['port'], sample_fp['protocol'])
-                if subnet_key in seen_subnets:
+                server_key = f"{sample_fp['server']}:{sample_fp['port']}:{sample_fp['protocol']}"
+                if server_key in seen_servers:
                     continue
-                seen_subnets.add(subnet_key)
+                seen_servers.add(server_key)
 
             def combined_score(cfg):
                 q = quality_scores.get(cfg, 0)
@@ -219,14 +239,11 @@ class DeepDeduplicator:
         logger.info(f"Deep deduplication: {len(configs)} → {len(best_configs)} configs")
         return best_configs
 
-    # Синхронный метод для обратной совместимости
     def deduplicate_configs(self, configs: List[str], quality_scores: Dict[str, float] = None) -> List[str]:
         try:
             loop = asyncio.get_running_loop()
-            # Если цикл уже запущен, создаём задачу
             return asyncio.run(self.deduplicate_configs_async(configs, quality_scores))
         except RuntimeError:
-            # Нет запущенного цикла
             return asyncio.run(self.deduplicate_configs_async(configs, quality_scores))
 
     def remove_low_quality(self, configs: List[str], quality_data: List[Dict], min_score: float = 30.0) -> List[str]:
