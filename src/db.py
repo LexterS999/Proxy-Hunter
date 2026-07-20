@@ -6,6 +6,7 @@
 ИСПРАВЛЕНО:
 - lru_cache заменён на TTL-кеш с инвалидацией
 - Добавлена функция get_db() для обратной совместимости с channel_quality_analyzer.py
+- Добавлен метод update_profiles_batch() для ProfileScorer._flush_profiles()
 """
 
 import sqlite3
@@ -352,6 +353,56 @@ class HistoryDB:
             conn.commit()
         # Инвалидируем кеш после записи
         invalidate_decompress_cache()
+
+    def update_profiles_batch(self, profiles: List[Dict]) -> None:
+        """
+        Пакетное обновление/вставка профилей.
+        Вызывается из ProfileScorer._flush_profiles() при завершении работы.
+
+        Каждый элемент profiles — dict с полями:
+            key, server, protocol, first_seen, last_seen,
+            success_count, fail_count, latencies, timestamps,
+            is_active, stability, lifetime, overall_score
+        """
+        if not profiles:
+            return
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                rows = []
+                for profile_data in profiles:
+                    key = profile_data.get('key', '')
+                    if not key:
+                        continue
+                    rows.append((
+                        key,
+                        profile_data.get('server', ''),
+                        profile_data.get('protocol', ''),
+                        profile_data.get('first_seen', datetime.now().isoformat()),
+                        profile_data.get('last_seen', datetime.now().isoformat()),
+                        profile_data.get('success_count', 0),
+                        profile_data.get('fail_count', 0),
+                        _compress(profile_data.get('latencies', [])),
+                        _compress(profile_data.get('timestamps', [])),
+                        1 if profile_data.get('is_active', True) else 0,
+                        profile_data.get('stability', 0.0),
+                        profile_data.get('lifetime', 0.0),
+                        profile_data.get('overall_score', 0.0)
+                    ))
+                if rows:
+                    cursor.executemany('''
+                        INSERT OR REPLACE INTO profiles (
+                            key, server, protocol, first_seen, last_seen,
+                            success_count, fail_count, latencies, timestamps,
+                            is_active, stability, lifetime, overall_score
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', rows)
+                    conn.commit()
+                    logger.debug(f"Batch updated {len(rows)} profiles in SQLite")
+            # Инвалидируем кеш после записи
+            invalidate_decompress_cache()
+        except Exception as e:
+            logger.error(f"Failed to batch update profiles: {e}")
 
     def get_profile(self, key: str) -> Optional[Dict]:
         with self._get_connection() as conn:
