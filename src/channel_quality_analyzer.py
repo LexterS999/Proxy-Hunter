@@ -40,7 +40,7 @@ class ChannelQualityAnalyzer:
 
     def __init__(self):
         self.db = get_db()
-        self._whitelist = set(CHANNEL_WHILETLIST)
+        self._whitelist = set(CHANNEL_WHITELIST)
         self._is_first_run = self._check_first_run()
 
     def _check_first_run(self) -> bool:
