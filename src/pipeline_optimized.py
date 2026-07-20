@@ -212,8 +212,192 @@ class OptimizedPipeline:
         self._setup_signal_handlers()
         self._load_model()
 
-    # ... (остальные методы: _setup_logging, _check_dependencies, _setup_signal_handlers, _load_model, _reload_model_if_changed, _get_cache_key и т.д.)
-    # Они остаются без изменений, кроме замены ThreadPoolExecutor на self._executor в нужных местах.
+    def _setup_logging(self):
+        log_dir = Path('logs')
+        log_dir.mkdir(exist_ok=True)
+        log_file = log_dir / 'pipeline.log'
+        handler = RotatingFileHandler(
+            str(log_file),
+            maxBytes=10*1024*1024,
+            backupCount=5,
+            encoding='utf-8'
+        )
+        handler.setFormatter(logging.Formatter(
+            '%(asctime)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        ))
+        logger.addHandler(handler)
+        console = logging.StreamHandler()
+        console.setFormatter(logging.Formatter(
+            '%(asctime)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        ))
+        logger.addHandler(console)
+        logger.setLevel(logging.INFO)
+
+    def _check_dependencies(self):
+        missing = []
+        try:
+            import aiohttp
+        except ImportError:
+            missing.append("aiohttp")
+        try:
+            import lxml
+        except ImportError:
+            missing.append("lxml")
+        try:
+            import numpy
+        except ImportError:
+            missing.append("numpy")
+        try:
+            import scipy
+        except ImportError:
+            missing.append("scipy")
+        try:
+            import tqdm
+        except ImportError:
+            missing.append("tqdm")
+        try:
+            import aiofiles
+        except ImportError:
+            missing.append("aiofiles")
+        try:
+            import catboost
+        except ImportError:
+            missing.append("catboost")
+        try:
+            import aiosqlite
+        except ImportError:
+            missing.append("aiosqlite")
+        if missing:
+            logger.error(f"Missing required dependencies: {', '.join(missing)}")
+            logger.error("Please install: pip install -r requirements.txt")
+            sys.exit(1)
+
+    def _setup_signal_handlers(self):
+        def handler(sig, frame):
+            logger.info(f"Received signal {sig}, initiating graceful shutdown...")
+            self._shutdown_requested = True
+        signal.signal(signal.SIGINT, handler)
+        signal.signal(signal.SIGTERM, handler)
+
+    def _load_model(self):
+        try:
+            mtime = os.path.getmtime(self.model_path) if os.path.exists(self.model_path) else None
+            if self.model is not None and mtime == self.model_mtime:
+                return
+            data = joblib.load(self.model_path)
+            self.model = data['model']
+            self.feature_cols = data['features']
+            self.cat_cols = data['categorical']
+            self.model_mtime = mtime
+            logger.info(f"✅ Quality model loaded from {self.model_path}")
+        except FileNotFoundError:
+            logger.warning(f"Model file {self.model_path} not found, using fallback scoring.")
+            self.model = None
+            self.model_mtime = None
+        except Exception as e:
+            logger.warning(f"Could not load quality model: {e}. Using fallback scoring.")
+            self.model = None
+            self.model_mtime = None
+
+    def _reload_model_if_changed(self):
+        if os.path.exists(self.model_path):
+            current_mtime = os.path.getmtime(self.model_path)
+            if current_mtime != self.model_mtime:
+                logger.info("Model file changed, reloading...")
+                self._load_model()
+
+    def _get_cache_key(self, config: str) -> str:
+        return hashlib.md5(config.encode()).hexdigest()
+
+    def _parse_config(self, config: str) -> Optional[Dict]:
+        parsed, method = FallbackParser.parse_with_stats(config)
+        if parsed:
+            parsed['protocol'] = config.split('://')[0].lower()
+        return parsed
+
+    def _get_config_key(self, config: str) -> str:
+        return ConfigIdentity.get_key(config)
+
+    def _generate_name(self, config: str) -> str:
+        try:
+            protocol = config.split('://')[0].upper()
+            key = self._get_config_key(config)
+            return f"{protocol}-{key[:8]}"
+        except:
+            return f"config-{hashlib.md5(config.encode()).hexdigest()[:8]}"
+
+    async def _load_archive_async(self) -> List[str]:
+        if not os.path.exists(self.output_file):
+            return []
+        try:
+            async with aiofiles.open(self.output_file, 'r', encoding='utf-8') as f:
+                content = await f.read()
+                return [line.strip() for line in content.splitlines() if line.strip() and not line.startswith('//')]
+        except Exception as e:
+            logger.warning(f"Failed to load archive: {e}")
+            return []
+
+    async def _save_archive_with_names_async(self, configs: List[str], mapping: Dict[str, str]):
+        lines = []
+        for cfg in configs:
+            key = self._get_config_key(cfg)
+            name = mapping.get(key, '')
+            if name:
+                if '#' in cfg:
+                    base = cfg.split('#')[0]
+                    lines.append(f"{base}#{name}")
+                else:
+                    lines.append(f"{cfg}#{name}")
+            else:
+                lines.append(cfg)
+        try:
+            Path(self.output_file).parent.mkdir(parents=True, exist_ok=True)
+            async with aiofiles.open(self.output_file, 'w', encoding='utf-8') as f:
+                await f.write('\n'.join(lines) + '\n')
+            await self._save_name_mapping_async(mapping)
+        except Exception as e:
+            logger.error(f"Failed to save archive: {e}")
+
+    async def _save_simple_async(self, configs: List[str], mapping: Dict[str, str]):
+        lines = []
+        for cfg in configs:
+            key = self._get_config_key(cfg)
+            name = mapping.get(key, '')
+            if name:
+                if '#' in cfg:
+                    base = cfg.split('#')[0]
+                    lines.append(f"{base}#{name}")
+                else:
+                    lines.append(f"{cfg}#{name}")
+            else:
+                lines.append(cfg)
+        try:
+            Path(self.simple_file).parent.mkdir(parents=True, exist_ok=True)
+            async with aiofiles.open(self.simple_file, 'w', encoding='utf-8') as f:
+                await f.write('\n'.join(lines) + '\n')
+        except Exception as e:
+            logger.error(f"Failed to save simple output: {e}")
+
+    async def _load_name_mapping_async(self) -> Dict[str, str]:
+        if not os.path.exists(self.name_mapping_file):
+            return {}
+        try:
+            async with aiofiles.open(self.name_mapping_file, 'r', encoding='utf-8') as f:
+                content = await f.read()
+                return json.loads(content)
+        except Exception as e:
+            logger.warning(f"Failed to load name mapping: {e}")
+            return {}
+
+    async def _save_name_mapping_async(self, mapping: Dict[str, str]):
+        try:
+            Path(self.name_mapping_file).parent.mkdir(parents=True, exist_ok=True)
+            async with aiofiles.open(self.name_mapping_file, 'w', encoding='utf-8') as f:
+                await f.write(json.dumps(mapping, indent=2, ensure_ascii=False))
+        except Exception as e:
+            logger.error(f"Failed to save name mapping: {e}")
 
     # ========== Атомарные шаги ==========
 
@@ -232,13 +416,11 @@ class OptimizedPipeline:
         if not raw_configs:
             return []
 
-        # Используем ProcessPoolExecutor для параллельного парсинга
         loop = asyncio.get_event_loop()
         batch_size = 1000
         valid = []
         parse_stats = {'strict': 0, 'heuristic': 0, 'failed': 0}
 
-        # Загружаем кеш парсинга
         cache_keys = [self._get_cache_key(cfg) for cfg in raw_configs]
         parsed_cache = await self.db.get_parsed_cache_batch(cache_keys)
         new_cache_items = {}
@@ -346,7 +528,6 @@ class OptimizedPipeline:
         if not scored_configs:
             return []
 
-        # Ресолвим DNS асинхронно (используем aiodns, если доступен)
         hosts = set()
         for item in scored_configs:
             parsed = item.get('parsed')
@@ -369,7 +550,6 @@ class OptimizedPipeline:
         await asyncio.gather(*[resolve_host(h) for h in hosts])
         logger.info(f"✅ Resolved {len([ip for ip in dns_cache.values() if ip])} hosts")
 
-        # Зондирование с адаптивными попытками
         probe_results = []
         global_sem = asyncio.Semaphore(100)
         host_sems = {}
@@ -463,37 +643,30 @@ class OptimizedPipeline:
             logger.info("🚀 Starting Proxy-Hunter Pipeline (refactored)")
             logger.info("=" * 60)
 
-            # Шаг 1: Сбор
             raw = await self._fetch()
             if self._shutdown_requested or not raw:
                 return False
 
-            # Шаг 2: Валидация
             valid = await self._validate(raw)
             if self._shutdown_requested or not valid:
                 return False
 
-            # Шаг 3: Оценка
             scored = await self._score(valid)
             if self._shutdown_requested or not scored:
                 return False
 
-            # Шаг 4: Зондирование
             good = await self._probe(scored)
             if self._shutdown_requested or not good:
                 return False
 
-            # Шаг 5: Дедупликация
             deduped = await self._deduplicate(good, scored)
             if self._shutdown_requested or not deduped:
                 return False
 
-            # Шаг 6: Архивация
             archived = await self._archive(deduped)
             if not archived:
                 return False
 
-            # Генерация Xray конфига (опционально)
             try:
                 from xray_balancer import ConfigToXray
                 converter = ConfigToXray(self.output_file, 'configs/xray_loadbalanced_config.json')
@@ -501,7 +674,6 @@ class OptimizedPipeline:
             except Exception as e:
                 logger.warning(f"Xray balancer failed: {e}")
 
-            # Обновление статистики в БД
             await self._update_run_stats(raw, valid, scored, good, deduped)
 
             elapsed = time.time() - start_time
@@ -524,121 +696,14 @@ class OptimizedPipeline:
             self._process_executor.shutdown(wait=False)
             self._executor.shutdown(wait=False)
 
-    # ========== Вспомогательные методы ==========
-
     async def _update_run_stats(self, raw, valid, scored, good, deduped):
+        """Обновление статистики в БД."""
         # ... (логика сохранения статистики в БД)
         pass
 
     async def save_state(self):
+        """Сохранение состояния."""
         # ... (сохранение состояния)
-        pass
-
-    def _get_cache_key(self, config: str) -> str:
-        return hashlib.md5(config.encode()).hexdigest()
-
-    def _parse_config(self, config: str) -> Optional[Dict]:
-        parsed, method = FallbackParser.parse_with_stats(config)
-        if parsed:
-            parsed['protocol'] = config.split('://')[0].lower()
-        return parsed
-
-    def _get_config_key(self, config: str) -> str:
-        return ConfigIdentity.get_key(config)
-
-    def _generate_name(self, config: str) -> str:
-        try:
-            protocol = config.split('://')[0].upper()
-            key = self._get_config_key(config)
-            return f"{protocol}-{key[:8]}"
-        except:
-            return f"config-{hashlib.md5(config.encode()).hexdigest()[:8]}"
-
-    async def _load_archive_async(self) -> List[str]:
-        if not os.path.exists(self.output_file):
-            return []
-        try:
-            async with aiofiles.open(self.output_file, 'r', encoding='utf-8') as f:
-                content = await f.read()
-                return [line.strip() for line in content.splitlines() if line.strip() and not line.startswith('//')]
-        except Exception as e:
-            logger.warning(f"Failed to load archive: {e}")
-            return []
-
-    async def _save_archive_with_names_async(self, configs: List[str], mapping: Dict[str, str]):
-        lines = []
-        for cfg in configs:
-            key = self._get_config_key(cfg)
-            name = mapping.get(key, '')
-            if name:
-                if '#' in cfg:
-                    base = cfg.split('#')[0]
-                    lines.append(f"{base}#{name}")
-                else:
-                    lines.append(f"{cfg}#{name}")
-            else:
-                lines.append(cfg)
-        try:
-            Path(self.output_file).parent.mkdir(parents=True, exist_ok=True)
-            async with aiofiles.open(self.output_file, 'w', encoding='utf-8') as f:
-                await f.write('\n'.join(lines) + '\n')
-            await self._save_name_mapping_async(mapping)
-        except Exception as e:
-            logger.error(f"Failed to save archive: {e}")
-
-    async def _save_simple_async(self, configs: List[str], mapping: Dict[str, str]):
-        lines = []
-        for cfg in configs:
-            key = self._get_config_key(cfg)
-            name = mapping.get(key, '')
-            if name:
-                if '#' in cfg:
-                    base = cfg.split('#')[0]
-                    lines.append(f"{base}#{name}")
-                else:
-                    lines.append(f"{cfg}#{name}")
-            else:
-                lines.append(cfg)
-        try:
-            Path(self.simple_file).parent.mkdir(parents=True, exist_ok=True)
-            async with aiofiles.open(self.simple_file, 'w', encoding='utf-8') as f:
-                await f.write('\n'.join(lines) + '\n')
-        except Exception as e:
-            logger.error(f"Failed to save simple output: {e}")
-
-    async def _load_name_mapping_async(self) -> Dict[str, str]:
-        if not os.path.exists(self.name_mapping_file):
-            return {}
-        try:
-            async with aiofiles.open(self.name_mapping_file, 'r', encoding='utf-8') as f:
-                content = await f.read()
-                return json.loads(content)
-        except Exception as e:
-            logger.warning(f"Failed to load name mapping: {e}")
-            return {}
-
-    async def _save_name_mapping_async(self, mapping: Dict[str, str]):
-        try:
-            Path(self.name_mapping_file).parent.mkdir(parents=True, exist_ok=True)
-            async with aiofiles.open(self.name_mapping_file, 'w', encoding='utf-8') as f:
-                await f.write(json.dumps(mapping, indent=2, ensure_ascii=False))
-        except Exception as e:
-            logger.error(f"Failed to save name mapping: {e}")
-
-    def _load_model(self):
-        # ... (без изменений)
-        pass
-
-    def _setup_logging(self):
-        # ... (без изменений)
-        pass
-
-    def _check_dependencies(self):
-        # ... (без изменений)
-        pass
-
-    def _setup_signal_handlers(self):
-        # ... (без изменений)
         pass
 
 
