@@ -1,345 +1,404 @@
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+"""
+xray_balancer.py - Генерация Xray-конфига с балансировкой и распределением нагрузки
+"""
 
 import json
+import re
 import ipaddress
 import logging
-from typing import Dict, Optional
+from typing import List, Dict, Any
+from collections import defaultdict
 
-import config_parser as parser
-import transport_builder
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# [CHANGE] убран logging.basicConfig — логирование настраивается только в точке входа
 logger = logging.getLogger(__name__)
 
-class ConfigToXray:
-    def __init__(self, input_file: str, output_file: str):
-        self.input_file = input_file
-        self.output_file = output_file
-        self.outbounds = []
 
-    @staticmethod
-    def is_valid_address(address: str) -> bool:
-        """Проверяет, является ли строка корректным IPv4 или IPv6 адресом."""
+class XrayBalancer:
+    """Генератор Xray-конфига с балансировкой"""
+
+    # [CHANGE] RFC 1123 hostname regex для валидации доменных адресов
+    _HOSTNAME_RE = re.compile(
+        r'^(?=.{1,253}$)'
+        r'((?!-)[A-Za-z0-9-]{1,63}(?<!-)\.)+'
+        r'(?!-)[A-Za-z0-9-]{1,63}(?<!-)$'
+    )
+
+    def __init__(self):
+        self.configs = []
+
+    def generate_config(self, configs: List[Dict[str, Any]],
+                        output_path: str = 'configs/xray_balanced.json') -> bool:
+        """Генерирует Xray-конфиг с балансировкой"""
         try:
-            ipaddress.ip_address(address)
+            logger.info(f"🔄 Генерация Xray-конфига для {len(configs)} прокси...")
+
+            # Группируем по протоколам
+            by_protocol = defaultdict(list)
+            for config in configs:
+                protocol = config.get('protocol', 'unknown')
+                by_protocol[protocol].append(config)
+
+            # Создаём outbounds
+            outbounds = []
+            balancer_tags = []
+
+            for protocol, protocol_configs in by_protocol.items():
+                if not protocol_configs:
+                    continue
+
+                # Сортируем по скору
+                protocol_configs.sort(key=lambda x: x.get('score', 0), reverse=True)
+
+                # Создаём outbound для каждого протокола
+                outbound = self._create_protocol_outbound(protocol, protocol_configs)
+                if outbound:
+                    outbounds.append(outbound)
+                    balancer_tags.append(outbound['tag'])
+
+            if not outbounds:
+                logger.warning("⚠️ Нет валидных конфигов для Xray")
+                return False
+
+            # Создаём основной конфиг
+            xray_config = self._create_xray_config(outbounds, balancer_tags)
+
+            # Сохраняем
+            with open(output_path, 'w', encoding='utf-8') as f:
+                json.dump(xray_config, f, indent=2, ensure_ascii=False)
+
+            logger.info(f"✅ Xray-конфиг сохранён: {output_path}")
+            logger.info(f"   📊 Протоколы: {dict((k, len(v)) for k, v in by_protocol.items())}")
             return True
-        except ValueError:
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка генерации Xray-конфига: {e}")
             return False
 
-    @staticmethod
-    def get_xray_template() -> Dict:
+    def _create_protocol_outbound(self, protocol: str, configs: List[Dict]) -> Dict:
+        """Создаёт outbound для протокола"""
+        try:
+            if protocol == 'vmess':
+                return self._create_vmess_outbound(configs)
+            elif protocol == 'vless':
+                return self._create_vless_outbound(configs)
+            elif protocol == 'trojan':
+                return self._create_trojan_outbound(configs)
+            elif protocol == 'shadowsocks':
+                return self._create_shadowsocks_outbound(configs)
+            elif protocol == 'wireguard':
+                return self._create_wireguard_outbound(configs)
+            else:
+                logger.warning(f"⚠️ Неподдерживаемый протокол: {protocol}")
+                return {}
+        except Exception as e:
+            logger.error(f"❌ Ошибка создания outbound для {protocol}: {e}")
+            return {}
+
+    def _create_vmess_outbound(self, configs: List[Dict]) -> Dict:
+        """Создаёт VMess outbound"""
+        servers = []
+        for i, config in enumerate(configs[:50]):  # Максимум 50 серверов
+            server = self.convert_vmess_to_xray(config)
+            if server:
+                servers.append(server)
+
+        if not servers:
+            return {}
+
+        return {
+            "tag": "vmess-balancer",
+            "protocol": "vmess",
+            "settings": {
+                "vnext": servers
+            },
+            "streamSettings": {
+                "network": configs[0].get('network', 'tcp'),
+                "security": configs[0].get('security', 'none'),
+            },
+            "balancerTag": "vmess-balancer"
+        }
+
+    def _create_vless_outbound(self, configs: List[Dict]) -> Dict:
+        """Создаёт VLESS outbound"""
+        servers = []
+        for config in configs[:50]:
+            server = self.convert_vless_to_xray(config)
+            if server:
+                servers.append(server)
+
+        if not servers:
+            return {}
+
+        return {
+            "tag": "vless-balancer",
+            "protocol": "vless",
+            "settings": {
+                "vnext": servers
+            },
+            "streamSettings": {
+                "network": configs[0].get('network', 'tcp'),
+                "security": configs[0].get('security', 'none'),
+            },
+            "balancerTag": "vless-balancer"
+        }
+
+    def _create_trojan_outbound(self, configs: List[Dict]) -> Dict:
+        """Создаёт Trojan outbound"""
+        servers = []
+        for config in configs[:50]:
+            server = self.convert_trojan_to_xray(config)
+            if server:
+                servers.append(server)
+
+        if not servers:
+            return {}
+
+        return {
+            "tag": "trojan-balancer",
+            "protocol": "trojan",
+            "settings": {
+                "servers": servers
+            },
+            "streamSettings": {
+                "network": "tcp",
+                "security": "tls",
+            },
+            "balancerTag": "trojan-balancer"
+        }
+
+    def _create_shadowsocks_outbound(self, configs: List[Dict]) -> Dict:
+        """Создаёт Shadowsocks outbound"""
+        servers = []
+        for config in configs[:50]:
+            server = self.convert_shadowsocks_to_xray(config)
+            if server:
+                servers.append(server)
+
+        if not servers:
+            return {}
+
+        return {
+            "tag": "shadowsocks-balancer",
+            "protocol": "shadowsocks",
+            "settings": {
+                "servers": servers
+            },
+            "balancerTag": "shadowsocks-balancer"
+        }
+
+    def _create_wireguard_outbound(self, configs: List[Dict]) -> Dict:
+        """Создаёт WireGuard outbound"""
+        # WireGuard в Xray требует отдельной настройки
+        # Пока пропускаем
+        return {}
+
+    def _create_xray_config(self, outbounds: List[Dict], balancer_tags: List[str]) -> Dict:
+        """Создаёт основной Xray-конфиг"""
         return {
             "log": {
                 "loglevel": "warning"
             },
-            "remarks": "👽 Anonymous Multi Balanced",
-            "dns": {
-                "servers": [
-                    "https://dns.google/dns-query",
-                    "https://cloudflare-dns.com/dns-query",
-                    {
-                        "address": "1.1.1.2",
-                        "domains": [
-                            "domain:ir",
-                            "geosite:category-ir"
-                        ],
-                        "skipFallback": True,
-                        "tag": "domestic-dns"
-                    }
-                ]
-            },
-            "fakedns": [
-                {
-                    "ipPool": "198.18.0.0/15",
-                    "poolSize": 10000
-                }
-            ],
             "inbounds": [
                 {
+                    "tag": "socks-in",
                     "port": 10808,
+                    "listen": "127.0.0.1",
                     "protocol": "socks",
                     "settings": {
                         "auth": "noauth",
                         "udp": True,
-                        "userLevel": 8
+                        "ip": "127.0.0.1"
                     },
                     "sniffing": {
-                        "destOverride": [
-                            "http",
-                            "tls",
-                            "fakedns"
-                        ],
                         "enabled": True,
-                        "routeOnly": False
-                    },
-                    "tag": "socks"
-                }
-            ],
-            "observatory": {
-                "enableConcurrency": True,
-                "probeInterval": "3m",
-                "probeUrl": "https://www.gstatic.com/generate_204",
-                "subjectSelector": [
-                    "proxy-"
-                ]
-            },
-            "outbounds": [],
-            "policy": {
-                "levels": {
-                    "8": {
-                        "connIdle": 300,
-                        "downlinkOnly": 1,
-                        "handshake": 4,
-                        "uplinkOnly": 1
+                        "destOverride": ["http", "tls"]
                     }
                 },
-                "system": {
-                    "statsOutboundUplink": True,
-                    "statsOutboundDownlink": True
-                }
-            },
-            "routing": {
-                "balancers": [
-                    {
-                        "selector": [
-                            "proxy-"
-                        ],
-                        "strategy": {
-                            "type": "leastPing"
-                        },
-                        "tag": "proxy-round"
+                {
+                    "tag": "http-in",
+                    "port": 10809,
+                    "listen": "127.0.0.1",
+                    "protocol": "http",
+                    "settings": {
+                        "timeout": 300
                     }
-                ],
-                "domainStrategy": "AsIs",
+                }
+            ],
+            "outbounds": outbounds + [
+                {
+                    "tag": "direct",
+                    "protocol": "freedom",
+                    "settings": {}
+                },
+                {
+                    "tag": "block",
+                    "protocol": "blackhole",
+                    "settings": {}
+                }
+            ],
+            "routing": {
+                "domainStrategy": "IPIfNonMatch",
                 "rules": [
                     {
-                        "inboundTag": [
-                            "socks"
-                        ],
-                        "outboundTag": "dns-out",
-                        "port": "53",
-                        "type": "field"
+                        "type": "field",
+                        "ip": ["geoip:private"],
+                        "outboundTag": "direct"
                     },
                     {
-                        "ip": [
-                            "geoip:private"
-                        ],
-                        "outboundTag": "direct",
-                        "type": "field"
+                        "type": "field",
+                        "domain": ["domain:ir", "geosite:category-ir"],
+                        "outboundTag": "direct"
                     },
                     {
-                        "domain": [
-                            "geosite:private"
-                        ],
-                        "outboundTag": "direct",
-                        "type": "field"
+                        "type": "field",
+                        "ip": ["geoip:ir"],
+                        "outboundTag": "direct"
                     },
                     {
-                        "domain": [
-                            "domain:ir",
-                            "geosite:category-ir"
-                        ],
-                        "outboundTag": "direct",
-                        "type": "field"
-                    },
-                    {
-                        "ip": [
-                            "geoip:ir"
-                        ],
-                        "outboundTag": "direct",
-                        "type": "field"
-                    },
-                    {
-                        "inboundTag": [
-                            "domestic-dns"
-                        ],
-                        "outboundTag": "direct",
-                        "type": "field"
-                    },
-                    {
-                        "balancerTag": "proxy-round",
+                        "type": "field",
                         "network": "tcp,udp",
-                        "type": "field"
+                        "balancerTag": balancer_tags[0] if balancer_tags else None
                     }
+                ],
+                "balancers": [
+                    {
+                        "tag": tag,
+                        "selector": [tag],
+                        "strategy": {
+                            "type": "leastPing"
+                        }
+                    } for tag in balancer_tags
+                ]
+            },
+            "dns": {
+                "servers": [
+                    "8.8.8.8",
+                    "1.1.1.1",
+                    "localhost"
                 ]
             }
         }
 
-    def convert_vmess(self, data: Dict) -> Optional[Dict]:
-        if not data.get('add') or not data.get('port') or not data.get('id'):
-            return None
-        if not self.is_valid_address(data.get('add', '')):
-            logger.debug(f"Skipping VMess config: address '{data.get('add')}' is not a valid IP")
-            return None
-        outbound = {
-            "protocol": "vmess",
-            "settings": {
-                "vnext": [
-                    {
-                        "address": data.get('add'),
-                        "port": int(data.get('port')),
-                        "users": [
-                            {
-                                "id": data.get('id'),
-                                "alterId": int(data.get('aid', 0)),
-                                "security": data.get('scy', 'auto'),
-                                "level": 8
-                            }
-                        ]
-                    }
-                ]
-            },
-            "streamSettings": transport_builder.build_xray_settings(data)
-        }
-        return outbound
+    # ------------------------------------------------------------------ #
+    #  Конвертеры
+    # ------------------------------------------------------------------ #
 
-    def convert_vless(self, data: Dict) -> Optional[Dict]:
-        if not data.get('address') or not data.get('port') or not data.get('uuid'):
-            return None
-        if not self.is_valid_address(data.get('address', '')):
-            logger.debug(f"Skipping VLESS config: address '{data.get('address')}' is not a valid IP")
-            return None
-        outbound = {
-            "protocol": "vless",
-            "settings": {
-                "vnext": [
-                    {
-                        "address": data['address'],
-                        "port": data['port'],
-                        "users": [
-                            {
-                                "id": data['uuid'],
-                                "flow": data.get('flow', ''),
-                                "encryption": "none",
-                                "level": 8
-                            }
-                        ]
-                    }
-                ]
-            },
-            "streamSettings": transport_builder.build_xray_settings(data)
-        }
-        return outbound
-
-    def convert_trojan(self, data: Dict) -> Optional[Dict]:
-        if not data.get('address') or not data.get('port') or not data.get('password'):
-            return None
-        if not self.is_valid_address(data.get('address', '')):
-            logger.debug(f"Skipping Trojan config: address '{data.get('address')}' is not a valid IP")
-            return None
-        outbound = {
-            "protocol": "trojan",
-            "settings": {
-                "servers": [
-                    {
-                        "address": data['address'],
-                        "port": data['port'],
-                        "password": data['password'],
-                        "level": 8
-                    }
-                ]
-            },
-            "streamSettings": transport_builder.build_xray_settings(data)
-        }
-        return outbound
-
-    def convert_shadowsocks(self, data: Dict) -> Optional[Dict]:
-        if not data.get('address') or not data.get('port') or not data.get('method') or not data.get('password'):
-            return None
-        if not self.is_valid_address(data.get('address', '')):
-            logger.debug(f"Skipping Shadowsocks config: address '{data.get('address')}' is not a valid IP")
-            return None
-        return {
-            "protocol": "shadowsocks",
-            "settings": {
-                "servers": [
-                    {
-                        "address": data['address'],
-                        "port": data['port'],
-                        "method": data['method'],
-                        "password": data['password'],
-                        "level": 8
-                    }
-                ]
-            },
-            "streamSettings": {
-                "network": "tcp"
-            }
-        }
-
-    def process_configs(self):
+    @staticmethod
+    def convert_vmess_to_xray(config: Dict) -> Dict:
+        """Конвертирует VMess конфиг в Xray формат"""
         try:
-            with open(self.input_file, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-        except FileNotFoundError:
-            logger.error(f"{self.input_file} not found!")
-            return
-        except Exception as e:
-            logger.error(f"Error reading {self.input_file}: {e}")
-            return
+            address = config.get('address', '')
+            port = config.get('port', 0)
+            uuid = config.get('uuid', '')
 
-        final_config = self.get_xray_template()
-        temp_outbounds = []
+            if not XrayBalancer.is_valid_address(address) or not port or not uuid:
+                return {}
 
-        for line in lines:
-            line = line.strip()
-            if not line or line.startswith('//'):
-                continue
-            line_lower = line.lower()
-            outbound = None
-            data = None
+            return {
+                "address": address,
+                "port": port,
+                "users": [
+                    {
+                        "id": uuid,
+                        "alterId": config.get('alter_id', 0),
+                        "security": config.get('security', 'auto'),
+                        "level": 8
+                    }
+                ]
+            }
+        except Exception:
+            return {}
 
+    @staticmethod
+    def convert_vless_to_xray(config: Dict) -> Dict:
+        """Конвертирует VLESS конфиг в Xray формат"""
+        try:
+            address = config.get('address', '')
+            port = config.get('port', 0)
+            uuid = config.get('uuid', '')
+
+            if not XrayBalancer.is_valid_address(address) or not port or not uuid:
+                return {}
+
+            return {
+                "address": address,
+                "port": port,
+                "users": [
+                    {
+                        "id": uuid,
+                        "encryption": config.get('encryption', 'none'),
+                        "flow": config.get('flow', ''),
+                        "level": 8
+                    }
+                ]
+            }
+        except Exception:
+            return {}
+
+    @staticmethod
+    def convert_trojan_to_xray(config: Dict) -> Dict:
+        """Конвертирует Trojan конфиг в Xray формат"""
+        try:
+            address = config.get('address', '')
+            port = config.get('port', 0)
+            password = config.get('password', '')
+
+            if not XrayBalancer.is_valid_address(address) or not port or not password:
+                return {}
+
+            return {
+                "address": address,
+                "port": port,
+                "password": password,
+                "level": 8
+            }
+        except Exception:
+            return {}
+
+    @staticmethod
+    def convert_shadowsocks_to_xray(config: Dict) -> Dict:
+        """Конвертирует Shadowsocks конфиг в Xray формат"""
+        try:
+            address = config.get('address', '')
+            port = config.get('port', 0)
+            password = config.get('password', '')
+            method = config.get('method', 'aes-256-gcm')
+
+            if not XrayBalancer.is_valid_address(address) or not port or not password:
+                return {}
+
+            return {
+                "address": address,
+                "port": port,
+                "password": password,
+                "method": method,
+                "level": 8
+            }
+        except Exception:
+            return {}
+
+    @staticmethod
+    def is_valid_address(address: str) -> bool:
+        """
+        [CHANGE] Валидирует адрес: IP (v4/v6, в т.ч. в скобках) ИЛИ домен (RFC 1123).
+        Ранее принимались только IP, из-за чего отбрасывались все доменные прокси
+        (Reality/CDN/WebSocket).
+        """
+        if not address or not isinstance(address, str):
+            return False
+        address = address.strip()
+        if not address:
+            return False
+
+        # 1. Обычный IP-адрес (v4 / v6)
+        try:
+            ipaddress.ip_address(address)
+            return True
+        except ValueError:
+            pass
+
+        # 2. IPv6 в квадратных скобках: [::1]
+        if address.startswith('[') and address.endswith(']'):
             try:
-                if line_lower.startswith('vmess://'):
-                    data = parser.decode_vmess(line)
-                    if data:
-                        outbound = self.convert_vmess(data)
-                elif line_lower.startswith('vless://'):
-                    data = parser.parse_vless(line)
-                    if data:
-                        outbound = self.convert_vless(data)
-                elif line_lower.startswith('trojan://'):
-                    data = parser.parse_trojan(line)
-                    if data:
-                        outbound = self.convert_trojan(data)
-                elif line_lower.startswith('ss://'):
-                    data = parser.parse_shadowsocks(line)
-                    if data:
-                        outbound = self.convert_shadowsocks(data)
-            except Exception as e:
-                logger.warning(f"Failed to parse config {line[:30]}...: {e}")
-
-            if outbound:
-                outbound["tag"] = f"proxy-{len(temp_outbounds) + 1}"
-                temp_outbounds.append(outbound)
-
-        if not temp_outbounds:
-            logger.error("No valid configs found to convert.")
-            return
-
-        temp_outbounds.extend([
-            {"protocol": "freedom", "settings": {}, "tag": "direct"},
-            {"protocol": "blackhole", "settings": {"response": {"type": "http"}}, "tag": "block"},
-            {"protocol": "dns", "tag": "dns-out"}
-        ])
-
-        final_config["outbounds"] = temp_outbounds
-
-        try:
-            os.makedirs(os.path.dirname(self.output_file) or '.', exist_ok=True)
-            with open(self.output_file, 'w', encoding='utf-8') as f:
-                json.dump(final_config, f, indent=2, ensure_ascii=False)
-            logger.info(f"Successfully converted {len(temp_outbounds) - 3} configs to {self.output_file}")
-        except Exception as e:
-            logger.error(f"Failed to write output file: {e}")
-
-def main():
-    input_file = 'configs/proxy_configs.txt'
-    output_file = 'configs/xray_loadbalanced_config.json'
-    converter = ConfigToXray(input_file, output_file)
-    converter.process_configs()
-
-if __name__ == '__main__':
-    main()
+                ipaddress.ip_address(address[1:-1])
+                return True
