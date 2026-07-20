@@ -1,6 +1,6 @@
 """
 Модуль для работы с SQLite-базой данных истории.
-Использует aiosqlite для асинхронного пула соединений.
+Использует aiosqlite с созданием нового соединения для каждой операции.
 """
 
 import sqlite3
@@ -11,7 +11,6 @@ import os
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 from contextlib import asynccontextmanager
-from functools import lru_cache
 import asyncio
 import aiosqlite
 
@@ -20,10 +19,6 @@ logger = logging.getLogger(__name__)
 DB_PATH = "configs/history.db"
 COMPRESS_LEVEL = 6
 SCHEMA_VERSION = 5
-
-# Пул соединений
-_connection_pool: Optional[aiosqlite.Connection] = None
-_pool_lock = asyncio.Lock()
 
 
 def _compress(data: Any) -> bytes:
@@ -35,8 +30,7 @@ def _compress(data: Any) -> bytes:
         return b''
 
 
-@lru_cache(maxsize=8192)
-def _decompress_cached(blob: bytes) -> Any:
+def _decompress(blob: bytes) -> Any:
     if blob is None or not blob:
         return None
     try:
@@ -45,17 +39,11 @@ def _decompress_cached(blob: bytes) -> Any:
         return None
 
 
-def _decompress(blob: bytes) -> Any:
-    return _decompress_cached(blob)
-
-
 def _now_utc() -> str:
-    """Возвращает текущее время в UTC в ISO-формате."""
     return datetime.now(timezone.utc).isoformat()
 
 
 class HistoryDB:
-    """Асинхронная работа с БД через пул соединений."""
     _instance = None
 
     def __new__(cls):
@@ -66,20 +54,17 @@ class HistoryDB:
 
     def _init_sync(self):
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-        # Синхронная инициализация схемы
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
             cursor = conn.cursor()
             self._init_schema(cursor)
             conn.commit()
-        self._pool: Optional[aiosqlite.Connection] = None
 
     def _init_schema(self, cursor):
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA synchronous=NORMAL")
 
-        # Проверка версии схемы
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='metadata'")
         if cursor.fetchone():
             cursor.execute("SELECT value FROM metadata WHERE key='schema_version'")
@@ -90,7 +75,6 @@ class HistoryDB:
                     logger.info(f"Upgrading schema from version {version} to {SCHEMA_VERSION}")
                     self._upgrade_schema(cursor, version)
 
-        # Основные таблицы
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS runs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -226,7 +210,6 @@ class HistoryDB:
                 created_at TEXT
             )
         ''')
-        # Новая таблица для кеша парсинга
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS parsed_cache (
                 cache_key TEXT PRIMARY KEY,
@@ -236,7 +219,6 @@ class HistoryDB:
             )
         ''')
 
-        # Индексы
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_history_url ON channel_history(url)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_history_timestamp ON channel_history(timestamp)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_history_run_id ON channel_history(run_id)")
@@ -266,36 +248,12 @@ class HistoryDB:
             cursor.execute("UPDATE metadata SET value=? WHERE key='schema_version'", (str(SCHEMA_VERSION),))
             logger.info(f"Schema upgraded to version {SCHEMA_VERSION}")
 
-    async def _get_connection(self) -> aiosqlite.Connection:
-        """Возвращает рабочее соединение из пула, пересоздавая при необходимости."""
-        global _connection_pool
-        async with _pool_lock:
-            # Проверяем, существует ли соединение и не закрыто ли оно
-            if _connection_pool is not None:
-                try:
-                    # Пробуем выполнить простой запрос, чтобы проверить, живо ли соединение
-                    await _connection_pool.execute("SELECT 1")
-                    # Если успешно, возвращаем
-                    return _connection_pool
-                except Exception:
-                    # Если ошибка, закрываем и пересоздаём
-                    try:
-                        await _connection_pool.close()
-                    except:
-                        pass
-                    _connection_pool = None
-            # Создаём новое соединение
-            _connection_pool = await aiosqlite.connect(DB_PATH)
-            await _connection_pool.execute("PRAGMA journal_mode=WAL")
-            await _connection_pool.execute("PRAGMA synchronous=NORMAL")
-            logger.info("Created new aiosqlite connection pool")
-            return _connection_pool
-
     @asynccontextmanager
     async def _transaction(self):
-        """Контекстный менеджер для транзакций."""
-        conn = await self._get_connection()
-        async with conn:
+        """Контекстный менеджер для транзакций с новым соединением."""
+        async with aiosqlite.connect(DB_PATH) as conn:
+            await conn.execute("PRAGMA journal_mode=WAL")
+            await conn.execute("PRAGMA synchronous=NORMAL")
             yield conn
 
     async def add_run(self, stats: Dict) -> int:
@@ -325,7 +283,7 @@ class HistoryDB:
             return cursor.lastrowid
 
     async def get_recent_runs(self, limit: int = 10) -> List[Dict]:
-        async with self._get_connection() as conn:
+        async with aiosqlite.connect(DB_PATH) as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('SELECT * FROM runs ORDER BY timestamp DESC LIMIT ?', (limit,))
@@ -353,7 +311,7 @@ class HistoryDB:
             await conn.commit()
 
     async def get_channel(self, url: str) -> Optional[Dict]:
-        async with self._get_connection() as conn:
+        async with aiosqlite.connect(DB_PATH) as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('SELECT * FROM channels WHERE url = ?', (url,))
@@ -365,7 +323,7 @@ class HistoryDB:
             return None
 
     async def get_all_channels(self) -> List[Dict]:
-        async with self._get_connection() as conn:
+        async with aiosqlite.connect(DB_PATH) as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('SELECT * FROM channels')
@@ -433,7 +391,7 @@ class HistoryDB:
             await conn.commit()
 
     async def get_profile(self, key: str) -> Optional[Dict]:
-        async with self._get_connection() as conn:
+        async with aiosqlite.connect(DB_PATH) as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('SELECT * FROM profiles WHERE key = ?', (key,))
@@ -447,7 +405,7 @@ class HistoryDB:
             return None
 
     async def get_all_profiles(self) -> List[Dict]:
-        async with self._get_connection() as conn:
+        async with aiosqlite.connect(DB_PATH) as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('SELECT * FROM profiles')
@@ -470,7 +428,7 @@ class HistoryDB:
             logger.info(f"Cleaned profiles older than {days} days")
 
     async def get_metadata(self, key: str, default: Any = None) -> Any:
-        async with self._get_connection() as conn:
+        async with aiosqlite.connect(DB_PATH) as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('SELECT value FROM metadata WHERE key = ?', (key,))
@@ -510,7 +468,7 @@ class HistoryDB:
             await conn.commit()
 
     async def get_channel_history(self, url: str, limit: int = 10) -> List[Dict]:
-        async with self._get_connection() as conn:
+        async with aiosqlite.connect(DB_PATH) as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('SELECT * FROM channel_history WHERE url = ? ORDER BY timestamp DESC LIMIT ?', (url, limit))
@@ -523,9 +481,8 @@ class HistoryDB:
             return result
 
     async def get_channel_history_scores(self, url: str, days: int = 7, limit: int = 100) -> List[Dict]:
-        """Возвращает историю скоров канала за N дней с ограничением."""
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        async with self._get_connection() as conn:
+        async with aiosqlite.connect(DB_PATH) as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('''
@@ -547,7 +504,7 @@ class HistoryDB:
     # ========== Кеш парсинга ==========
 
     async def get_parsed_cache(self, cache_key: str) -> Optional[Dict]:
-        async with self._get_connection() as conn:
+        async with aiosqlite.connect(DB_PATH) as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('SELECT parsed_data FROM parsed_cache WHERE cache_key = ?', (cache_key,))
@@ -557,11 +514,10 @@ class HistoryDB:
             return None
 
     async def get_parsed_cache_batch(self, keys: List[str]) -> Dict[str, Dict]:
-        """Пакетное получение кеша."""
         if not keys:
             return {}
         result = {}
-        async with self._get_connection() as conn:
+        async with aiosqlite.connect(DB_PATH) as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             placeholders = ','.join(['?'] * len(keys))
@@ -583,7 +539,6 @@ class HistoryDB:
             await conn.commit()
 
     async def set_parsed_cache_batch(self, items: Dict[str, Dict]):
-        """Пакетная запись в кеш парсинга."""
         if not items:
             return
         async with self._transaction() as conn:
@@ -608,7 +563,7 @@ class HistoryDB:
             logger.info(f"Model version saved: {version} (RMSE={rmse:.2f}, MAE={mae:.2f})")
 
     async def get_best_model(self) -> Optional[Dict]:
-        async with self._get_connection() as conn:
+        async with aiosqlite.connect(DB_PATH) as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('SELECT * FROM model_versions ORDER BY rmse ASC LIMIT 1')
@@ -629,7 +584,7 @@ class HistoryDB:
             await conn.commit()
 
     async def get_profile_features(self, profile_key: str) -> Optional[Dict]:
-        async with self._get_connection() as conn:
+        async with aiosqlite.connect(DB_PATH) as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('SELECT * FROM profile_features WHERE profile_key = ?', (profile_key,))
@@ -669,7 +624,7 @@ class HistoryDB:
 
     async def get_probe_history(self, profile_key: str, since_hours: int = 24) -> List[Dict]:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=since_hours)).isoformat()
-        async with self._get_connection() as conn:
+        async with aiosqlite.connect(DB_PATH) as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('''
@@ -682,7 +637,7 @@ class HistoryDB:
 
     async def get_recent_probes(self, since_hours: int = 24) -> List[Dict]:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=since_hours)).isoformat()
-        async with self._get_connection() as conn:
+        async with aiosqlite.connect(DB_PATH) as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
             await cursor.execute('''
@@ -694,11 +649,8 @@ class HistoryDB:
             return [dict(row) for row in rows]
 
     async def close(self):
-        global _connection_pool
-        if _connection_pool is not None:
-            await _connection_pool.close()
-            _connection_pool = None
-            logger.info("Closed database connection pool")
+        # Ничего не делаем, так как соединения не хранятся
+        pass
 
 
 _db = None
