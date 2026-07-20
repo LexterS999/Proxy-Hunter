@@ -11,7 +11,7 @@ from typing import List, Dict, Optional, Set
 import asyncio
 import aiohttp
 from aiohttp import ClientTimeout, ClientConnectorError, ClientResponseError
-from bs4 import BeautifulSoup
+from lxml import html
 from config import ProxyConfig, ChannelConfig
 from config_validator import ConfigValidator
 from parse_fallback import FallbackParser
@@ -32,6 +32,17 @@ from user_settings import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Предварительная компиляция паттернов для быстрого поиска
+_PROTOCOL_PATTERNS = {
+    'vmess': re.compile(r'vmess://[A-Za-z0-9+/=_-]+', re.IGNORECASE),
+    'vless': re.compile(r'vless://[A-Za-z0-9+/=_-]+', re.IGNORECASE),
+    'trojan': re.compile(r'trojan://[^/\s]+', re.IGNORECASE),
+    'ss': re.compile(r'ss://[A-Za-z0-9+/=_-]+', re.IGNORECASE),
+    'hysteria2': re.compile(r'(?:hysteria2|hy2)://[^\s]+', re.IGNORECASE),
+    'tuic': re.compile(r'tuic://[^\s]+', re.IGNORECASE),
+    'wireguard': re.compile(r'wireguard://[^\s]+', re.IGNORECASE),
+}
 
 
 class AdaptiveRateLimiter:
@@ -84,8 +95,8 @@ class AsyncConfigFetcher:
         self.protocol_counts: Dict[str, int] = {p: 0 for p in config.SUPPORTED_PROTOCOLS}
         self.seen_configs: Set[str] = set()
         self.channel_protocol_counts: Dict[str, Dict[str, int]] = {}
-        self._message_cache: Dict[str, List[str]] = {}  # Кеш сообщений по каналу
-        self._cache_ttl = 3600  # 1 час
+        self._message_cache: Dict[str, List[str]] = {}
+        self._cache_ttl = 3600
 
         num_channels = len(config.SOURCE_URLS) if config.SOURCE_URLS else 1
         self._connector_limit = min(200, num_channels * 10)
@@ -96,7 +107,6 @@ class AsyncConfigFetcher:
 
     @lru_cache(maxsize=128)
     def _get_protocol(self, config: str) -> Optional[str]:
-        """Кешированное определение протокола."""
         for protocol in self._enabled_protocols_set:
             if config.startswith(protocol):
                 return protocol
@@ -114,9 +124,7 @@ class AsyncConfigFetcher:
 
     @retry_with_backoff(attempts=3, base_delay=0.2, max_delay=5.0, deadline=30.0)
     async def _fetch_with_retry(self, url: str) -> Optional[str]:
-        """Обёртка для всех внешних запросов с rate limiting."""
         await self._rate_limiter.acquire()
-
         session = await self._ensure_session()
         try:
             async with session.get(url) as response:
@@ -168,6 +176,28 @@ class AsyncConfigFetcher:
             return [text]
         return self.validator.split_configs(text)
 
+    def _extract_configs_from_text_fast(self, text: str) -> List[str]:
+        """Быстрое извлечение конфигов с использованием предварительно скомпилированных паттернов."""
+        configs = []
+        for proto, pattern in _PROTOCOL_PATTERNS.items():
+            for match in pattern.finditer(text):
+                configs.append(match.group(0))
+        return list(set(configs))
+
+    def _extract_message_texts_from_lxml(self, tree) -> List[str]:
+        """Извлекает тексты сообщений из lxml-дерева."""
+        messages = []
+        # Поиск через XPath для Telegram
+        elements = tree.xpath('//div[@class="tgme_widget_message_text"]')
+        if not elements:
+            # Fallback: ищем любые div с текстом
+            elements = tree.xpath('//div[contains(@class, "tgme_widget_message")]//div[contains(@class, "text")]')
+        for elem in elements:
+            text = elem.text_content()
+            if text and text.strip():
+                messages.append(text.strip())
+        return messages
+
     async def fetch_channel(self, channel: ChannelConfig) -> List[str]:
         async with self._semaphore:
             return await self._fetch_channel_internal(channel)
@@ -180,14 +210,12 @@ class AsyncConfigFetcher:
         channel.metrics.protocol_counts = {p: 0 for p in self.config.SUPPORTED_PROTOCOLS}
         start_time = time.time()
 
-        # Проверяем кеш сообщений
         cache_key = channel.url
         if cache_key in self._message_cache:
             cached = self._message_cache[cache_key]
             logger.debug(f"Using cached messages for {channel.url} ({len(cached)} messages)")
-            # Парсим кешированные сообщения
             for msg in cached:
-                configs.extend(self._extract_configs_from_text(msg))
+                configs.extend(self._extract_configs_from_text_fast(msg))
         else:
             if channel.url.startswith('ssconf://'):
                 configs.extend(await self.fetch_ssconf_configs(channel.url))
@@ -204,33 +232,23 @@ class AsyncConfigFetcher:
             response_time = time.time() - start_time
 
             if channel.is_telegram:
-                soup = BeautifulSoup(text, 'html.parser')
-                # Используем CSS-селектор напрямую
-                messages = soup.select('div.tgme_widget_message_text')
-                sorted_messages = sorted(
-                    messages,
-                    key=lambda m: self.extract_date_from_message(m) or datetime.min.replace(tzinfo=timezone.utc),
-                    reverse=True
-                )
-                # Кешируем текст сообщений
-                cached_messages = []
-                for message in sorted_messages:
-                    if not message or not message.text:
-                        continue
-                    msg_text = message.text
-                    cached_messages.append(msg_text)
-                    configs.extend(self._extract_configs_from_text(msg_text))
+                # Используем lxml вместо BeautifulSoup для скорости
+                tree = html.fromstring(text)
+                messages = self._extract_message_texts_from_lxml(tree)
+                # Сортировка по дате (если доступна)
                 # Сохраняем в кеш
+                cached_messages = []
+                for msg_text in messages:
+                    if msg_text:
+                        cached_messages.append(msg_text)
+                        configs.extend(self._extract_configs_from_text_fast(msg_text))
                 self._message_cache[cache_key] = cached_messages
-                # Очистка старых кешей (простая стратегия)
                 if len(self._message_cache) > 100:
-                    # Удаляем половину старых
                     keys = list(self._message_cache.keys())[:50]
                     for k in keys:
                         del self._message_cache[k]
             else:
-                # Для не-Telegram просто парсим текст
-                configs.extend(self._extract_configs_from_text(text))
+                configs.extend(self._extract_configs_from_text_fast(text))
 
         configs = list(set(configs))
         processed = []
@@ -248,54 +266,11 @@ class AsyncConfigFetcher:
 
         return processed
 
-    def _extract_configs_from_text(self, text: str) -> List[str]:
-        """Извлекает конфиги из текста с ранней фильтрацией."""
-        configs = []
-        # Ранняя фильтрация: проверяем наличие хотя бы одного протокола
-        if not any(proto in text for proto in self._enabled_protocols_set):
-            return configs
-
-        # Проверяем на ssconf
-        if text.startswith('ssconf://'):
-            # Асинхронный вызов, но здесь синхронный контекст — пропускаем
-            # В реальности нужно вызывать fetch_ssconf_configs отдельно
-            return configs
-
-        # Базовая фильтрация по длине
-        if len(text) < 10:
-            return configs
-
-        # Разбиваем и фильтруем
-        parts = text.split()
-        for part in parts:
-            part = part.strip()
-            if not part or len(part) < 10:
-                continue
-            # Проверяем на Base64 и бинарный мусор
-            if self.validator.is_base64(part):
-                try:
-                    # Строгая валидация Base64
-                    decoded = base64.b64decode(part + '==', validate=True)
-                    if decoded:
-                        # Декодируем и пробуем извлечь конфиги
-                        decoded_text = decoded.decode('utf-8', errors='ignore')
-                        found = self.validator.split_configs(decoded_text)
-                        configs.extend(found)
-                except Exception:
-                    # Если не удалось декодировать — пропускаем
-                    continue
-            else:
-                # Обычный текст — пробуем извлечь напрямую
-                found = self.validator.split_configs(part)
-                configs.extend(found)
-        return configs
-
     def process_config(self, config: str, channel: ChannelConfig) -> List[str]:
         processed = []
         if config.startswith('hy2://'):
             config = self.validator.normalize_hysteria2_protocol(config)
 
-        # Используем кешированное определение протокола
         protocol = self._get_protocol(config)
         if not protocol:
             return processed
@@ -320,7 +295,6 @@ class AsyncConfigFetcher:
     def check_and_decode_base64(self, text: str) -> str:
         if self.validator.is_base64(text):
             try:
-                # Строгая валидация
                 decoded = base64.b64decode(text + '==', validate=True)
                 if decoded:
                     return decoded.decode('utf-8', errors='ignore')
@@ -329,11 +303,11 @@ class AsyncConfigFetcher:
         return text
 
     def extract_date_from_message(self, message) -> Optional[datetime]:
-        # Используем CSS-селектор напрямую
-        time_element = message.select_one('time')
-        if time_element and 'datetime' in time_element.attrs:
+        # Для lxml
+        time_elem = message.find('.//time')
+        if time_elem is not None and 'datetime' in time_elem.attrib:
             try:
-                dt_str = time_element['datetime']
+                dt_str = time_elem.attrib['datetime']
                 return date_parser.parse(dt_str)
             except Exception as e:
                 logger.debug(f"Date parsing failed: {e}")
