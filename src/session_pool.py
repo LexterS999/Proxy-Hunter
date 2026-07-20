@@ -1,93 +1,100 @@
 """
-Единый пул aiohttp ClientSession для всего приложения.
-Предотвращает создание множества соединений и улучшает переиспользование keep-alive.
-Добавлена блокировка и корректное закрытие старых соединений.
+session_pool.py - Пул aiohttp-сессий (синглтон)
 """
 
-import aiohttp
 import asyncio
 import logging
 from typing import Optional
 
+import aiohttp
+
 logger = logging.getLogger(__name__)
+
 
 class SessionPool:
     """
-    Синглтон для переиспользования одной aiohttp ClientSession.
-    Используется в fetch_configs.py и active_checker.py.
+    Синглтон-пул aiohttp-сессий.
+
+    [CHANGE] asyncio.Lock создаётся лениво при первом использовании (внутри
+    event loop), а не на уровне класса при импорте — это избегает проблем в
+    Python 3.10+, когда Lock, созданный вне loop, привязывается не к тому loop.
+
+    [CHANGE] параметры connector_limit / per_host теперь учитываются: если
+    запрошены большие лимиты, чем у текущей сессии, сессия пересоздаётся
+    (ранее параметры молча игнорировались после первого создания).
     """
 
-    _instance = None
+    _instance: Optional['SessionPool'] = None
     _session: Optional[aiohttp.ClientSession] = None
     _connector: Optional[aiohttp.TCPConnector] = None
-    _lock = asyncio.Lock()
+    _lock: Optional[asyncio.Lock] = None
+    _current_limit: int = 0
+    _current_per_host: int = 0
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    async def get_session(
-        self,
-        connector_limit: int = 200,
-        per_host_limit: int = 50,
-        timeout_total: float = 60.0,
-        headers: Optional[dict] = None
-    ) -> aiohttp.ClientSession:
-        """
-        Возвращает общую ClientSession. Параметры применяются только при первом создании.
-        Блокировка гарантирует, что сессия создаётся только один раз.
-        """
-        async with self._lock:
-            if self._session is None or self._session.closed:
-                # Закрываем старые объекты перед созданием новых
-                await self._cleanup_old()
+    @classmethod
+    def _get_lock(cls) -> asyncio.Lock:
+        """Ленивое создание Lock внутри текущего event loop."""
+        if cls._lock is None:
+            cls._lock = asyncio.Lock()
+        return cls._lock
 
-                self._connector = aiohttp.TCPConnector(
+    @classmethod
+    async def get_session(cls, connector_limit: int = 1000,
+                          per_host: int = 200,
+                          force_new: bool = False) -> aiohttp.ClientSession:
+        """
+        Возвращает (при необходимости создаёт) общую сессию.
+        Если запрошены большие лимиты — пересоздаёт сессию.
+        """
+        lock = cls._get_lock()
+        async with lock:
+            need_recreate = (
+                force_new
+                or cls._session is None
+                or cls._session.closed
+                or connector_limit > cls._current_limit
+                or per_host > cls._current_per_host
+            )
+
+            if need_recreate:
+                # Закрываем старую сессию, если есть
+                if cls._session is not None and not cls._session.closed:
+                    try:
+                        await cls._session.close()
+                    except Exception:
+                        pass
+
+                cls._connector = aiohttp.TCPConnector(
                     limit=connector_limit,
-                    limit_per_host=per_host_limit,
+                    limit_per_host=per_host,
                     ttl_dns_cache=300,
-                    enable_cleanup_closed=True,
-                    force_close=True  # Явно закрывать соединения
+                    ssl=False,
                 )
-                timeout = aiohttp.ClientTimeout(total=timeout_total)
-                default_headers = {
-                    'User-Agent': 'Proxy-Hunter/2.0',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.5',
-                    'Connection': 'keep-alive'
-                }
-                if headers:
-                    default_headers.update(headers)
-                self._session = aiohttp.ClientSession(
-                    connector=self._connector,
-                    timeout=timeout,
-                    headers=default_headers
+                cls._session = aiohttp.ClientSession(connector=cls._connector)
+                cls._current_limit = connector_limit
+                cls._current_per_host = per_host
+                logger.debug(
+                    f"🔌 Создана сессия: limit={connector_limit}, per_host={per_host}"
                 )
-                logger.info(
-                    f"Created shared ClientSession with limit={connector_limit}, "
-                    f"per_host_limit={per_host_limit}"
-                )
-            return self._session
 
-    async def _cleanup_old(self):
-        """Закрывает старый коннектор и сессию, если они существуют."""
-        if self._connector and not self._connector.closed:
-            await self._connector.close()
-            logger.debug("Closed old TCPConnector")
-        if self._session and not self._session.closed:
-            await self._session.close()
-            logger.debug("Closed old ClientSession")
-        self._connector = None
-        self._session = None
+            return cls._session
 
-    async def close(self):
+    @classmethod
+    async def close(cls):
         """Закрывает сессию и коннектор."""
-        async with self._lock:
-            await self._cleanup_old()
-            logger.info("Closed shared ClientSession and TCPConnector")
-
-    def reset(self):
-        """Сброс состояния (для тестов)."""
-        self._session = None
-        self._connector = None
+        lock = cls._get_lock()
+        async with lock:
+            if cls._session is not None and not cls._session.closed:
+                try:
+                    await cls._session.close()
+                except Exception as e:
+                    logger.debug(f"⚠️ close session: {e}")
+            cls._session = None
+            cls._connector = None
+            cls._current_limit = 0
+            cls._current_per_host = 0
