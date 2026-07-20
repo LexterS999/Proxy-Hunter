@@ -21,12 +21,23 @@ class ConfigToXray:
 
     @staticmethod
     def is_valid_address(address: str) -> bool:
-        """Проверяет, является ли строка корректным IPv4 или IPv6 адресом."""
+        """Проверяет, является ли строка корректным IPv4, IPv6 или доменным именем."""
+        if not address:
+            return False
+        # Проверка на IP
         try:
             ipaddress.ip_address(address)
             return True
         except ValueError:
-            return False
+            pass
+        # Проверка на домен (RFC 1123)
+        # Простая проверка: содержит точку и буквы/цифры/дефис
+        if '.' in address and len(address) < 255:
+            import re
+            # разрешены буквы, цифры, дефис, точка
+            if re.match(r'^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)*$', address):
+                return True
+        return False
 
     @staticmethod
     def get_xray_template() -> Dict:
@@ -171,7 +182,7 @@ class ConfigToXray:
         if not data.get('add') or not data.get('port') or not data.get('id'):
             return None
         if not self.is_valid_address(data.get('add', '')):
-            logger.debug(f"Skipping VMess config: address '{data.get('add')}' is not a valid IP")
+            logger.debug(f"Skipping VMess config: address '{data.get('add')}' is not a valid IP or domain")
             return None
         outbound = {
             "protocol": "vmess",
@@ -199,7 +210,7 @@ class ConfigToXray:
         if not data.get('address') or not data.get('port') or not data.get('uuid'):
             return None
         if not self.is_valid_address(data.get('address', '')):
-            logger.debug(f"Skipping VLESS config: address '{data.get('address')}' is not a valid IP")
+            logger.debug(f"Skipping VLESS config: address '{data.get('address')}' is not a valid IP or domain")
             return None
         outbound = {
             "protocol": "vless",
@@ -227,7 +238,7 @@ class ConfigToXray:
         if not data.get('address') or not data.get('port') or not data.get('password'):
             return None
         if not self.is_valid_address(data.get('address', '')):
-            logger.debug(f"Skipping Trojan config: address '{data.get('address')}' is not a valid IP")
+            logger.debug(f"Skipping Trojan config: address '{data.get('address')}' is not a valid IP or domain")
             return None
         outbound = {
             "protocol": "trojan",
@@ -249,7 +260,7 @@ class ConfigToXray:
         if not data.get('address') or not data.get('port') or not data.get('method') or not data.get('password'):
             return None
         if not self.is_valid_address(data.get('address', '')):
-            logger.debug(f"Skipping Shadowsocks config: address '{data.get('address')}' is not a valid IP")
+            logger.debug(f"Skipping Shadowsocks config: address '{data.get('address')}' is not a valid IP or domain")
             return None
         return {
             "protocol": "shadowsocks",
