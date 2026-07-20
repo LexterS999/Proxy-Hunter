@@ -147,10 +147,31 @@ class ChannelQualityAnalyzer:
         return unhealthy
 
     def update_health(self, channel_urls: List[str], run_id: int = None):
-        """Обновляет данные о здоровье для списка каналов (сохраняет метрики в БД)."""
-        # Здесь мы просто вызываем обновление метрик через отдельный метод,
-        # который уже используется в pipeline. Этот метод оставлен для интерфейса.
-        pass
+        """Обновляет метрики каналов в БД на основе текущих данных из config.SOURCE_URLS."""
+        try:
+            from config import ProxyConfig
+            config = ProxyConfig()
+            for ch in config.SOURCE_URLS:
+                if ch.url in channel_urls:
+                    # Сохраняем метрики в БД (используем db)
+                    m = ch.metrics
+                    metrics = {
+                        'total_configs': m.total_configs,
+                        'valid_configs': m.valid_configs,
+                        'unique_configs': m.unique_configs,
+                        'avg_response_time': m.avg_response_time,
+                        'last_success': m.last_success_time.isoformat() if m.last_success_time else None,
+                        'fail_count': m.fail_count,
+                        'success_count': m.success_count,
+                        'overall_score': m.overall_score,
+                        'protocol_counts': m.protocol_counts or {}
+                    }
+                    self.db.update_channel(ch.url, metrics, enabled=ch.enabled)
+                    if run_id is not None:
+                        self.db.add_channel_history(ch.url, run_id, metrics)
+            logger.info(f"Channel health updated for {len(channel_urls)} channels.")
+        except Exception as e:
+            logger.error(f"Failed to update channel health: {e}")
 
     def get_health_report(self) -> Dict:
         """Возвращает отчёт о состоянии всех каналов."""
