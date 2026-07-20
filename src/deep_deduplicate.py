@@ -1,5 +1,6 @@
 """
 Глубокая дедупликация с использованием xxHash и упрощённым индексом.
+Все методы асинхронные.
 """
 
 import re
@@ -21,24 +22,21 @@ from config_identity import ConfigIdentity
 
 logger = logging.getLogger(__name__)
 
-# Кеш DNS с TTL 300 сек
 _dns_cache = {}
 _dns_cache_time = {}
 _DNS_TTL = 300
 
+
 @lru_cache(maxsize=1024)
 def _resolve_hostname(hostname: str) -> Optional[str]:
-    """Разрешает домен в IP с кешированием."""
     if not hostname:
         return None
     try:
-        # Проверяем, не IP ли это
         ipaddress.ip_address(hostname)
         return hostname
     except ValueError:
         pass
     try:
-        # Разрешаем через DNS
         ip = socket.gethostbyname(hostname)
         return ip
     except Exception:
@@ -51,7 +49,6 @@ class DeepDeduplicator:
         self.fingerprint_to_config = {}
         self.best_configs = {}
         self._bloom = ShardedBloomDeduplicator(cache_dir="bloom_shards")
-        # Индекс по подсети (/24 для IPv4, /48 для IPv6) с портом
         self._subnet_index: Dict[str, Set[str]] = defaultdict(set)
         self._server_cache = {}
         self._index = set()
@@ -113,33 +110,15 @@ class DeepDeduplicator:
                 result['fingerprint'] = xxhash.xxh64(
                     f"{result['server']}:{result['port']}:{result['credential']}".encode()
                 ).hexdigest()
-            elif config_lower.startswith(('hysteria2://', 'hy2://')):
-                result['protocol'] = 'hysteria2'
-                result['server'] = data.get('address')
-                result['port'] = int(data.get('port', 0))
-                result['credential'] = data.get('password', '')
-                result['fingerprint'] = xxhash.xxh64(
-                    f"{result['server']}:{result['port']}:{result['credential']}".encode()
-                ).hexdigest()
-            elif config_lower.startswith('tuic://'):
-                result['protocol'] = 'tuic'
-                result['server'] = data.get('address')
-                result['port'] = int(data.get('port', 0))
-                result['credential'] = f"{data.get('uuid', '')}:{data.get('password', '')}"
-                result['fingerprint'] = xxhash.xxh64(
-                    f"{result['server']}:{result['port']}:{result['credential']}".encode()
-                ).hexdigest()
             return result if result['fingerprint'] else None
         except Exception as e:
             logger.debug(f"Fingerprint generation failed: {e}")
             return None
 
     def _get_index_key(self, fp_data: Dict) -> str:
-        """Включает credential для лучшей дедупликации."""
         return f"{fp_data['server']}:{fp_data['port']}:{fp_data['protocol']}:{fp_data['credential']}"
 
     def _get_subnet_key(self, server: str, port: int, protocol: str) -> str:
-        """Возвращает ключ подсети с учётом порта."""
         try:
             ip = ipaddress.ip_address(server)
             if ip.version == 4:
@@ -149,7 +128,6 @@ class DeepDeduplicator:
                 network = ipaddress.ip_network(f"{server}/48", strict=False)
                 return f"{network}:{protocol}:{port}"
         except ValueError:
-            # Доменное имя — разрешаем через DNS
             resolved = _resolve_hostname(server)
             if resolved:
                 try:
@@ -179,23 +157,7 @@ class DeepDeduplicator:
         return subnet1 == subnet2
 
     async def contains_batch(self, configs: List[str]) -> Dict[str, bool]:
-        """Пакетная проверка наличия в Bloom-фильтре."""
-        result = {}
-        # Группируем по шардам для эффективности
-        shard_map = defaultdict(list)
-        for cfg in configs:
-            shard_idx = self._bloom._get_shard_index(cfg)
-            shard_map[shard_idx].append(cfg)
-        for shard_idx, cfgs in shard_map.items():
-            await self._bloom._load_shard(shard_idx)
-            bloom = self._bloom.shards.get(shard_idx)
-            if bloom:
-                for cfg in cfgs:
-                    result[cfg] = cfg in bloom
-            else:
-                for cfg in cfgs:
-                    result[cfg] = False
-        return result
+        return await self._bloom.contains_batch(configs)
 
     async def deduplicate_configs_async(self, configs: List[str], quality_scores: Dict[str, float] = None) -> List[str]:
         if quality_scores is None:
@@ -204,8 +166,7 @@ class DeepDeduplicator:
         groups = defaultdict(list)
         fingerprint_data = {}
 
-        # Пакетная проверка через Bloom
-        presence = await self.contains_batch(configs)
+        presence = await self._bloom.contains_batch(configs)
         for config in configs:
             if presence.get(config, False):
                 fp_data = self.generate_fingerprint(config)
@@ -237,14 +198,12 @@ class DeepDeduplicator:
                     continue
                 seen_subnets.add(subnet_key)
 
-            # Комбинированный скор: quality_score * 0.6 + protocol_priority * 0.4
             def combined_score(cfg):
                 q = quality_scores.get(cfg, 0)
                 proto = cfg.split('://')[0].lower() if '://' in cfg else ''
                 priority = self._protocol_priority.get(proto, 3)
-                # Приоритет: чем меньше число, тем лучше, поэтому нормализуем
                 priority_score = max(0, 1 - (priority - 1) * 0.3)
-                return q * 0.6 + priority_score * 40  # 40 — максимальный priority_score * 0.4 * 100
+                return q * 0.6 + priority_score * 40
 
             best = max(group, key=combined_score)
             fp_best = self.generate_fingerprint(best)
@@ -260,9 +219,15 @@ class DeepDeduplicator:
         logger.info(f"Deep deduplication: {len(configs)} → {len(best_configs)} configs")
         return best_configs
 
+    # Синхронный метод для обратной совместимости
     def deduplicate_configs(self, configs: List[str], quality_scores: Dict[str, float] = None) -> List[str]:
-        import asyncio
-        return asyncio.run(self.deduplicate_configs_async(configs, quality_scores))
+        try:
+            loop = asyncio.get_running_loop()
+            # Если цикл уже запущен, создаём задачу
+            return asyncio.run(self.deduplicate_configs_async(configs, quality_scores))
+        except RuntimeError:
+            # Нет запущенного цикла
+            return asyncio.run(self.deduplicate_configs_async(configs, quality_scores))
 
     def remove_low_quality(self, configs: List[str], quality_data: List[Dict], min_score: float = 30.0) -> List[str]:
         filtered = [
