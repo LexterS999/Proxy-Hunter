@@ -30,7 +30,7 @@ MIN_PROTOCOLS = max(1, CHANNEL_MIN_PROTOCOLS)
 HISTORY_DAYS = max(7, CHANNEL_HISTORY_DAYS)
 RECOVERING_TREND_THRESHOLD = max(0.05, CHANNEL_RECOVERING_TREND_THRESHOLD)
 MIN_RECENT_DAYS_FOR_TREND = max(2, CHANNEL_MIN_RECENT_DAYS_FOR_TREND)
-MAX_HISTORY_SCORES = 100  # Ограничение на количество записей в истории
+MAX_HISTORY_SCORES = 100
 
 
 class ChannelQualityAnalyzer:
@@ -42,9 +42,9 @@ class ChannelQualityAnalyzer:
         self.db = get_db()
         self._whitelist = set(CHANNEL_WHITELIST)
         self._is_first_run = self._check_first_run()
+        self._last_check_cache = {}
 
     def _check_first_run(self) -> bool:
-        """Проверяет, был ли хотя бы один запуск."""
         import asyncio
         try:
             last_run = asyncio.run(self.db.get_last_run())
@@ -53,7 +53,6 @@ class ChannelQualityAnalyzer:
             return True
 
     def _get_channel_history_scores(self, url: str, days: int = HISTORY_DAYS) -> List[Dict]:
-        """Возвращает историю скоров канала за последние days дней с ограничением."""
         import asyncio
         try:
             return asyncio.run(self.db.get_channel_history_scores(url, days, MAX_HISTORY_SCORES))
@@ -61,20 +60,16 @@ class ChannelQualityAnalyzer:
             logger.warning(f"Failed to get channel history for {url}: {e}")
             return []
 
-    def _calculate_long_term_score(self, url: str, days: int = HISTORY_DAYS) -> Optional[float]:
-        scores = self._get_channel_history_scores(url, days)
-        valid_scores = [s['score'] for s in scores if s['score'] > 0]
-        if not valid_scores:
-            return None
-        return sum(valid_scores) / len(valid_scores)
-
-    def _compute_trend(self, scores: List[float]) -> float:
-        if len(scores) < 2:
-            return 0.0
-        x = np.arange(len(scores))
-        y = np.array(scores)
-        coeffs = np.polyfit(x, y, 1)
-        return coeffs[0]
+    def get_channel_score(self, url: str) -> float:
+        """Вычисляет взвешенное скользящее среднее."""
+        history = self._get_channel_history_scores(url, days=7)
+        if not history:
+            return 0
+        scores = [h['score'] for h in history if h['score'] > 0]
+        if not scores:
+            return 0
+        weights = np.exp(np.linspace(-1, 0, len(scores)))
+        return np.average(scores, weights=weights)
 
     def _get_channel_state(self, url: str) -> str:
         if url in self._whitelist:
@@ -84,37 +79,21 @@ class ChannelQualityAnalyzer:
             logger.info(f"First run: assuming all channels active, including {url}")
             return 'active'
 
-        history = self._get_channel_history_scores(url, days=HISTORY_DAYS)
-        if not history:
-            return 'inactive'
+        if url in self._last_check_cache:
+            last_check = self._last_check_cache[url]
+            if (datetime.now(timezone.utc) - last_check).days < 3:
+                return 'inactive'
 
-        valid_entries = [h for h in history if h['score'] > 0]
-        if not valid_entries:
-            return 'inactive'
-
-        scores = [h['score'] for h in valid_entries]
-        avg_score = sum(scores) / len(scores)
-
-        if avg_score >= HEALTH_THRESHOLD:
+        score = self.get_channel_score(url)
+        if score >= HEALTH_THRESHOLD:
             return 'active'
-
-        recent_count = min(MIN_RECENT_DAYS_FOR_TREND, len(scores))
-        if recent_count < 2:
-            return 'inactive'
-
-        recent_scores = scores[-recent_count:]
-        slope = self._compute_trend(recent_scores)
-        threshold = RECOVERING_TREND_THRESHOLD * avg_score
-
-        if slope > threshold:
-            logger.debug(f"Channel {url} has positive trend (slope={slope:.2f}) -> recovering")
-            return 'recovering'
         else:
+            self._last_check_cache[url] = datetime.now(timezone.utc)
             return 'inactive'
 
     def is_channel_healthy(self, channel_url: str) -> bool:
         state = self._get_channel_state(channel_url)
-        return state in ('active', 'recovering')
+        return state == 'active'
 
     def get_channel_state(self, channel_url: str) -> str:
         return self._get_channel_state(channel_url)
@@ -155,7 +134,7 @@ class ChannelQualityAnalyzer:
     def get_health_report(self) -> Dict:
         import asyncio
         channels = asyncio.run(self.db.get_all_channels())
-        states = {'active': 0, 'inactive': 0, 'recovering': 0}
+        states = {'active': 0, 'inactive': 0}
         total = len(channels)
         for ch in channels:
             state = self._get_channel_state(ch['url'])
@@ -165,8 +144,7 @@ class ChannelQualityAnalyzer:
             'summary': {
                 'total': total,
                 'active': states.get('active', 0),
-                'inactive': states.get('inactive', 0),
-                'recovering': states.get('recovering', 0)
+                'inactive': states.get('inactive', 0)
             }
         }
 
