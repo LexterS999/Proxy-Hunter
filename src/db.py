@@ -1,382 +1,279 @@
 """
-Модуль для работы с SQLite-базой данных истории.
-Хранит статистику запусков, каналов и профилей с компрессией.
-Добавлены индексы, LRU-кеш для распаковки, WAL-режим.
+db.py - SQLite хранилище истории и профилей
 """
 
 import sqlite3
-import json
-import zlib
 import logging
-import os
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
-from contextlib import contextmanager
 from functools import lru_cache
+from typing import List, Dict, Any, Optional, Tuple
+
+try:
+    import msgpack
+    import zstandard as zstd
+    _HAS_COMPRESSION = True
+except ImportError:
+    _HAS_COMPRESSION = False
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = "configs/history.db"
-COMPRESS_LEVEL = 6  # уровень сжатия zlib
 
+# --------------------------------------------------------------------------- #
+#  Сжатие / распаковка
+# --------------------------------------------------------------------------- #
 
 def _compress(data: Any) -> bytes:
-    """Сжимает JSON-данные в bytes."""
-    if data is None:
-        return b''
+    """Сжимает данные (msgpack + zstd)."""
+    if not _HAS_COMPRESSION:
+        import json
+        return json.dumps(data, ensure_ascii=False).encode('utf-8')
     try:
-        return zlib.compress(json.dumps(data).encode('utf-8'), level=COMPRESS_LEVEL)
+        packed = msgpack.packb(data, use_bin_type=True)
+        return zstd.ZstdCompressor().compress(packed)
     except Exception:
-        return b''
+        import json
+        return json.dumps(data, ensure_ascii=False).encode('utf-8')
 
 
-@lru_cache(maxsize=1024)
-def _decompress_cached(blob: bytes) -> Any:
-    """Распаковывает bytes в JSON-объект с кешированием."""
-    if blob is None or not blob:
+def _decompress(data: bytes) -> Any:
+    """
+    [CHANGE] Распаковка БЕЗ lru_cache.
+    Ранее @lru_cache кэшировал большие blob'ы и возвращал тот же изменяемый
+    объект (dict/list) — мутация результата ломала кеш. Теперь каждый вызов
+    возвращает свежий объект.
+    """
+    if not data:
         return None
+    if not _HAS_COMPRESSION:
+        import json
+        try:
+            return json.loads(data.decode('utf-8'))
+        except Exception:
+            return None
     try:
-        return json.loads(zlib.decompress(blob).decode('utf-8'))
+        return msgpack.unpackb(zstd.ZstdDecompressor().decompress(data), raw=False)
     except Exception:
-        return None
-
-
-def _decompress(blob: bytes) -> Any:
-    """Обёртка для обратной совместимости."""
-    return _decompress_cached(blob)
+        import json
+        try:
+            return json.loads(data.decode('utf-8'))
+        except Exception:
+            return None
 
 
 class HistoryDB:
-    """Синглтон для доступа к SQLite базе истории с индексами и WAL."""
+    """SQLite хранилище истории запусков и профилей конфигов (синглтон)."""
 
     _instance = None
 
-    def __new__(cls):
+    def __new__(cls, db_path: str = 'configs/history.db'):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance._init_db()
+            cls._instance._initialized = False
         return cls._instance
 
-    def _init_db(self):
-        """Создаёт таблицы и индексы, включает WAL."""
-        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-        with self._get_connection() as conn:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-            cursor = conn.cursor()
+    def __init__(self, db_path: str = 'configs/history.db'):
+        if self._initialized:
+            return
+        self.db_path = db_path
+        self._init_db()
+        self._initialized = True
 
-            # Таблица запусков (runs)
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS runs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT NOT NULL,
-                    total_raw INTEGER,
-                    total_valid INTEGER,
-                    total_final INTEGER,
-                    avg_score REAL,
-                    p50_latency REAL,
-                    p95_latency REAL,
-                    p99_latency REAL,
-                    success_rate REAL,
-                    protocols BLOB,
-                    geo_distribution BLOB,
-                    anomalies BLOB
-                )
-            ''')
-
-            # Таблица каналов (channels)
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS channels (
-                    url TEXT PRIMARY KEY,
-                    enabled INTEGER DEFAULT 1,
-                    metrics BLOB,
-                    last_updated TEXT
-                )
-            ''')
-
-            # Таблица профилей (profiles)
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS profiles (
-                    key TEXT PRIMARY KEY,
-                    server TEXT,
-                    protocol TEXT,
-                    first_seen TEXT,
-                    last_seen TEXT,
-                    success_count INTEGER DEFAULT 0,
-                    fail_count INTEGER DEFAULT 0,
-                    latencies BLOB,
-                    timestamps BLOB,
-                    is_active INTEGER DEFAULT 1,
-                    stability REAL,
-                    lifetime REAL,
-                    overall_score REAL
-                )
-            ''')
-
-            # Таблица метаданных
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS metadata (
-                    key TEXT PRIMARY KEY,
-                    value TEXT
-                )
-            ''')
-
-            # Таблица истории каналов (channel_history)
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS channel_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    url TEXT,
-                    run_id INTEGER,
-                    total_configs INTEGER,
-                    valid_configs INTEGER,
-                    unique_configs INTEGER,
-                    avg_response_time REAL,
-                    overall_score REAL,
-                    protocol_counts BLOB,
-                    timestamp TEXT,
-                    FOREIGN KEY(run_id) REFERENCES runs(id)
-                )
-            ''')
-
-            # Индексы (добавляем, если их нет)
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_history_url ON channel_history(url)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_history_timestamp ON channel_history(timestamp)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_history_run_id ON channel_history(run_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_profiles_server ON profiles(server)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_profiles_protocol ON profiles(protocol)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_profiles_last_seen ON profiles(last_seen)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_runs_timestamp ON runs(timestamp)")
-
-            conn.commit()
-            logger.info("SQLite history database initialized with indexes and WAL.")
-
-    @contextmanager
-    def _get_connection(self):
-        """Контекстный менеджер для соединения с БД."""
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    def _get_connection(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self):
+        """Создаёт таблицы (если не существуют)."""
+        conn = self._get_connection()
         try:
-            yield conn
+            with conn:
+                conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS history (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        run_id TEXT,
+                        channel_url TEXT,
+                        total_configs INTEGER DEFAULT 0,
+                        success INTEGER DEFAULT 0,
+                        avg_latency REAL DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+
+                    CREATE TABLE IF NOT EXISTS channels (
+                        channel_url TEXT PRIMARY KEY,
+                        success_rate REAL DEFAULT 0,
+                        total_configs INTEGER DEFAULT 0,
+                        last_run TEXT,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+
+                    CREATE TABLE IF NOT EXISTS profiles (
+                        fingerprint TEXT PRIMARY KEY,
+                        data BLOB,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_history_channel
+                        ON history(channel_url);
+                    CREATE INDEX IF NOT EXISTS idx_history_run
+                        ON history(run_id);
+                """)
         finally:
             conn.close()
 
-    # ----- Методы для работы с runs (без изменений) -----
-    def add_run(self, stats: Dict) -> int:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO runs (
-                    timestamp, total_raw, total_valid, total_final,
-                    avg_score, p50_latency, p95_latency, p99_latency,
-                    success_rate, protocols, geo_distribution, anomalies
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                stats.get('timestamp', datetime.now().isoformat()),
-                stats.get('total_raw', 0),
-                stats.get('total_valid', 0),
-                stats.get('total_final', 0),
-                stats.get('avg_score', 0.0),
-                stats.get('p50_latency', 0.0),
-                stats.get('p95_latency', 0.0),
-                stats.get('p99_latency', 0.0),
-                stats.get('success_rate', 0.0),
-                _compress(stats.get('protocols', {})),
-                _compress(stats.get('geo_distribution', {})),
-                _compress(stats.get('anomalies', []))
-            ))
-            conn.commit()
-            return cursor.lastrowid
+    # ------------------------------------------------------------------ #
+    #  History
+    # ------------------------------------------------------------------ #
 
-    def get_recent_runs(self, limit: int = 10) -> List[Dict]:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT * FROM runs ORDER BY timestamp DESC LIMIT ?
-            ''', (limit,))
-            rows = cursor.fetchall()
-            result = []
-            for row in rows:
-                d = dict(row)
-                d['protocols'] = _decompress(row['protocols']) or {}
-                d['geo_distribution'] = _decompress(row['geo_distribution']) or {}
-                d['anomalies'] = _decompress(row['anomalies']) or []
-                result.append(d)
-            return result
+    def add_history(self, run_id: str, channel_url: str, total_configs: int,
+                    success: int, avg_latency: float = 0.0):
+        conn = self._get_connection()
+        try:
+            with conn:
+                conn.execute(
+                    "INSERT INTO history (run_id, channel_url, total_configs, success, avg_latency) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (run_id, channel_url, total_configs, success, avg_latency)
+                )
+        finally:
+            conn.close()
 
-    def get_last_run(self) -> Optional[Dict]:
-        runs = self.get_recent_runs(1)
-        return runs[0] if runs else None
+    def get_channel_stats(self, channel_url: str, limit: int = 100) -> List[Dict]:
+        """Возвращает последние записи истории для канала."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT total_configs, success, avg_latency, created_at "
+                "FROM history WHERE channel_url = ? ORDER BY created_at DESC LIMIT ?",
+                (channel_url, limit)
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
 
-    # ----- Методы для работы с каналами (без изменений) -----
-    def update_channel(self, url: str, metrics: Dict, enabled: bool = True):
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT OR REPLACE INTO channels (url, enabled, metrics, last_updated)
-                VALUES (?, ?, ?, ?)
-            ''', (
-                url,
-                1 if enabled else 0,
-                _compress(metrics),
-                datetime.now().isoformat()
-            ))
-            conn.commit()
+    # ------------------------------------------------------------------ #
+    #  Channels
+    # ------------------------------------------------------------------ #
 
-    def get_channel(self, url: str) -> Optional[Dict]:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT * FROM channels WHERE url = ?', (url,))
-            row = cursor.fetchone()
+    def get_channel(self, channel_url: str) -> Optional[Dict]:
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM channels WHERE channel_url = ?", (channel_url,)
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def update_channel(self, channel_url: str, **kwargs):
+        """Создаёт или обновляет запись канала."""
+        conn = self._get_connection()
+        try:
+            with conn:
+                existing = conn.execute(
+                    "SELECT 1 FROM channels WHERE channel_url = ?", (channel_url,)
+                ).fetchone()
+                if existing:
+                    sets = ', '.join(f"{k} = ?" for k in kwargs)
+                    vals = list(kwargs.values()) + [channel_url]
+                    conn.execute(
+                        f"UPDATE channels SET {sets}, updated_at = CURRENT_TIMESTAMP "
+                        f"WHERE channel_url = ?", vals
+                    )
+                else:
+                    cols = ['channel_url'] + list(kwargs.keys())
+                    placeholders = ', '.join('?' * len(cols))
+                    vals = [channel_url] + list(kwargs.values())
+                    conn.execute(
+                        f"INSERT INTO channels ({', '.join(cols)}) VALUES ({placeholders})",
+                        vals
+                    )
+        finally:
+            conn.close()
+
+    # ------------------------------------------------------------------ #
+    #  Profiles (одиночные)
+    # ------------------------------------------------------------------ #
+
+    def get_profile(self, fingerprint: str) -> Dict:
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT data FROM profiles WHERE fingerprint = ?", (fingerprint,)
+            ).fetchone()
             if row:
-                d = dict(row)
-                d['metrics'] = _decompress(row['metrics']) or {}
-                return d
-            return None
+                return _decompress(row['data']) or {}
+            return {}
+        finally:
+            conn.close()
 
-    def get_all_channels(self) -> List[Dict]:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT * FROM channels')
-            rows = cursor.fetchall()
-            result = []
-            for row in rows:
-                d = dict(row)
-                d['metrics'] = _decompress(row['metrics']) or {}
-                result.append(d)
+    def update_profile(self, fingerprint: str, data: Dict):
+        conn = self._get_connection()
+        try:
+            with conn:
+                conn.execute(
+                    "INSERT INTO profiles (fingerprint, data) VALUES (?, ?) "
+                    "ON CONFLICT(fingerprint) DO UPDATE SET data = excluded.data, "
+                    "updated_at = CURRENT_TIMESTAMP",
+                    (fingerprint, _compress(data))
+                )
+        finally:
+            conn.close()
+
+    # ------------------------------------------------------------------ #
+    #  [CHANGE] Profiles (батчинг) — устраняет N+1 запросов
+    # ------------------------------------------------------------------ #
+
+    def get_profiles_batch(self, fingerprints: List[str]) -> Dict[str, Dict]:
+        """
+        Пакетная загрузка профилей. SQLite ограничивает число параметров (~999),
+        поэтому бьём на чанки по 900.
+        """
+        if not fingerprints:
+            return {}
+        conn = self._get_connection()
+        result: Dict[str, Dict] = {}
+        try:
+            for i in range(0, len(fingerprints), 900):
+                chunk = fingerprints[i:i + 900]
+                placeholders = ','.join('?' * len(chunk))
+                rows = conn.execute(
+                    f"SELECT fingerprint, data FROM profiles "
+                    f"WHERE fingerprint IN ({placeholders})", chunk
+                ).fetchall()
+                for row in rows:
+                    result[row['fingerprint']] = _decompress(row['data']) or {}
             return result
+        finally:
+            conn.close()
 
-    # ----- Методы для работы с профилями (без изменений) -----
-    def update_profile(self, key: str, profile_data: Dict):
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT OR REPLACE INTO profiles (
-                    key, server, protocol, first_seen, last_seen,
-                    success_count, fail_count, latencies, timestamps,
-                    is_active, stability, lifetime, overall_score
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                key,
-                profile_data.get('server', ''),
-                profile_data.get('protocol', ''),
-                profile_data.get('first_seen', datetime.now().isoformat()),
-                profile_data.get('last_seen', datetime.now().isoformat()),
-                profile_data.get('success_count', 0),
-                profile_data.get('fail_count', 0),
-                _compress(profile_data.get('latencies', [])),
-                _compress(profile_data.get('timestamps', [])),
-                1 if profile_data.get('is_active', True) else 0,
-                profile_data.get('stability', 0.0),
-                profile_data.get('lifetime', 0.0),
-                profile_data.get('overall_score', 0.0)
-            ))
-            conn.commit()
-
-    def get_profile(self, key: str) -> Optional[Dict]:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT * FROM profiles WHERE key = ?', (key,))
-            row = cursor.fetchone()
-            if row:
-                d = dict(row)
-                d['latencies'] = _decompress(row['latencies']) or []
-                d['timestamps'] = _decompress(row['timestamps']) or []
-                d['is_active'] = bool(row['is_active'])
-                return d
-            return None
-
-    def get_all_profiles(self) -> List[Dict]:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT * FROM profiles')
-            rows = cursor.fetchall()
-            result = []
-            for row in rows:
-                d = dict(row)
-                d['latencies'] = _decompress(row['latencies']) or []
-                d['timestamps'] = _decompress(row['timestamps']) or []
-                d['is_active'] = bool(row['is_active'])
-                result.append(d)
-            return result
-
-    # ----- Методы для метаданных (без изменений) -----
-    def get_metadata(self, key: str, default: Any = None) -> Any:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT value FROM metadata WHERE key = ?', (key,))
-            row = cursor.fetchone()
-            if row:
-                try:
-                    return json.loads(row['value'])
-                except:
-                    return row['value']
-            return default
-
-    def set_metadata(self, key: str, value: Any):
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)
-            ''', (key, json.dumps(value)))
-            conn.commit()
-
-    # ----- Методы для истории каналов (без изменений) -----
-    def add_channel_history(self, url: str, run_id: int, metrics: Dict):
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO channel_history (
-                    url, run_id, total_configs, valid_configs, unique_configs,
-                    avg_response_time, overall_score, protocol_counts, timestamp
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                url,
-                run_id,
-                metrics.get('total_configs', 0),
-                metrics.get('valid_configs', 0),
-                metrics.get('unique_configs', 0),
-                metrics.get('avg_response_time', 0.0),
-                metrics.get('overall_score', 0.0),
-                _compress(metrics.get('protocol_counts', {})),
-                datetime.now().isoformat()
-            ))
-            conn.commit()
-
-    def get_channel_history(self, url: str, limit: int = 10) -> List[Dict]:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT * FROM channel_history
-                WHERE url = ?
-                ORDER BY timestamp DESC LIMIT ?
-            ''', (url, limit))
-            rows = cursor.fetchall()
-            result = []
-            for row in rows:
-                d = dict(row)
-                d['protocol_counts'] = _decompress(row['protocol_counts']) or {}
-                result.append(d)
-            return result
-
-    def get_channel_history_scores(self, url: str, days: int = 7) -> List[Dict]:
-        cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT timestamp, overall_score FROM channel_history
-                WHERE url = ? AND timestamp >= ?
-                ORDER BY timestamp ASC
-            ''', (url, cutoff))
-            rows = cursor.fetchall()
-            return [{'timestamp': row['timestamp'], 'score': row['overall_score']} for row in rows]
-
-    def get_channel_long_term_score(self, url: str, days: int = 7) -> Optional[float]:
-        scores = self.get_channel_history_scores(url, days)
-        valid_scores = [s['score'] for s in scores if s['score'] > 0]
-        if not valid_scores:
-            return None
-        return sum(valid_scores) / len(valid_scores)
+    def update_profiles_batch(self, updates: List[Tuple[str, Dict]]):
+        """
+        Пакетная запись профилей в одной транзакции (executemany).
+        updates: список (fingerprint, data).
+        """
+        if not updates:
+            return
+        conn = self._get_connection()
+        try:
+            rows = [(fp, _compress(data)) for fp, data in updates]
+            with conn:
+                conn.executemany(
+                    "INSERT INTO profiles (fingerprint, data) VALUES (?, ?) "
+                    "ON CONFLICT(fingerprint) DO UPDATE SET data = excluded.data, "
+                    "updated_at = CURRENT_TIMESTAMP",
+                    rows
+                )
+        finally:
+            conn.close()
 
 
-# Инициализация
-_db = HistoryDB()
+# --------------------------------------------------------------------------- #
+#  [CHANGE] Ленивая инициализация синглтона.
+#  Ранее в конце модуля было `_db = HistoryDB()`, что создавало БД при ЛЮБОМ
+#  импорте db (побочный эффект). Теперь экземпляр создаётся только при вызове.
+# --------------------------------------------------------------------------- #
+
+@lru_cache(maxsize=1)
+def get_db(db_path: str = 'configs/history.db') -> HistoryDB:
+    """Ленивая фабрика единственного экземпляра БД."""
+    return HistoryDB(db_path)
