@@ -6,7 +6,7 @@
 
 import logging
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set
 
 from db import get_db
@@ -23,41 +23,45 @@ from user_settings import (
 
 logger = logging.getLogger(__name__)
 
-# Переопределяем пороги, чтобы сделать их более консервативными
 HEALTH_THRESHOLD = max(30.0, CHANNEL_HEALTH_THRESHOLD)
 MIN_CONFIGS = max(3, CHANNEL_MIN_CONFIGS)
 MIN_VALID_RATIO = max(0.05, CHANNEL_MIN_VALID_RATIO)
 MIN_PROTOCOLS = max(1, CHANNEL_MIN_PROTOCOLS)
-HISTORY_DAYS = max(7, CHANNEL_HISTORY_DAYS)  # минимум 7 дней
+HISTORY_DAYS = max(7, CHANNEL_HISTORY_DAYS)
 RECOVERING_TREND_THRESHOLD = max(0.05, CHANNEL_RECOVERING_TREND_THRESHOLD)
 MIN_RECENT_DAYS_FOR_TREND = max(2, CHANNEL_MIN_RECENT_DAYS_FOR_TREND)
+MAX_HISTORY_SCORES = 100  # Ограничение на количество записей в истории
 
 
 class ChannelQualityAnalyzer:
     """
     Анализирует качество каналов на основе долгосрочной истории (SQLite) с учётом трендов.
-    Состояния канала:
-        - 'active'   : стабильно здоров (средний скор >= порога)
-        - 'inactive' : стабильно болен (средний скор < порога, без признаков оживления)
-        - 'recovering' : был болен, но наблюдается положительный тренд (канал оживает)
     """
 
     def __init__(self):
         self.db = get_db()
-        self._whitelist = set(CHANNEL_WHITELIST)
+        self._whitelist = set(CHANNEL_WHILETLIST)
         self._is_first_run = self._check_first_run()
 
     def _check_first_run(self) -> bool:
         """Проверяет, был ли хотя бы один запуск."""
-        last_run = self.db.get_last_run()
-        return last_run is None
+        import asyncio
+        try:
+            last_run = asyncio.run(self.db.get_last_run())
+            return last_run is None
+        except Exception:
+            return True
 
     def _get_channel_history_scores(self, url: str, days: int = HISTORY_DAYS) -> List[Dict]:
-        """Возвращает историю скоров канала за последние days дней."""
-        return self.db.get_channel_history_scores(url, days)
+        """Возвращает историю скоров канала за последние days дней с ограничением."""
+        import asyncio
+        try:
+            return asyncio.run(self.db.get_channel_history_scores(url, days, MAX_HISTORY_SCORES))
+        except Exception as e:
+            logger.warning(f"Failed to get channel history for {url}: {e}")
+            return []
 
     def _calculate_long_term_score(self, url: str, days: int = HISTORY_DAYS) -> Optional[float]:
-        """Вычисляет средний скор за последние days дней."""
         scores = self._get_channel_history_scores(url, days)
         valid_scores = [s['score'] for s in scores if s['score'] > 0]
         if not valid_scores:
@@ -65,24 +69,14 @@ class ChannelQualityAnalyzer:
         return sum(valid_scores) / len(valid_scores)
 
     def _compute_trend(self, scores: List[float]) -> float:
-        """
-        Вычисляет наклон линейной регрессии по временному ряду скоров.
-        Положительное значение -> рост, отрицательное -> падение.
-        """
         if len(scores) < 2:
             return 0.0
         x = np.arange(len(scores))
         y = np.array(scores)
-        # Линейная регрессия через polyfit (степень 1)
         coeffs = np.polyfit(x, y, 1)
-        slope = coeffs[0]  # наклон
-        return slope
+        return coeffs[0]
 
     def _get_channel_state(self, url: str) -> str:
-        """
-        Определяет состояние канала на основе истории и тренда.
-        Возвращает 'active', 'inactive' или 'recovering'.
-        """
         if url in self._whitelist:
             return 'active'
 
@@ -90,13 +84,10 @@ class ChannelQualityAnalyzer:
             logger.info(f"First run: assuming all channels active, including {url}")
             return 'active'
 
-        # Получаем все scores за последние HISTORY_DAYS дней
         history = self._get_channel_history_scores(url, days=HISTORY_DAYS)
         if not history:
-            # Нет данных -> считаем неактивным
             return 'inactive'
 
-        # Отфильтруем только те записи, где score > 0 (были конфиги)
         valid_entries = [h for h in history if h['score'] > 0]
         if not valid_entries:
             return 'inactive'
@@ -104,25 +95,17 @@ class ChannelQualityAnalyzer:
         scores = [h['score'] for h in valid_entries]
         avg_score = sum(scores) / len(scores)
 
-        # Определяем, здоров ли канал по среднему скору
-        is_healthy = avg_score >= HEALTH_THRESHOLD
-
-        # Если здоров, то активен
-        if is_healthy:
+        if avg_score >= HEALTH_THRESHOLD:
             return 'active'
 
-        # Если не здоров, проверяем тренд за последние MIN_RECENT_DAYS_FOR_TREND дней
-        # Берём последние N записей (N = MIN_RECENT_DAYS_FOR_TREND, но не более имеющихся)
         recent_count = min(MIN_RECENT_DAYS_FOR_TREND, len(scores))
         if recent_count < 2:
-            return 'inactive'  # недостаточно данных для тренда
+            return 'inactive'
 
         recent_scores = scores[-recent_count:]
         slope = self._compute_trend(recent_scores)
-
-        # Если наклон положительный и превышает порог (относительно среднего скора)
-        # Например, если средний скор = 20, а наклон > 0.1*20 = 2, то считаем восстанавливающимся
         threshold = RECOVERING_TREND_THRESHOLD * avg_score
+
         if slope > threshold:
             logger.debug(f"Channel {url} has positive trend (slope={slope:.2f}) -> recovering")
             return 'recovering'
@@ -130,16 +113,13 @@ class ChannelQualityAnalyzer:
             return 'inactive'
 
     def is_channel_healthy(self, channel_url: str) -> bool:
-        """Проверяет, здоров ли канал (активен или восстанавливается)."""
         state = self._get_channel_state(channel_url)
         return state in ('active', 'recovering')
 
     def get_channel_state(self, channel_url: str) -> str:
-        """Возвращает текущее состояние канала."""
         return self._get_channel_state(channel_url)
 
     def get_unhealthy_channels(self, channel_urls: List[str]) -> List[str]:
-        """Возвращает список каналов, которые находятся в состоянии 'inactive'."""
         unhealthy = []
         for url in channel_urls:
             if self._get_channel_state(url) == 'inactive':
@@ -147,13 +127,12 @@ class ChannelQualityAnalyzer:
         return unhealthy
 
     def update_health(self, channel_urls: List[str], run_id: int = None):
-        """Обновляет метрики каналов в БД на основе текущих данных из config.SOURCE_URLS."""
         try:
             from config import ProxyConfig
             config = ProxyConfig()
+            import asyncio
             for ch in config.SOURCE_URLS:
                 if ch.url in channel_urls:
-                    # Сохраняем метрики в БД (используем db)
                     m = ch.metrics
                     metrics = {
                         'total_configs': m.total_configs,
@@ -166,16 +145,16 @@ class ChannelQualityAnalyzer:
                         'overall_score': m.overall_score,
                         'protocol_counts': m.protocol_counts or {}
                     }
-                    self.db.update_channel(ch.url, metrics, enabled=ch.enabled)
+                    asyncio.create_task(self.db.update_channel(ch.url, metrics, enabled=ch.enabled))
                     if run_id is not None:
-                        self.db.add_channel_history(ch.url, run_id, metrics)
+                        asyncio.create_task(self.db.add_channel_history(ch.url, run_id, metrics))
             logger.info(f"Channel health updated for {len(channel_urls)} channels.")
         except Exception as e:
             logger.error(f"Failed to update channel health: {e}")
 
     def get_health_report(self) -> Dict:
-        """Возвращает отчёт о состоянии всех каналов."""
-        channels = self.db.get_all_channels()
+        import asyncio
+        channels = asyncio.run(self.db.get_all_channels())
         states = {'active': 0, 'inactive': 0, 'recovering': 0}
         total = len(channels)
         for ch in channels:
@@ -192,14 +171,11 @@ class ChannelQualityAnalyzer:
         }
 
     def prune_bad_channels(self, channel_urls: List[str]) -> List[str]:
-        """
-        Возвращает список каналов, которые следует оставить (удаляет только truly inactive).
-        """
         healthy = []
         for url in channel_urls:
             state = self._get_channel_state(url)
             if state == 'inactive':
-                logger.info(f"Channel {url} is inactive (score below threshold, no recovery trend), removing.")
+                logger.info(f"Channel {url} is inactive, removing.")
             else:
                 healthy.append(url)
         return healthy
