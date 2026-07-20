@@ -6,6 +6,7 @@ import json
 import ipaddress
 import logging
 import socket
+import asyncio
 from typing import Dict, Optional
 
 import config_parser as parser
@@ -20,8 +21,7 @@ class ConfigToXray:
         self.output_file = output_file
         self.outbounds = []
 
-    @staticmethod
-    def is_valid_address(address: str) -> bool:
+    async def is_valid_address_async(self, address: str) -> bool:
         if not address:
             return False
         try:
@@ -29,14 +29,11 @@ class ConfigToXray:
             return True
         except ValueError:
             pass
-        # Проверка через socket.getaddrinfo с таймаутом
+        loop = asyncio.get_event_loop()
         try:
-            socket.setdefaulttimeout(0.5)
-            socket.getaddrinfo(address, 443, socket.AF_UNSPEC, socket.SOCK_STREAM)
-            return True
-        except socket.gaierror:
-            return False
-        except Exception:
+            result = await loop.run_in_executor(None, socket.getaddrinfo, address, 443)
+            return bool(result)
+        except:
             return False
 
     @staticmethod
@@ -97,8 +94,9 @@ class ConfigToXray:
     def convert_vmess(self, data: Dict) -> Optional[Dict]:
         if not data.get('add') or not data.get('port') or not data.get('id'):
             return None
-        if not self.is_valid_address(data.get('add', '')):
-            logger.debug(f"Skipping VMess config: address '{data.get('add')}' is not a valid IP or domain")
+        valid = asyncio.run(self.is_valid_address_async(data.get('add', '')))
+        if not valid:
+            logger.debug(f"Skipping VMess config: address '{data.get('add')}' invalid")
             return None
         outbound = {
             "protocol": "vmess",
@@ -108,7 +106,7 @@ class ConfigToXray:
                     "port": int(data.get('port')),
                     "users": [{
                         "id": data.get('id'),
-                        "alterId": int(data.get('aid', 0)),  # <-- добавлено
+                        "alterId": int(data.get('aid', 0)),
                         "security": data.get('scy', 'auto'),
                         "level": 8
                     }]
@@ -121,8 +119,9 @@ class ConfigToXray:
     def convert_vless(self, data: Dict) -> Optional[Dict]:
         if not data.get('address') or not data.get('port') or not data.get('uuid'):
             return None
-        if not self.is_valid_address(data.get('address', '')):
-            logger.debug(f"Skipping VLESS config: address '{data.get('address')}' is not a valid IP or domain")
+        valid = asyncio.run(self.is_valid_address_async(data.get('address', '')))
+        if not valid:
+            logger.debug(f"Skipping VLESS config: address '{data.get('address')}' invalid")
             return None
         outbound = {
             "protocol": "vless",
@@ -145,8 +144,9 @@ class ConfigToXray:
     def convert_trojan(self, data: Dict) -> Optional[Dict]:
         if not data.get('address') or not data.get('port') or not data.get('password'):
             return None
-        if not self.is_valid_address(data.get('address', '')):
-            logger.debug(f"Skipping Trojan config: address '{data.get('address')}' is not a valid IP or domain")
+        valid = asyncio.run(self.is_valid_address_async(data.get('address', '')))
+        if not valid:
+            logger.debug(f"Skipping Trojan config: address '{data.get('address')}' invalid")
             return None
         outbound = {
             "protocol": "trojan",
@@ -165,8 +165,9 @@ class ConfigToXray:
     def convert_shadowsocks(self, data: Dict) -> Optional[Dict]:
         if not data.get('address') or not data.get('port') or not data.get('method') or not data.get('password'):
             return None
-        if not self.is_valid_address(data.get('address', '')):
-            logger.debug(f"Skipping Shadowsocks config: address '{data.get('address')}' is not a valid IP or domain")
+        valid = asyncio.run(self.is_valid_address_async(data.get('address', '')))
+        if not valid:
+            logger.debug(f"Skipping Shadowsocks config: address '{data.get('address')}' invalid")
             return None
         return {
             "protocol": "shadowsocks",
@@ -201,13 +202,13 @@ class ConfigToXray:
             if not line or line.startswith('//'):
                 continue
             line_lower = line.lower()
+
+            if line_lower.startswith(('hysteria2://', 'hy2://')):
+                logger.warning(f"Hysteria2 config skipped: Xray does not support this protocol. Use sing-box instead.")
+                continue
+
             outbound = None
             data = None
-
-            # Пропускаем Hysteria2 (не поддерживается Xray)
-            if line_lower.startswith(('hysteria2://', 'hy2://')):
-                logger.debug(f"Skipping Hysteria2 config (not supported by Xray): {line[:30]}...")
-                continue
 
             try:
                 if line_lower.startswith('vmess://'):
@@ -237,7 +238,6 @@ class ConfigToXray:
             logger.error("No valid configs found to convert.")
             return
 
-        # Сортировка по протоколу для стабильности
         temp_outbounds.sort(key=lambda x: x.get('protocol', 'unknown'))
 
         temp_outbounds.extend([
