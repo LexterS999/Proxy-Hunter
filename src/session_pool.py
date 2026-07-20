@@ -20,11 +20,11 @@ class SessionPool:
     _instance = None
     _session: Optional[aiohttp.ClientSession] = None
     _connector: Optional[aiohttp.TCPConnector] = None
-    _lock = asyncio.Lock()
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
+            cls._instance._lock = asyncio.Lock()
         return cls._instance
 
     async def get_session(
@@ -34,10 +34,6 @@ class SessionPool:
         timeout_total: float = 60.0,
         headers: Optional[dict] = None
     ) -> aiohttp.ClientSession:
-        """
-        Возвращает общую ClientSession. Параметры применяются только при первом создании.
-        Блокировка гарантирует, что сессия создаётся только один раз.
-        """
         async with self._lock:
             if self._session is None or self._session.closed:
                 # Закрываем старые объекты перед созданием новых
@@ -48,7 +44,7 @@ class SessionPool:
                     limit_per_host=per_host_limit,
                     ttl_dns_cache=300,
                     enable_cleanup_closed=True,
-                    force_close=True  # Явно закрывать соединения
+                    force_close=True
                 )
                 timeout = aiohttp.ClientTimeout(total=timeout_total)
                 default_headers = {
@@ -71,7 +67,6 @@ class SessionPool:
             return self._session
 
     async def _cleanup_old(self):
-        """Закрывает старый коннектор и сессию, если они существуют."""
         if self._connector and not self._connector.closed:
             await self._connector.close()
             logger.debug("Closed old TCPConnector")
@@ -82,12 +77,10 @@ class SessionPool:
         self._session = None
 
     async def close(self):
-        """Закрывает сессию и коннектор."""
         async with self._lock:
             await self._cleanup_old()
             logger.info("Closed shared ClientSession and TCPConnector")
 
     def reset(self):
-        """Сброс состояния (для тестов)."""
         self._session = None
         self._connector = None
