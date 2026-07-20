@@ -1,68 +1,46 @@
-#!/usr/bin/env bash
+#!/bin/bash
+
+# Proxy-Hunter - Скрипт запуска
+# Запускает полный цикл: сбор -> парсинг -> скоринг -> проверка -> дедупликация -> архив
 
 set -e
 
 cd "$(dirname "$0")"
 
-LOG_DIR="logs"
-mkdir -p "$LOG_DIR"
-TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
-LOG_FILE="$LOG_DIR/run_$TIMESTAMP.log"
-
-exec > >(tee -a "$LOG_FILE") 2>&1
-
-echo "════════════════════════════════════════════════════════════════"
-echo "  Proxy-Hunter Optimized Pipeline"
-echo "  Started at: $(date)"
-echo "════════════════════════════════════════════════════════════════"
-
-PYTHON_CMD="python3"
-if [ -f "venv/bin/python" ]; then
-    PYTHON_CMD="venv/bin/python"
-    echo "✅ Using virtual environment: venv"
-else
-    echo "ℹ️  Using system Python: $(command -v python3)"
+# Активируем виртуальное окружение
+if [ -d "venv" ]; then
+    source venv/bin/activate 2>/dev/null || . venv/Scripts/activate
 fi
 
-# Проверка зависимостей
-echo "➤ Checking required Python modules..."
-$PYTHON_CMD -c "import requests, bs4, geoip2" 2>/dev/null || {
-    echo "⚠️  Some dependencies are missing. Installing..."
-    $PYTHON_CMD -m pip install -r requirements.txt --quiet
+# Определяем Python
+if command -v python3 &> /dev/null; then
+    PYTHON_CMD=python3
+elif command -v python &> /dev/null; then
+    PYTHON_CMD=python
+else
+    echo "Ошибка: Python не найден"
+    exit 1
+fi
+
+# [CHANGE] проверяем только реально используемые зависимости (geoip2 удалён из проекта)
+$PYTHON_CMD -c "import aiohttp, bs4, xxhash, msgpack, tqdm" 2>/dev/null || {
+    echo "Ошибка: зависимости не установлены. Запустите install.sh"
+    exit 1
 }
 
-# Запуск пайплайна
-echo ""
-echo "➤ [$(date +%H:%M:%S)] Running optimized pipeline..."
-if $PYTHON_CMD src/pipeline_optimized.py; then
-    echo "✓ [$(date +%H:%M:%S)] Pipeline completed successfully!"
-else
-    echo "✗ [$(date +%H:%M:%S)] Pipeline failed!"
-    exit 1
-fi
+echo "🚀 Запуск Proxy-Hunter..."
+echo "=========================="
 
-# Проверка выходного файла
-echo ""
-if [ -f "configs/output.txt" ]; then
-    FILE_SIZE=$(wc -c < "configs/output.txt")
-    LINE_COUNT=$(wc -l < "configs/output.txt")
-    echo "✅ Output file created: configs/output.txt"
-    echo "   Size: $FILE_SIZE bytes"
-    echo "   Lines: $LINE_COUNT"
+# Запуск оптимизированного пайплайна
+$PYTHON_CMD src/pipeline_optimized.py
+
+# [CHANGE] проверяем реальные выходные файлы (ранее проверялся несуществующий output.txt)
+if [ -f "configs/output_archive.txt" ] || [ -f "configs/output_simple.txt" ]; then
     echo ""
-    echo "📄 First 5 lines of output:"
-    head -n 5 "configs/output.txt" | sed 's/^/   /'
+    echo "✅ Готово! Результаты:"
+    [ -f "configs/output_archive.txt" ] && echo "   - configs/output_archive.txt"
+    [ -f "configs/output_simple.txt" ] && echo "   - configs/output_simple.txt"
+    [ -f "configs/xray_balanced.json" ] && echo "   - configs/xray_balanced.json"
 else
-    echo "❌ ERROR: configs/output.txt was not created!"
-    echo "   Check pipeline logs for details."
-    exit 1
+    echo "⚠️ Пайплайн завершён, но выходные файлы не созданы (возможно, нет новых конфигов)"
 fi
-
-echo ""
-echo "════════════════════════════════════════════════════════════════"
-echo "  ✅ Pipeline completed successfully!"
-echo "  Finished at: $(date)"
-echo "════════════════════════════════════════════════════════════════"
-
-# Очистка старых логов
-find "$LOG_DIR" -name "run_*.log" -mtime +7 -delete 2>/dev/null || true
