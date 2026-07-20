@@ -15,27 +15,52 @@ from config_identity import ConfigIdentity
 
 logger = logging.getLogger(__name__)
 
-# Кеш TCP-рукопожатий
 _tcp_cache = {}
-_TCP_CACHE_TTL = 300  # 5 минут
+_TCP_CACHE_TTL = 300
+
+# ============================
+# DeadHostTracker
+# ============================
+
+class DeadHostTracker:
+    def __init__(self, threshold=3, ban_time=300):
+        self.failures = {}
+        self.banned = {}
+        self.threshold = threshold
+        self.ban_time = ban_time
+
+    def record_failure(self, host):
+        self.failures[host] = self.failures.get(host, 0) + 1
+        if self.failures[host] >= self.threshold:
+            self.banned[host] = time.time() + self.ban_time
+
+    def record_success(self, host):
+        self.failures[host] = 0
+
+    def is_banned(self, host):
+        if host in self.banned:
+            if time.time() < self.banned[host]:
+                return True
+            del self.banned[host]
+        return False
+
+# ============================
+# Основной класс
+# ============================
 
 class IntelligentProbe:
     def __init__(self, timeout=5.0, max_attempts=3):
         self.timeout = timeout
         self.max_attempts = max_attempts
+        self._dead_tracker = DeadHostTracker(threshold=3, ban_time=300)
 
     async def probe(self, config: str, parsed: dict = None, ml_score: float = 50.0) -> Dict:
-        """
-        Выполняет зондирование с адаптивным числом попыток, fast fail и кешированием TCP.
-        ml_score используется для выбора числа попыток: >70 -> 1, 40-70 -> 2, <40 -> 3.
-        """
         if parsed is None:
             from parse_fallback import FallbackParser
             parsed, _ = FallbackParser.parse_with_stats(config)
             if not parsed:
                 return {'success': False, 'error': 'parse_failed'}
 
-        # Адаптивное число попыток
         if ml_score > 70:
             max_attempts = 1
         elif ml_score > 40:
@@ -51,7 +76,23 @@ class IntelligentProbe:
         path = parsed.get('path', '/')
         host_header = parsed.get('host', host)
 
-        # Адаптивный таймаут на основе истории (если есть в parsed)
+        if self._dead_tracker.is_banned(host):
+            return {'success': False, 'error': 'host_banned'}
+
+        if protocol == 'hysteria2' or protocol == 'hy2':
+            tcp_ok = await self._tcp_probe(host, port, use_tls=True)
+            if tcp_ok:
+                return {'success': True, 'latency': 100, 'protocol': protocol, 'transport': transport}
+            else:
+                return {'success': False, 'error': 'tcp_failed'}
+
+        if protocol == 'tuic':
+            tcp_ok = await self._tcp_probe(host, port, use_tls=True)
+            if tcp_ok:
+                return {'success': True, 'latency': 100, 'protocol': protocol, 'transport': transport}
+            else:
+                return {'success': False, 'error': 'tcp_failed'}
+
         avg_lat = parsed.get('avg_latency_24h', 1000)
         timeout = max(2.0, min(10.0, avg_lat / 100 + 2))
 
@@ -63,10 +104,11 @@ class IntelligentProbe:
             )
             results.append(probe_result)
             if probe_result.get('success'):
+                self._dead_tracker.record_success(host)
                 break
-            # Fast fail: если ошибка фатальная, прерываем
             error = probe_result.get('error')
             if error in ('connection_refused', 'dns_failed', 'ssl_error'):
+                self._dead_tracker.record_failure(host)
                 break
             await asyncio.sleep(0.5 * attempt)
 
@@ -93,6 +135,25 @@ class IntelligentProbe:
             'total_attempts': max_attempts,
         }
 
+    async def _tcp_probe(self, host, port, use_tls=False):
+        try:
+            if use_tls:
+                context = ssl.create_default_context()
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(host, port, ssl=context),
+                    timeout=self.timeout
+                )
+            else:
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(host, port, ssl=False),
+                    timeout=self.timeout
+                )
+            writer.close()
+            await writer.wait_closed()
+            return True
+        except:
+            return False
+
     async def _single_probe(self, protocol, transport, host, port, sni, host_header, path,
                              parsed, attempt, total_attempts, timeout) -> Dict:
         start_time = time.time()
@@ -109,7 +170,6 @@ class IntelligentProbe:
         }
 
         try:
-            # 1. TCP/TLS рукопожатие с кешированием
             use_tls = parsed.get('security') in ('tls', 'reality') or parsed.get('tls') in ('tls', 'reality')
             cache_key = (host, port, use_tls)
             if cache_key in _tcp_cache:
@@ -118,7 +178,6 @@ class IntelligentProbe:
                     del _tcp_cache[cache_key]
                 else:
                     result['tls_handshake'] = cached['latency']
-                    # Если кеш говорит, что соединение недоступно, сразу возвращаем ошибку
                     if cached['error']:
                         result['error'] = cached['error']
                         return result
@@ -148,22 +207,25 @@ class IntelligentProbe:
                     result['tls_handshake'] = tcp_latency
                 except ConnectionRefusedError:
                     result['error'] = 'connection_refused'
+                    self._dead_tracker.record_failure(host)
                     _tcp_cache[cache_key] = {'latency': 0, 'ts': time.time(), 'error': 'connection_refused'}
                     return result
                 except socket.gaierror:
                     result['error'] = 'dns_failed'
+                    self._dead_tracker.record_failure(host)
                     _tcp_cache[cache_key] = {'latency': 0, 'ts': time.time(), 'error': 'dns_failed'}
                     return result
                 except ssl.SSLError:
                     result['error'] = 'ssl_error'
+                    self._dead_tracker.record_failure(host)
                     _tcp_cache[cache_key] = {'latency': 0, 'ts': time.time(), 'error': 'ssl_error'}
                     return result
                 except Exception as e:
                     result['error'] = str(e)
+                    self._dead_tracker.record_failure(host)
                     _tcp_cache[cache_key] = {'latency': 0, 'ts': time.time(), 'error': str(e)}
                     return result
 
-            # 2. HTTP-зонд (используем HEAD вместо GET)
             session = await SessionPool().get_session()
             scheme = 'https' if use_tls else 'http'
             url = f"{scheme}://{host}:{port}{path}"
