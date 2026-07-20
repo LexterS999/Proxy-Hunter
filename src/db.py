@@ -1,7 +1,6 @@
 """
 Модуль для работы с SQLite-базой данных истории.
-Хранит статистику запусков, каналов и профилей с компрессией.
-Добавлены индексы, LRU-кеш для распаковки, WAL-режим, миграции.
+Хранит статистику запусков, каналов, профилей, признаков и историю зондов.
 """
 
 import sqlite3
@@ -19,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 DB_PATH = "configs/history.db"
 COMPRESS_LEVEL = 6
-SCHEMA_VERSION = 2  # Новая версия схемы
+SCHEMA_VERSION = 3  # Увеличена версия для новых таблиц
 
 
 def _compress(data: Any) -> bytes:
@@ -31,7 +30,7 @@ def _compress(data: Any) -> bytes:
         return b''
 
 
-@lru_cache(maxsize=8192)  # Увеличенный кеш
+@lru_cache(maxsize=8192)
 def _decompress_cached(blob: bytes) -> Any:
     if blob is None or not blob:
         return None
@@ -136,6 +135,69 @@ class HistoryDB:
                     FOREIGN KEY(run_id) REFERENCES runs(id)
                 )
             ''')
+            # Новые таблицы для улучшенного анализа
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS profile_features (
+                    profile_key TEXT PRIMARY KEY,
+                    protocol TEXT,
+                    transport TEXT,
+                    has_sni INTEGER,
+                    has_host INTEGER,
+                    has_path INTEGER,
+                    has_pbk INTEGER,
+                    has_flow INTEGER,
+                    is_reality INTEGER,
+                    alter_id INTEGER,
+                    ss_method TEXT,
+                    sni_count INTEGER,
+                    host_count INTEGER,
+                    path_count INTEGER,
+                    config_length INTEGER,
+                    count_1h INTEGER,
+                    count_6h INTEGER,
+                    count_24h INTEGER,
+                    count_7d INTEGER,
+                    success_1h INTEGER,
+                    success_6h INTEGER,
+                    success_24h INTEGER,
+                    success_7d INTEGER,
+                    avg_latency_1h REAL,
+                    avg_latency_6h REAL,
+                    avg_latency_24h REAL,
+                    avg_latency_7d REAL,
+                    p90_latency_24h REAL,
+                    p99_latency_24h REAL,
+                    latency_std_24h REAL,
+                    latency_cv_24h REAL,
+                    latency_trend_24h REAL,
+                    check_interval_avg REAL,
+                    same_ip_count INTEGER,
+                    same_ip_success_rate REAL,
+                    same_sni_count INTEGER,
+                    last_updated TEXT
+                )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS probe_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_key TEXT,
+                    timestamp TEXT,
+                    success INTEGER,
+                    latency REAL,
+                    tls_handshake_latency REAL,
+                    http_first_byte REAL,
+                    http_total REAL,
+                    status_code INTEGER,
+                    error_type TEXT,
+                    protocol TEXT,
+                    transport TEXT,
+                    sni_used TEXT,
+                    host_used TEXT,
+                    path_used TEXT,
+                    attempt_number INTEGER,
+                    total_attempts INTEGER
+                )
+            ''')
             # Индексы
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_history_url ON channel_history(url)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_history_timestamp ON channel_history(timestamp)")
@@ -144,6 +206,9 @@ class HistoryDB:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_profiles_protocol ON profiles(protocol)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_profiles_last_seen ON profiles(last_seen)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_runs_timestamp ON runs(timestamp)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_probe_profile ON probe_history(profile_key)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_probe_timestamp ON probe_history(timestamp)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_probe_success ON probe_history(success)")
 
             # Если метаданных нет, добавляем версию
             cursor.execute("SELECT value FROM metadata WHERE key='schema_version'")
@@ -156,14 +221,79 @@ class HistoryDB:
         """Обновление схемы БД."""
         cursor = conn.cursor()
         if old_version < 1:
-            # Добавляем столбцы, если их нет
             pass
         if old_version < 2:
-            # Добавляем очистку старых профилей (будет выполняться при запросе)
             pass
-        cursor.execute("UPDATE metadata SET value=? WHERE key='schema_version'", (str(SCHEMA_VERSION),))
-        conn.commit()
-        logger.info(f"Schema upgraded to version {SCHEMA_VERSION}")
+        if old_version < 3:
+            # Добавляем новые таблицы
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS profile_features (
+                    profile_key TEXT PRIMARY KEY,
+                    protocol TEXT,
+                    transport TEXT,
+                    has_sni INTEGER,
+                    has_host INTEGER,
+                    has_path INTEGER,
+                    has_pbk INTEGER,
+                    has_flow INTEGER,
+                    is_reality INTEGER,
+                    alter_id INTEGER,
+                    ss_method TEXT,
+                    sni_count INTEGER,
+                    host_count INTEGER,
+                    path_count INTEGER,
+                    config_length INTEGER,
+                    count_1h INTEGER,
+                    count_6h INTEGER,
+                    count_24h INTEGER,
+                    count_7d INTEGER,
+                    success_1h INTEGER,
+                    success_6h INTEGER,
+                    success_24h INTEGER,
+                    success_7d INTEGER,
+                    avg_latency_1h REAL,
+                    avg_latency_6h REAL,
+                    avg_latency_24h REAL,
+                    avg_latency_7d REAL,
+                    p90_latency_24h REAL,
+                    p99_latency_24h REAL,
+                    latency_std_24h REAL,
+                    latency_cv_24h REAL,
+                    latency_trend_24h REAL,
+                    check_interval_avg REAL,
+                    same_ip_count INTEGER,
+                    same_ip_success_rate REAL,
+                    same_sni_count INTEGER,
+                    last_updated TEXT
+                )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS probe_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_key TEXT,
+                    timestamp TEXT,
+                    success INTEGER,
+                    latency REAL,
+                    tls_handshake_latency REAL,
+                    http_first_byte REAL,
+                    http_total REAL,
+                    status_code INTEGER,
+                    error_type TEXT,
+                    protocol TEXT,
+                    transport TEXT,
+                    sni_used TEXT,
+                    host_used TEXT,
+                    path_used TEXT,
+                    attempt_number INTEGER,
+                    total_attempts INTEGER
+                )
+            ''')
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_probe_profile ON probe_history(profile_key)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_probe_timestamp ON probe_history(timestamp)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_probe_success ON probe_history(success)")
+            cursor.execute("UPDATE metadata SET value=? WHERE key='schema_version'", (str(SCHEMA_VERSION),))
+            conn.commit()
+            logger.info(f"Schema upgraded to version {SCHEMA_VERSION}")
 
     @contextmanager
     def _get_connection(self):
@@ -277,7 +407,6 @@ class HistoryDB:
             conn.commit()
 
     def update_profiles_batch(self, profiles: List[Dict]):
-        """Пакетная вставка профилей."""
         if not profiles:
             return
         with self._get_connection() as conn:
@@ -334,7 +463,6 @@ class HistoryDB:
             return result
 
     def clean_old_profiles(self, days: int = 7):
-        """Удаляет профили, не обновлявшиеся более days дней."""
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -408,6 +536,84 @@ class HistoryDB:
             return None
         return sum(valid_scores) / len(valid_scores)
 
+    # ========== Новые методы для улучшенного анализа ==========
+
+    def update_profile_features(self, features: Dict):
+        """Сохраняет или обновляет признаки профиля."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            columns = ', '.join(features.keys())
+            placeholders = ', '.join(['?'] * len(features))
+            cursor.execute(f'''
+                INSERT OR REPLACE INTO profile_features ({columns})
+                VALUES ({placeholders})
+            ''', list(features.values()))
+            conn.commit()
+
+    def get_profile_features(self, profile_key: str) -> Optional[Dict]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM profile_features WHERE profile_key = ?', (profile_key,))
+            row = cursor.fetchone()
+            if row:
+                return dict(row)
+            return None
+
+    def add_probe_history(self, probe_data: Dict):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO probe_history (
+                    profile_key, timestamp, success, latency,
+                    tls_handshake_latency, http_first_byte, http_total,
+                    status_code, error_type, protocol, transport,
+                    sni_used, host_used, path_used,
+                    attempt_number, total_attempts
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                probe_data.get('profile_key', ''),
+                probe_data.get('timestamp', datetime.now().isoformat()),
+                1 if probe_data.get('success') else 0,
+                probe_data.get('latency', 0),
+                probe_data.get('tls_handshake', 0),
+                probe_data.get('http_first_byte', 0),
+                probe_data.get('http_total', 0),
+                probe_data.get('status_code', 0),
+                probe_data.get('error'),
+                probe_data.get('protocol'),
+                probe_data.get('transport'),
+                probe_data.get('sni_used'),
+                probe_data.get('host_used'),
+                probe_data.get('path_used'),
+                probe_data.get('attempt_number', 1),
+                probe_data.get('total_attempts', 1)
+            ))
+            conn.commit()
+
+    def get_probe_history(self, profile_key: str, since_hours: int = 24) -> List[Dict]:
+        cutoff = (datetime.now() - timedelta(hours=since_hours)).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM probe_history
+                WHERE profile_key = ? AND timestamp > ?
+                ORDER BY timestamp ASC
+            ''', (profile_key, cutoff))
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    def get_recent_probes(self, since_hours: int = 24) -> List[Dict]:
+        cutoff = (datetime.now() - timedelta(hours=since_hours)).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM probe_history
+                WHERE timestamp > ?
+                ORDER BY timestamp DESC
+            ''', (cutoff,))
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+
 
 _db = None
 
@@ -415,6 +621,5 @@ def get_db() -> HistoryDB:
     global _db
     if _db is None:
         _db = HistoryDB()
-        # Периодическая очистка старых профилей
         _db.clean_old_profiles(days=7)
     return _db
