@@ -161,4 +161,111 @@ class ProfileScorer:
             return max(1, 24 * success_rate)
 
         intervals = [(times[i] - times[i-1]).total_seconds() / 3600 for i in range(1, len(times))]
-        avg_interval
+        avg_interval = sum(intervals) / len(intervals) if intervals else 0
+        if avg_interval == 0:
+            return 24.0
+        total = profile['success_count'] + profile['fail_count']
+        success_rate = profile['success_count'] / total if total > 0 else 0.5
+        lifetime = avg_interval * success_rate * 2
+        return max(1, round(lifetime, 2))
+
+    def calculate_config_quality(self, config: str, parsed: Dict) -> float:
+        score = 1.0
+        protocol = config.split('://')[0].lower() if config else ''
+        if protocol not in ('vless', 'vmess', 'trojan', 'ss', 'hysteria2', 'tuic'):
+            score -= 0.3
+
+        if not parsed.get('address') and not parsed.get('add'):
+            score -= 0.3
+        if not parsed.get('port'):
+            score -= 0.3
+        if protocol == 'vless':
+            if not parsed.get('uuid'):
+                score -= 0.3
+            if parsed.get('encryption') == 'none':
+                score -= 0.1
+            if parsed.get('flow'):
+                score += 0.1
+        elif protocol == 'vmess':
+            if not parsed.get('id'):
+                score -= 0.3
+        elif protocol == 'trojan':
+            if not parsed.get('password'):
+                score -= 0.3
+        elif protocol == 'ss':
+            if not parsed.get('method') or not parsed.get('password'):
+                score -= 0.3
+        if parsed.get('sni'):
+            score += 0.1
+        if parsed.get('pbk'):
+            score += 0.1
+        if parsed.get('fp'):
+            score += 0.05
+        return max(0, min(1, round(score, 2)))
+
+    def calculate_composite_score(self, profile: Dict, parsed: Dict) -> float:
+        stability = profile.get('stability', 0.5)
+        lifetime = profile.get('lifetime', 24.0)
+        total = profile['success_count'] + profile['fail_count']
+        success_rate = profile['success_count'] / total if total > 0 else 0.5
+        config_quality = self.calculate_config_quality('', parsed)
+
+        timestamps = profile.get('timestamps', [])
+        if not timestamps:
+            return 50.0
+
+        half_life = 7 * 24 * 3600
+        now = datetime.now(timezone.utc)
+        weights = []
+        for ts in timestamps:
+            try:
+                dt = datetime.fromisoformat(ts)
+                age = (now - dt).total_seconds()
+                weight = math.exp(-age / half_life)
+            except Exception:
+                weight = 0.5
+            weights.append(weight)
+
+        if sum(weights) > 0:
+            weighted_success = profile['success_count'] * (weights[-1] if weights else 1)
+            weighted_total = (profile['success_count'] + profile['fail_count']) * (weights[-1] if weights else 1)
+            success_rate = weighted_success / weighted_total if weighted_total > 0 else 0.5
+
+        reputation = 0.5
+
+        if len(timestamps) < 2:
+            stability = 0.7
+            lifetime = 24.0
+            success_rate = 0.7
+
+        w = SCORE_WEIGHTS
+        score = (w['stability'] * stability +
+                 w['success_rate'] * success_rate +
+                 w['reputation'] * reputation +
+                 w['lifetime'] * (lifetime / 48) +
+                 w['config_quality'] * config_quality)
+        score = max(0, min(100, score * 100))
+        return round(score, 2)
+
+    def score_profile(self, config: str, parsed: Dict, success: bool = True,
+                      latency: float = 0) -> Dict:
+        self.update_profile_history(config, parsed, success, latency)
+        key = self.get_profile_key(config, parsed)
+        profile = self._get_cached_profile(key)
+        if not profile:
+            return {'score': 50, 'stability': 0.5, 'lifetime': 24, 'is_datacenter': False, 'server_type': 'UNK'}
+
+        stability = profile.get('stability', 0.5)
+        lifetime = profile.get('lifetime', 24.0)
+        composite = self.calculate_composite_score(profile, parsed)
+
+        return {
+            'score': composite,
+            'stability': stability,
+            'lifetime': lifetime,
+            'is_datacenter': False,
+            'server_type': 'UNK',
+            'config_quality': self.calculate_config_quality(config, parsed),
+            'reputation': 0.5,
+            'privacy': {}
+        }
