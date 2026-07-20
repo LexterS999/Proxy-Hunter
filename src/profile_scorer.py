@@ -26,9 +26,15 @@ class ProfileScorer:
         self._batch_size = 100
         self._last_flush = datetime.now(timezone.utc)
         self._flush_interval = 60
+        self.weights = self._normalize_weights(SCORE_WEIGHTS)
+
+    def _normalize_weights(self, weights):
+        total = sum(weights.values())
+        if total == 0:
+            return {k: 1/len(weights) for k in weights}
+        return {k: v/total for k, v in weights.items()}
 
     def __del__(self):
-        """Гарантированная запись при завершении."""
         try:
             asyncio.run(self._flush_profiles_async())
         except Exception:
@@ -151,19 +157,19 @@ class ProfileScorer:
         timestamps = profile.get('timestamps', [])
         if not timestamps:
             return 24.0
-
-        times = [datetime.fromisoformat(ts) for ts in timestamps if ts]
-        if len(times) < 2:
+        if len(timestamps) < 2:
             total = profile['success_count'] + profile['fail_count']
             if total == 0:
                 return 24.0
             success_rate = profile['success_count'] / total
             return max(1, 24 * success_rate)
 
-        intervals = [(times[i] - times[i-1]).total_seconds() / 3600 for i in range(1, len(times))]
-        avg_interval = sum(intervals) / len(intervals) if intervals else 0
+        times = np.array([datetime.fromisoformat(ts).timestamp() for ts in timestamps])
+        intervals = np.diff(times) / 3600
+        avg_interval = np.mean(intervals) if intervals.size > 0 else 0
         if avg_interval == 0:
             return 24.0
+
         total = profile['success_count'] + profile['fail_count']
         success_rate = profile['success_count'] / total if total > 0 else 0.5
         lifetime = avg_interval * success_rate * 2
@@ -238,7 +244,7 @@ class ProfileScorer:
             lifetime = 24.0
             success_rate = 0.7
 
-        w = SCORE_WEIGHTS
+        w = self.weights
         score = (w['stability'] * stability +
                  w['success_rate'] * success_rate +
                  w['reputation'] * reputation +
