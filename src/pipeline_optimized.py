@@ -20,12 +20,12 @@ import json
 import hashlib
 import shutil
 import signal
+import socket
 from pathlib import Path
 from typing import List, Dict, Optional, Set
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 from logging.handlers import RotatingFileHandler
-from async_db_writer import AsyncDBWriter
 
 import aiofiles
 import numpy as np
@@ -50,6 +50,7 @@ from feature_extractor import FeatureExtractor
 from probe_engine import IntelligentProbe
 from anomaly_detector import AnomalyDetector
 from channel_selector import ChannelSelector
+from async_db_writer import AsyncDBWriter
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,8 @@ class OptimizedPipeline:
         self._executor = ThreadPoolExecutor(max_workers=4)
         self.checker_cache = None
         self._health_applied = False
-        self.async_writer = AsyncDBWriter()
+
+        # Новые компоненты
         self.feature_extractor = FeatureExtractor()
         self.probe_engine = IntelligentProbe(timeout=5.0, max_attempts=3)
         self.anomaly_detector = AnomalyDetector()
@@ -82,6 +84,8 @@ class OptimizedPipeline:
         self.feature_cols = []
         self.cat_cols = []
         self._load_model()
+        self.async_writer = AsyncDBWriter()
+
         self._setup_logging()
         self._check_dependencies()
         self._setup_signal_handlers()
@@ -471,6 +475,8 @@ class OptimizedPipeline:
                         key = self.feature_extractor.get_profile_key(cfg)
                         if key:
                             feats = self.feature_extractor.extract_features(key, cfg, parsed)
+                            # Асинхронно сохраняем признаки через writer
+                            # здесь пока синхронно, но позже заменим
                             self.feature_extractor.update_features_db(feats)
                             return {
                                 'config': cfg,
@@ -538,30 +544,68 @@ class OptimizedPipeline:
                 for item in scored_configs:
                     item['ml_score'] = item['score']
 
-            # Шаг 5: Аномалии
+            # Шаг 5: Аномалии (не удаляем, только логируем)
             anomaly_features = [f for f in features_list if self.anomaly_detector.predict(f)]
             logger.info(f"🔍 Detected {len(anomaly_features)} anomalous profiles")
 
-            # Шаг 6: Интеллектуальная активная проверка
-            logger.info("🔌 Intelligent probing (multi-attempt, protocol-aware)...")
+            # Шаг 6: Интеллектуальная активная проверка с per-host семафорами и адаптивными попытками
+            logger.info("🔄 Resolving DNS for unique hosts...")
+            hosts = set()
+            for item in scored_configs:
+                cfg = item['config']
+                parsed = item.get('parsed')
+                if not parsed:
+                    parsed = self._parse_config(cfg)
+                    item['parsed'] = parsed
+                if parsed:
+                    host = parsed.get('address') or parsed.get('add')
+                    if host:
+                        hosts.add(host)
+
+            dns_cache = {}
+            loop = asyncio.get_event_loop()
+            async def resolve_host(host):
+                try:
+                    ip = await loop.run_in_executor(self._executor, socket.gethostbyname, host)
+                    dns_cache[host] = ip
+                except:
+                    dns_cache[host] = None
+            await asyncio.gather(*[resolve_host(h) for h in hosts])
+            logger.info(f"✅ Resolved {len([ip for ip in dns_cache.values() if ip])} hosts")
+
+            logger.info("🔌 Intelligent probing (adaptive attempts, per-host semaphores)...")
             probe_results = []
             valid_configs_to_probe = [item['config'] for item in scored_configs]
 
-            sem = asyncio.Semaphore(50)  # ограничение параллелизма
+            global_sem = asyncio.Semaphore(100)
+            host_sems = {}
+            host_sem_limit = 5
 
-            async def probe_one(item):
-                async with sem:
-                    cfg = item['config']
-                    parsed = item.get('parsed')
-                    if not parsed:
-                        parsed = self._parse_config(cfg)
-                    if parsed:
-                        result = await self.probe_engine.probe(cfg, parsed)
-                        result['profile_key'] = item.get('profile_key', self.feature_extractor.get_profile_key(cfg))
-                        return result
+            async def probe_with_limits(item):
+                cfg = item['config']
+                parsed = item.get('parsed')
+                if not parsed:
+                    parsed = self._parse_config(cfg)
+                    item['parsed'] = parsed
+                if not parsed:
                     return {'success': False, 'error': 'parse_failed'}
 
-            probe_tasks = [probe_one(item) for item in scored_configs]
+                host = parsed.get('address') or parsed.get('add')
+                if host not in host_sems:
+                    host_sems[host] = asyncio.Semaphore(host_sem_limit)
+
+                ml_score = item.get('ml_score', 50.0)
+                async with global_sem, host_sems[host]:
+                    result = await self.probe_engine.probe(cfg, parsed, ml_score=ml_score)
+                    result['profile_key'] = item.get('profile_key', self.feature_extractor.get_profile_key(cfg))
+                    # Асинхронно сохраняем результат в БД
+                    await self.async_writer.enqueue({
+                        'type': 'probe',
+                        **result
+                    })
+                    return result
+
+            probe_tasks = [probe_with_limits(item) for item in scored_configs]
             probe_results = await asyncio.gather(*probe_tasks, return_exceptions=True)
 
             # Обработка результатов
@@ -572,8 +616,6 @@ class OptimizedPipeline:
                     continue
                 if res.get('success'):
                     good_configs.append(scored_configs[idx]['config'])
-                # Сохраняем историю зонда
-                self.db.add_probe_history(res)
 
             logger.info(f"✅ Active check: {len(good_configs)} configs passed")
             saga_state['step'] = 'checked'
@@ -704,6 +746,7 @@ class OptimizedPipeline:
             return False
         finally:
             try:
+                await self.async_writer.stop()
                 await SessionPool().close()
                 if hasattr(self.deduplicator, '_bloom'):
                     await self.deduplicator._bloom.save()
