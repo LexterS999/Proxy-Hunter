@@ -376,3 +376,11 @@ class HistoryDB:
         if not valid_scores:
             return None
         return sum(valid_scores) / len(valid_scores)
+
+_db = None
+
+def get_db() -> HistoryDB:
+    global _db
+    if _db is None:
+        _db = HistoryDB()
+    return _db
