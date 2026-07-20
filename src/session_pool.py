@@ -33,7 +33,7 @@ class SessionPool:
                 await self._cleanup_old()
 
                 # Используем aiodns для асинхронного DNS
-                resolver = aiodns.DefaultResolver()
+                resolver = aiodns.DNSResolver()  # <--- ИСПРАВЛЕНО: DefaultResolver → DNSResolver
                 self._connector = aiohttp.TCPConnector(
                     limit=connector_limit,
                     limit_per_host=per_host_limit,
