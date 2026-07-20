@@ -1,200 +1,158 @@
 """
-Модуль для оценки качества прокси-профилей на основе истории,
-без использования активных пингов и без GeoIP.
+profile_scorer.py - Скоринг профилей на основе истории
 """
 
-import json
-import os
 import logging
-import numpy as np
-from typing import Dict, Optional, Tuple, List
-from datetime import datetime
+import time
+from typing import Dict, Any, List, Tuple
 
-from db import HistoryDB
-from user_settings import SCORE_WEIGHTS
+from db import HistoryDB, get_db
 
 logger = logging.getLogger(__name__)
 
+
 class ProfileScorer:
-    def __init__(self):
-        self.db = HistoryDB()
+    """Скоринг конфигов на основе исторических профилей"""
 
-    def get_profile_key(self, config: str, parsed: Dict) -> str:
-        protocol = config.split('://')[0].lower()
-        server = parsed.get('address') or parsed.get('add') or parsed.get('host')
-        port = parsed.get('port')
-        if protocol == 'vless':
-            credential = parsed.get('uuid', '')
-        elif protocol == 'vmess':
-            credential = parsed.get('id', '')
-        elif protocol == 'trojan':
-            credential = parsed.get('password', '')
-        elif protocol == 'ss':
-            credential = f"{parsed.get('method', '')}:{parsed.get('password', '')}"
+    # Веса факторов
+    W_SUCCESS_RATE = 0.5
+    W_LATENCY = 0.3
+    W_FRESHNESS = 0.2
+
+    def __init__(self, db: HistoryDB = None, batch_size: int = 500):
+        # [CHANGE] используем ленивую фабрику вместо HistoryDB() по умолчанию
+        self.db = db or get_db()
+        # [CHANGE] кеш профилей и очередь отложенной записи (батчинг)
+        self._profile_cache: Dict[str, Dict] = {}
+        self._dirty: Dict[str, Dict] = {}
+        self._batch_size = batch_size
+
+    # ------------------------------------------------------------------ #
+    #  [CHANGE] Управление кешем и батчингом
+    # ------------------------------------------------------------------ #
+
+    def preload_profiles(self, fingerprints: List[str]):
+        """Предзагрузка профилей пачкой перед скорингом."""
+        if not fingerprints:
+            return
+        try:
+            loaded = self.db.get_profiles_batch(fingerprints)
+            self._profile_cache.update(loaded)
+        except Exception as e:
+            logger.debug(f"⚠️ preload_profiles: {e}")
+
+    def flush(self):
+        """Сбрасывает накопленные изменения профилей в БД одной транзакцией."""
+        if not self._dirty:
+            return
+        try:
+            self.db.update_profiles_batch(list(self._dirty.items()))
+            self._dirty.clear()
+        except Exception as e:
+            logger.debug(f"⚠️ flush: {e}")
+
+    def _get_profile_cached(self, fingerprint: str) -> Dict:
+        if fingerprint not in self._profile_cache:
+            try:
+                self._profile_cache[fingerprint] = self.db.get_profile(fingerprint)
+            except Exception:
+                self._profile_cache[fingerprint] = {}
+        return self._profile_cache[fingerprint]
+
+    def _queue_update(self, fingerprint: str, profile: Dict):
+        self._profile_cache[fingerprint] = profile
+        self._dirty[fingerprint] = profile
+        if len(self._dirty) >= self._batch_size:
+            self.flush()
+
+    # ------------------------------------------------------------------ #
+    #  Скоринг
+    # ------------------------------------------------------------------ #
+
+    def score_profile(self, parsed_config: Dict[str, Any]) -> float:
+        """
+        Вычисляет скоринг конфига на основе истории профиля.
+        [CHANGE] использует кеш + отложенную пакетную запись.
+        """
+        fingerprint = parsed_config.get('fingerprint', '')
+        if not fingerprint:
+            return 0.5
+
+        profile = self._get_profile_cached(fingerprint)
+
+        success_count = profile.get('success_count', 0)
+        fail_count = profile.get('fail_count', 0)
+        total = success_count + fail_count
+        avg_latency = profile.get('avg_latency', 0.0)
+        last_seen = profile.get('last_seen', 0)
+
+        # 1. Success rate
+        success_rate = (success_count / total) if total else 0.5
+
+        # 2. Latency score (чем ниже, тем лучше; нормируем на 5000 мс)
+        if avg_latency > 0:
+            latency_score = max(0.0, 1.0 - avg_latency / 5000.0)
         else:
-            credential = 'default'
-        return f"{server}:{port}:{protocol}:{credential}"
+            latency_score = 0.5
 
-    def update_profile_history(self, config: str, parsed: Dict,
-                               success: bool, latency: float = 0):
-        key = self.get_profile_key(config, parsed)
-        now = datetime.now().isoformat()
-
-        profile = self.db.get_profile(key)
-        if not profile:
-            profile = {
-                'key': key,
-                'server': parsed.get('address') or parsed.get('add') or parsed.get('host'),
-                'protocol': config.split('://')[0].lower(),
-                'first_seen': now,
-                'last_seen': now,
-                'success_count': 0,
-                'fail_count': 0,
-                'latencies': [],
-                'timestamps': [],
-                'is_active': True,
-                'stability': 0.0,
-                'lifetime': 0.0,
-                'overall_score': 0.0
-            }
+        # 3. Freshness (свежесть)
+        if last_seen:
+            age_days = (time.time() - last_seen) / 86400.0
+            freshness_score = max(0.0, 1.0 - age_days / 30.0)
         else:
-            if isinstance(profile.get('latencies'), bytes):
-                import zlib
-                try:
-                    profile['latencies'] = json.loads(zlib.decompress(profile['latencies']).decode())
-                except:
-                    profile['latencies'] = []
-            if isinstance(profile.get('timestamps'), bytes):
-                try:
-                    profile['timestamps'] = json.loads(zlib.decompress(profile['timestamps']).decode())
-                except:
-                    profile['timestamps'] = []
-            profile['last_seen'] = now
+            freshness_score = 0.5
+
+        score = (
+            self.W_SUCCESS_RATE * success_rate +
+            self.W_LATENCY * latency_score +
+            self.W_FRESHNESS * freshness_score
+        )
+
+        # Обновляем профиль (отложенно, пачкой)
+        profile['last_seen'] = time.time()
+        profile['avg_latency'] = avg_latency
+        self._queue_update(fingerprint, profile)
+
+        return round(max(0.0, min(1.0, score)), 4)
+
+    def update_profile_history(self, fingerprint: str, success: bool, latency: float = 0.0):
+        """Обновляет историю профиля после проверки."""
+        profile = self._get_profile_cached(fingerprint)
 
         if success:
-            profile['success_count'] += 1
+            profile['success_count'] = profile.get('success_count', 0) + 1
         else:
-            profile['fail_count'] += 1
+            profile['fail_count'] = profile.get('fail_count', 0) + 1
+
+        # Скользящее среднее latency
         if latency > 0:
-            profile['latencies'].append(latency)
-        profile['timestamps'].append(now)
+            old_avg = profile.get('avg_latency', 0.0)
+            n = profile.get('latency_samples', 0)
+            profile['avg_latency'] = (old_avg * n + latency) / (n + 1)
+            profile['latency_samples'] = n + 1
 
-        max_history = 100
-        if len(profile['latencies']) > max_history:
-            profile['latencies'] = profile['latencies'][-max_history:]
-        if len(profile['timestamps']) > max_history:
-            profile['timestamps'] = profile['timestamps'][-max_history:]
+        profile['last_seen'] = time.time()
+        self._queue_update(fingerprint, profile)
 
-        profile['stability'] = self.calculate_stability(profile)
-        profile['lifetime'] = self.calculate_lifetime_prediction(profile)
-
-        self.db.update_profile(key, profile)
-
-    def calculate_stability(self, profile: Dict) -> float:
-        latencies = profile.get('latencies', [])
-        if len(latencies) < 3:
-            return 0.5
-        mean = np.mean(latencies)
-        if mean == 0:
-            return 0.5
-        std = np.std(latencies)
-        cv = std / mean
-        stability = max(0, min(1, 1 - cv))
-        total = profile['success_count'] + profile['fail_count']
-        if total > 0:
-            success_rate = profile['success_count'] / total
-            stability = stability * 0.7 + success_rate * 0.3
-        return round(stability, 4)
-
-    def calculate_lifetime_prediction(self, profile: Dict) -> float:
-        timestamps = profile.get('timestamps', [])
-        if len(timestamps) < 2:
-            return 24.0
-        times = [datetime.fromisoformat(ts) for ts in timestamps if ts]
-        if len(times) < 2:
-            return 24.0
-        intervals = [(times[i] - times[i-1]).total_seconds() / 3600 for i in range(1, len(times))]
-        avg_interval = sum(intervals) / len(intervals) if intervals else 0
-        if avg_interval == 0:
-            return 24.0
-        total = profile['success_count'] + profile['fail_count']
-        success_rate = profile['success_count'] / total if total > 0 else 0.5
-        lifetime = avg_interval * success_rate * 2
-        return max(1, round(lifetime, 2))
-
-    def calculate_config_quality(self, config: str, parsed: Dict) -> float:
-        score = 1.0
-        if not parsed.get('address') and not parsed.get('add'):
-            score -= 0.3
-        if not parsed.get('port'):
-            score -= 0.3
-        protocol = config.split('://')[0].lower() if config else ''
-        if protocol == 'vless':
-            if not parsed.get('uuid'):
-                score -= 0.3
-            if parsed.get('encryption') == 'none':
-                score -= 0.1
-            if parsed.get('flow'):
-                score += 0.1
-        elif protocol == 'vmess':
-            if not parsed.get('id'):
-                score -= 0.3
-        elif protocol == 'trojan':
-            if not parsed.get('password'):
-                score -= 0.3
-        elif protocol == 'ss':
-            if not parsed.get('method') or not parsed.get('password'):
-                score -= 0.3
-        if parsed.get('sni'):
-            score += 0.1
-        if parsed.get('pbk'):
-            score += 0.1
-        if parsed.get('fp'):
-            score += 0.05
-        return max(0, min(1, round(score, 2)))
-
-    def calculate_composite_score(self, profile: Dict, parsed: Dict) -> float:
-        stability = profile.get('stability', 0.5)
-        lifetime = profile.get('lifetime', 24.0)
-        total = profile['success_count'] + profile['fail_count']
-        success_rate = profile['success_count'] / total if total > 0 else 0.5
-        config_quality = self.calculate_config_quality('', parsed)
-
-        reputation = 0.5
-
-        if len(profile.get('timestamps', [])) < 2:
-            stability = 0.7
-            lifetime = 24.0
-            success_rate = 0.7
-
-        w = SCORE_WEIGHTS
-        score = (w['stability'] * stability +
-                 w['success_rate'] * success_rate +
-                 w['reputation'] * reputation +
-                 w['lifetime'] * (lifetime / 48) +
-                 w['config_quality'] * config_quality)
-        score = max(0, min(100, score * 100))
-        return round(score, 2)
-
-    def score_profile(self, config: str, parsed: Dict, success: bool = True,
-                      latency: float = 0) -> Dict:
-        self.update_profile_history(config, parsed, success, latency)
-        key = self.get_profile_key(config, parsed)
-        profile = self.db.get_profile(key)
-        if not profile:
-            return {'score': 50, 'stability': 0.5, 'lifetime': 24, 'is_datacenter': False, 'server_type': 'UNK'}
-
-        stability = profile.get('stability', 0.5)
-        lifetime = profile.get('lifetime', 24.0)
-        composite = self.calculate_composite_score(profile, parsed)
-
-        return {
-            'score': composite,
-            'stability': stability,
-            'lifetime': lifetime,
-            'is_datacenter': False,
-            'server_type': 'UNK',
-            'config_quality': self.calculate_config_quality(config, parsed),
-            'reputation': 0.5,
-            'privacy': {}
-        }
+    def get_adaptive_thresholds(self) -> Dict[str, float]:
+        """
+        Возвращает адаптивные пороги на основе накопленной статистики.
+        [CHANGE] реально используется в pipeline для фильтрации по скору.
+        """
+        try:
+            if not self._profile_cache:
+                return {'min_score': 0.3}
+            scores = []
+            for fp, profile in self._profile_cache.items():
+                total = profile.get('success_count', 0) + profile.get('fail_count', 0)
+                if total:
+                    scores.append(profile.get('success_count', 0) / total)
+            if not scores:
+                return {'min_score': 0.3}
+            scores.sort()
+            # Берём 25-й перцентиль как минимальный порог
+            idx = max(0, len(scores) // 4 - 1)
+            min_score = round(max(0.1, min(0.9, scores[idx])), 3)
+            return {'min_score': min_score}
+        except Exception:
+            return {'min_score': 0.3}
