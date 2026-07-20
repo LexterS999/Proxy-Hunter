@@ -7,6 +7,7 @@ import json
 import base64
 import re
 import logging
+import uuid as uuid_lib
 from typing import Dict, Optional, Tuple, Any, List, Callable
 from urllib.parse import urlparse, parse_qs, unquote
 import binascii
@@ -63,11 +64,22 @@ def safe_json_loads(text: str) -> Optional[Dict]:
             return None
 
 
-# === Зарегистрированные парсеры ===
+# Улучшенный паттерн UUID
+UUID_PATTERN = re.compile(
+    r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
+    re.IGNORECASE
+)
+
+def is_valid_uuid(uuid_str: str) -> bool:
+    try:
+        uuid_lib.UUID(uuid_str)
+        return True
+    except ValueError:
+        return False
+
 
 @register_parser('vmess://', 'strict')
 def decode_vmess(config: str) -> Optional[Dict]:
-    """Декодирует VMess-конфигурацию с fallback-стратегией."""
     if not config or not isinstance(config, str) or not config.startswith('vmess://'):
         return None
 
@@ -86,6 +98,10 @@ def decode_vmess(config: str) -> Optional[Dict]:
 
         required_fields = ['add', 'port', 'id']
         if not all(field in data and data[field] for field in required_fields):
+            return None
+
+        if not is_valid_uuid(data.get('id', '')):
+            logger.debug(f"VMess invalid UUID: {data.get('id')}")
             return None
 
         try:
@@ -114,13 +130,16 @@ def decode_vmess(config: str) -> Optional[Dict]:
 
 @register_parser('vless://', 'strict')
 def parse_vless(config: str) -> Optional[Dict]:
-    """Парсит VLESS-конфигурацию с fallback-стратегией."""
     if not config or not isinstance(config, str) or not config.startswith('vless://'):
         return None
 
     try:
         url = urlparse(config)
         if not url.hostname or not url.username:
+            return FallbackParser.parse_vless_fallback(config)
+
+        if not is_valid_uuid(url.username):
+            logger.debug(f"VLESS invalid UUID: {url.username}")
             return FallbackParser.parse_vless_fallback(config)
 
         port = url.port or 443
@@ -167,7 +186,6 @@ def parse_vless(config: str) -> Optional[Dict]:
 
 @register_parser('trojan://', 'strict')
 def parse_trojan(config: str) -> Optional[Dict]:
-    """Парсит Trojan-конфигурацию с fallback-стратегией."""
     if not config or not isinstance(config, str) or not config.startswith('trojan://'):
         return None
 
@@ -208,7 +226,6 @@ def parse_trojan(config: str) -> Optional[Dict]:
 
 @register_parser('ss://', 'strict')
 def parse_shadowsocks(config: str) -> Optional[Dict]:
-    """Парсит Shadowsocks-конфигурацию с fallback-стратегией."""
     if not config or not isinstance(config, str) or not config.startswith('ss://'):
         return None
 
@@ -309,19 +326,44 @@ def parse_shadowsocks(config: str) -> Optional[Dict]:
         return FallbackParser.parse_ss_fallback(config)
 
 
-# Функция для получения парсера по протоколу
+@register_parser('wireguard://', 'strict')
+def parse_wireguard(config: str) -> Optional[Dict]:
+    """Парсинг WireGuard-конфигурации."""
+    if not config or not isinstance(config, str) or not config.startswith('wireguard://'):
+        return None
+
+    try:
+        url = urlparse(config)
+        if not url.hostname or not url.username:
+            return None
+
+        port = url.port or 51820
+        if not validate_port_for_protocol(port, 'wireguard'):
+            return None
+
+        params = parse_qs(url.query)
+        return {
+            'public_key': url.username,
+            'address': url.hostname,
+            'port': port,
+            'private_key': params.get('private_key', [''])[0],
+            'allowed_ips': params.get('allowed_ips', ['0.0.0.0/0'])[0],
+            'name': unquote(url.fragment) if url.fragment else ''
+        }
+    except Exception as e:
+        logger.debug(f"WireGuard parse failed: {e}")
+        return None
+
+
 def get_parser(protocol: str) -> Optional[Callable]:
-    """Возвращает зарегистрированный парсер для протокола."""
     return _PARSER_REGISTRY.get(protocol, {}).get('func')
 
 
 def get_parser_method(protocol: str) -> str:
-    """Возвращает метод парсинга для протокола."""
     return _METHODS_REGISTRY.get(protocol, 'unknown')
 
 
 def parse_with_fallback(config: str) -> Tuple[Optional[Dict], str]:
-    """Парсит конфигурацию с автоматическим определением протокола."""
     protocol = None
     for p in _PARSER_REGISTRY:
         if config.startswith(p):
@@ -341,7 +383,5 @@ def parse_with_fallback(config: str) -> Tuple[Optional[Dict], str]:
     return FallbackParser.parse_any(config), 'fallback'
 
 
-# Экспортируем функции для обратной совместимости
 def parse_hysteria2(config: str) -> Optional[Dict]:
-    """Парсит Hysteria2-конфигурацию (заглушка для обратной совместимости)."""
     return FallbackParser.parse_any(config)
