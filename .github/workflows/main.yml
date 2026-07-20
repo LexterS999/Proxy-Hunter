@@ -286,7 +286,12 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add configs/output_archive.txt configs/output_simple.txt configs/parsed_cache.json custom_channels.txt configs/quality_model.cbm
+          # Добавляем только существующие файлы
+          if [ -f "configs/output_archive.txt" ]; then git add configs/output_archive.txt; fi
+          if [ -f "configs/output_simple.txt" ]; then git add configs/output_simple.txt; fi
+          if [ -f "configs/parsed_cache.json" ]; then git add configs/parsed_cache.json; fi
+          if [ -f "custom_channels.txt" ]; then git add custom_channels.txt; fi
+          if [ -f "configs/quality_model.cbm" ]; then git add configs/quality_model.cbm; fi
           if git diff --staged --quiet; then
             echo "✅ No changes to commit"
           else
