@@ -7,7 +7,11 @@
 
 import sys
 import os
-from db import HistoryDB, _compress, _decompress
+import asyncio
+import uvloop
+asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+
+from db import get_db, _compress, _decompress
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import logging
@@ -15,16 +19,12 @@ import time
 import traceback
 import json
 import hashlib
-import asyncio
-import concurrent.futures
-from concurrent.futures import ThreadPoolExecutor
-from config_identity import ConfigIdentity
-from db import get_db
 import shutil
 import signal
 from pathlib import Path
 from typing import List, Dict, Optional, Set
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
 
 import aiofiles
 from tqdm import tqdm
@@ -34,14 +34,14 @@ from fetch_configs import AsyncConfigFetcher
 from config_validator import ConfigValidator
 from deep_deduplicate import DeepDeduplicator
 from config_quality import ConfigQualityChecker
-from quality_analyzer_enhanced import EnhancedQualityAnalyzer
 from profile_scorer import ProfileScorer
 from active_checker import ActiveChecker
 from parse_fallback import FallbackParser
 from session_pool import SessionPool
 from channel_quality_analyzer import ChannelQualityAnalyzer
-from db import HistoryDB
+from config_identity import ConfigIdentity
 
+# Настройка логирования (только в точке входа)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -65,8 +65,9 @@ class OptimizedPipeline:
         self.channel_analyzer = None
         self._shutdown_requested = False
         self._state = {}
-        self.db = HistoryDB()
+        self.db = get_db()
         self.ARCHIVE_RETENTION_DAYS = 7
+        self._executor = ThreadPoolExecutor(max_workers=4)  # для CPU-bound задач
 
         # Кеш для ActiveChecker (будет создан позже)
         self.checker_cache = None
@@ -155,36 +156,8 @@ class OptimizedPipeline:
             logger.error(f"Failed to save name mapping: {e}")
 
     def _get_config_key(self, config: str) -> str:
-        try:
-            data, _ = FallbackParser.parse_with_stats(config)
-            if not data:
-                return hashlib.md5(config.encode()).hexdigest()
-            protocol = config.split('://')[0].lower()
-            if protocol == 'vmess':
-                server = data.get('add', '')
-                port = data.get('port', 0)
-                credential = data.get('id', '')
-            elif protocol == 'vless':
-                server = data.get('address', '')
-                port = data.get('port', 0)
-                credential = data.get('uuid', '')
-            elif protocol == 'trojan':
-                server = data.get('address', '')
-                port = data.get('port', 0)
-                credential = data.get('password', '')
-            elif protocol == 'ss':
-                server = data.get('address', '')
-                port = data.get('port', 0)
-                credential = f"{data.get('method', '')}:{data.get('password', '')}"
-            else:
-                server = data.get('address') or data.get('add') or data.get('host') or ''
-                port = data.get('port', 0)
-                credential = ''
-            key = f"{server}:{port}:{protocol}:{credential}"
-            return hashlib.md5(key.encode()).hexdigest()
-        except Exception as e:
-            logger.debug(f"Failed to generate config key: {e}")
-            return hashlib.md5(config.encode()).hexdigest()
+        # Используем единый модуль
+        return ConfigIdentity.get_key(config)
 
     def _generate_name(self, config: str) -> str:
         try:
@@ -345,37 +318,45 @@ class OptimizedPipeline:
                 return False
             logger.info(f"✅ Raw configs: {len(raw_configs)}")
 
-            # Шаг 2: Парсинг и валидация (асинхронно)
+            # Шаг 2: Парсинг и валидация (параллельно)
             logger.info("🔍 Validating and extracting server info...")
             parsed_cache = await self._load_parsed_cache_async()
             valid_configs = []
             parse_stats = {'strict': 0, 'heuristic': 0, 'failed': 0}
 
-            with tqdm(total=len(raw_configs), desc="Parsing configs") as pbar:
-                for cfg in raw_configs:
-                    if self._shutdown_requested:
-                        break
-                    try:
-                        if self.validator.is_valid_config(cfg):
-                            cache_key = self._get_cache_key(cfg)
-                            if cache_key in parsed_cache:
-                                parsed_data = parsed_cache[cache_key]
-                                if parsed_data:
-                                    valid_configs.append(cfg)
-                                    parse_stats['strict' if parsed_data.get('method') == 'strict' else 'heuristic'] += 1
-                                else:
-                                    parse_stats['failed'] += 1
+            def parse_one(cfg):
+                try:
+                    if self.validator.is_valid_config(cfg):
+                        cache_key = self._get_cache_key(cfg)
+                        if cache_key in parsed_cache:
+                            data = parsed_cache[cache_key]
+                            if data:
+                                return (cfg, 'strict' if data.get('method') == 'strict' else 'heuristic')
                             else:
-                                data, method = FallbackParser.parse_with_stats(cfg)
-                                if data:
-                                    valid_configs.append(cfg)
-                                    parse_stats[method if method in parse_stats else 'heuristic'] += 1
-                                else:
-                                    parse_stats['failed'] += 1
-                                parsed_cache[cache_key] = data
-                    except Exception as e:
-                        logger.warning(f"Validation error for config: {cfg[:50]}... {e}")
-                    pbar.update(1)
+                                return (None, 'failed')
+                        else:
+                            data, method = FallbackParser.parse_with_stats(cfg)
+                            parsed_cache[cache_key] = data
+                            if data:
+                                return (cfg, method if method in ('strict', 'heuristic') else 'heuristic')
+                            else:
+                                return (None, 'failed')
+                except Exception:
+                    return (None, 'failed')
+                return (None, 'failed')
+
+            loop = asyncio.get_event_loop()
+            batch_size = 1000
+            for i in range(0, len(raw_configs), batch_size):
+                batch = raw_configs[i:i+batch_size]
+                futures = [loop.run_in_executor(self._executor, parse_one, cfg) for cfg in batch]
+                for future in asyncio.as_completed(futures):
+                    cfg, method = await future
+                    if cfg:
+                        valid_configs.append(cfg)
+                        parse_stats[method] = parse_stats.get(method, 0) + 1
+                    else:
+                        parse_stats['failed'] += 1
 
             if self._shutdown_requested:
                 await self.save_state()
@@ -388,29 +369,39 @@ class OptimizedPipeline:
                 logger.error("No valid configs found.")
                 return False
 
-            # Шаг 3: Оценка
+            # Шаг 3: Оценка (параллельно)
             logger.info("⚡ Scoring profiles...")
             scored_configs = []
+            scored_lock = asyncio.Lock()
+
+            def score_one(cfg):
+                try:
+                    info = self.quality_checker.extract_server_info(cfg)
+                    if info and info.get('parsed'):
+                        score_info = self.scorer.score_profile(cfg, info['parsed'], success=True)
+                        return {
+                            'config': cfg,
+                            'score': score_info['score'],
+                            'stability': score_info['stability'],
+                            'lifetime': score_info['lifetime'],
+                            'is_datacenter': False,
+                            'server_type': 'UNK',
+                            'parsed': info['parsed']
+                        }
+                except Exception:
+                    pass
+                return None
+
             with tqdm(total=len(valid_configs), desc="Scoring configs") as pbar:
-                for idx, cfg in enumerate(valid_configs):
-                    if self._shutdown_requested:
-                        break
-                    try:
-                        info = self.quality_checker.extract_server_info(cfg)
-                        if info and info.get('parsed'):
-                            score_info = self.scorer.score_profile(cfg, info['parsed'], success=True)
-                            scored_configs.append({
-                                'config': cfg,
-                                'score': score_info['score'],
-                                'stability': score_info['stability'],
-                                'lifetime': score_info['lifetime'],
-                                'is_datacenter': False,
-                                'server_type': 'UNK',
-                                'parsed': info['parsed']
-                            })
-                    except Exception as e:
-                        logger.error(f"Scoring error for config {idx}: {e}")
-                    pbar.update(1)
+                for i in range(0, len(valid_configs), batch_size):
+                    batch = valid_configs[i:i+batch_size]
+                    futures = [loop.run_in_executor(self._executor, score_one, cfg) for cfg in batch]
+                    for future in asyncio.as_completed(futures):
+                        result = await future
+                        if result:
+                            async with scored_lock:
+                                scored_configs.append(result)
+                        pbar.update(1)
 
             if self._shutdown_requested:
                 await self.save_state()
@@ -421,15 +412,15 @@ class OptimizedPipeline:
                 logger.error("No configs scored.")
                 return False
 
-            # Шаг 4: Фильтр по скору
-            min_score = 0.0
+            # Шаг 4: Фильтр по скору (адаптивный)
+            thresholds = self.db.get_metadata('adaptive_thresholds', {})
+            min_score = thresholds.get('score_min', 20.0)
             filtered = [item for item in scored_configs if item['score'] >= min_score]
-            logger.info(f"✅ After min_score filter: {len(filtered)}")
-            if not filtered:
-                logger.warning("No configs passed min_score filter, lowering threshold...")
-                min_score = 0.0
+            logger.info(f"✅ After adaptive min_score filter ({min_score:.1f}): {len(filtered)}")
+            if len(filtered) < 10:
+                min_score = max(5.0, min_score * 0.5)
                 filtered = [item for item in scored_configs if item['score'] >= min_score]
-                logger.info(f"✅ After lowered filter: {len(filtered)}")
+                logger.info(f"✅ After lowered filter ({min_score:.1f}): {len(filtered)}")
             if self._shutdown_requested or not filtered:
                 await self.save_state()
                 return False
@@ -437,7 +428,6 @@ class OptimizedPipeline:
             # Шаг 5: Активная проверка (с кешированием)
             logger.info("🔌 Active checking (TCP, HTTP HEAD, async, cached)...")
             history = self._safe_load_history()
-            # Используем кешированный чекер
             if self.checker_cache is None:
                 self.checker_cache = ActiveChecker(
                     timeout=5.0,
@@ -599,6 +589,7 @@ class OptimizedPipeline:
                 await SessionPool().close()
             except Exception as e:
                 logger.warning(f"Error closing session pool: {e}")
+            self._executor.shutdown(wait=False)
 
 
 def main():
