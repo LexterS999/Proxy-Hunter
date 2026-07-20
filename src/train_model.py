@@ -9,7 +9,7 @@ import sqlite3
 import pandas as pd
 import numpy as np
 from catboost import CatBoostRegressor, Pool
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 import joblib
 import logging
@@ -21,11 +21,10 @@ logger = logging.getLogger(__name__)
 
 DB_PATH = 'configs/history.db'
 MODEL_PATH = 'configs/quality_model.cbm'
-MIN_SAMPLES = 10
+MIN_SAMPLES = 50
 
 def load_training_data(db_path=DB_PATH, min_samples=MIN_SAMPLES):
     conn = sqlite3.connect(db_path)
-    # Получаем все профили с признаками
     query = '''
         SELECT pf.*,
                (SELECT AVG(latency) FROM probe_history WHERE profile_key = pf.profile_key AND success=1) as avg_latency,
@@ -40,7 +39,6 @@ def load_training_data(db_path=DB_PATH, min_samples=MIN_SAMPLES):
     if df.empty:
         return None, None, None, None
 
-    # Вычисляем survival_hours
     survival_list = []
     for idx, row in df.iterrows():
         key = row['profile_key']
@@ -50,7 +48,7 @@ def load_training_data(db_path=DB_PATH, min_samples=MIN_SAMPLES):
         '''
         probe_df = pd.read_sql(probe_query, conn, params=(key,))
         if probe_df.empty:
-            survival_list.append(24.0)  # fallback
+            survival_list.append(24.0)
             continue
         failures = probe_df[probe_df['success'] == 0]
         if failures.empty:
@@ -66,11 +64,8 @@ def load_training_data(db_path=DB_PATH, min_samples=MIN_SAMPLES):
         survival_list.append(max(0.1, survival_hours))
 
     df['survival_hours'] = survival_list
-
-    # reliability – доля успешных за 7 дней
     df['reliability'] = df['success_7d'] / df['count_7d'].clip(lower=1)
 
-    # quality_score – комбинированный
     max_lat = df['avg_latency_7d'].max()
     latency_score = 100 * (1 - df['avg_latency_7d'] / max_lat) if max_lat > 0 else 50
     success_score = df['reliability'] * 100
@@ -132,17 +127,22 @@ def train():
         loss_function='RMSE',
         random_seed=42
     )
+
+    # Кросс-валидация
+    scores = cross_val_score(model, X, y, cv=5, scoring='neg_mean_squared_error')
+    logger.info(f"Cross-validation scores: {scores}")
+    mean_cv_rmse = np.sqrt(-scores.mean())
+    logger.info(f"Mean CV RMSE: {mean_cv_rmse:.2f}")
+
     model.fit(X_train, y_train, eval_set=(X_test, y_test))
     rmse = mean_squared_error(y_test, model.predict(X_test), squared=False)
     mae = mean_absolute_error(y_test, model.predict(X_test))
     logger.info(f"Quality model RMSE: {rmse:.2f}, MAE: {mae:.2f}")
 
-    # Сохраняем метрики в БД
     db = get_db()
     version = f"catboost_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     db.save_model_version(version, rmse, mae, datetime.now().isoformat())
 
-    # Сравниваем с лучшей моделью
     best = db.get_best_model()
     if best is None or rmse < best['rmse']:
         data = {
