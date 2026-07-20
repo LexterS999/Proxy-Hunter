@@ -17,14 +17,23 @@ class AsyncDBWriter:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance._init()
+            cls._instance._queue = None
+            cls._instance._task = None
+            cls._instance._running = False
         return cls._instance
 
     def _init(self):
-        self._queue = asyncio.Queue(maxsize=1000)
-        self._running = True
-        self._task = asyncio.create_task(self._worker())
-        logger.info("AsyncDBWriter started")
+        # вызывается из start() в цикле событий
+        if self._queue is None:
+            self._queue = asyncio.Queue(maxsize=1000)
+        if self._task is None or self._task.done():
+            self._running = True
+            self._task = asyncio.create_task(self._worker())
+            logger.info("AsyncDBWriter started")
+
+    async def start(self):
+        """Запускает воркер в текущем цикле событий."""
+        self._init()
 
     async def _worker(self):
         conn = sqlite3.connect('configs/history.db')
@@ -82,14 +91,14 @@ class AsyncDBWriter:
         conn.commit()
 
     async def enqueue(self, item: Dict):
-        if self._running:
+        if self._running and self._queue is not None:
             await self._queue.put(item)
         else:
             logger.warning("AsyncDBWriter is not running, dropping item")
 
     async def stop(self):
         self._running = False
-        if self._queue:
+        if self._queue is not None:
             await self._queue.put(None)
-        if self._task:
+        if self._task is not None:
             await self._task
