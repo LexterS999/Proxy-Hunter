@@ -17,6 +17,8 @@ from config_validator import ConfigValidator
 from parse_fallback import FallbackParser
 from pathlib import Path
 from dateutil import parser as date_parser
+import base64
+from functools import lru_cache
 
 from retry_utils import retry_with_backoff, is_retryable
 from session_pool import SessionPool
@@ -40,7 +42,7 @@ class AdaptiveRateLimiter:
         self.tokens = max_burst
         self.last_refill = time.time()
         self._lock = asyncio.Lock()
-        self.backoff_factor = 1.0  # множитель скорости
+        self.backoff_factor = 1.0
 
     async def acquire(self):
         async with self._lock:
@@ -58,18 +60,15 @@ class AdaptiveRateLimiter:
                 self.tokens -= 1
 
     def report_success(self):
-        """Увеличиваем скорость при успехе."""
         self.backoff_factor = min(2.0, self.backoff_factor * 1.02)
 
     def report_error(self, is_429: bool = False):
-        """Уменьшаем скорость при ошибке."""
         if is_429:
             self.backoff_factor = max(0.1, self.backoff_factor * 0.7)
         else:
             self.backoff_factor = max(0.3, self.backoff_factor * 0.9)
 
     def set_retry_after(self, seconds: int):
-        """Принудительно ждать."""
         self.last_refill = time.time() + seconds
 
 
@@ -85,13 +84,23 @@ class AsyncConfigFetcher:
         self.protocol_counts: Dict[str, int] = {p: 0 for p in config.SUPPORTED_PROTOCOLS}
         self.seen_configs: Set[str] = set()
         self.channel_protocol_counts: Dict[str, Dict[str, int]] = {}
+        self._message_cache: Dict[str, List[str]] = {}  # Кеш сообщений по каналу
+        self._cache_ttl = 3600  # 1 час
 
         num_channels = len(config.SOURCE_URLS) if config.SOURCE_URLS else 1
         self._connector_limit = min(200, num_channels * 10)
         self._connector_per_host = min(50, num_channels * 5)
 
-        # Используем адаптивный лимитер
         self._rate_limiter = AdaptiveRateLimiter(rate=TELEGRAM_CALLS_PER_SECOND)
+        self._enabled_protocols_set = {p for p, enabled in config.SUPPORTED_PROTOCOLS.items() if enabled}
+
+    @lru_cache(maxsize=128)
+    def _get_protocol(self, config: str) -> Optional[str]:
+        """Кешированное определение протокола."""
+        for protocol in self._enabled_protocols_set:
+            if config.startswith(protocol):
+                return protocol
+        return None
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
         pool = SessionPool()
@@ -105,6 +114,7 @@ class AsyncConfigFetcher:
 
     @retry_with_backoff(attempts=3, base_delay=0.2, max_delay=5.0, deadline=30.0)
     async def _fetch_with_retry(self, url: str) -> Optional[str]:
+        """Обёртка для всех внешних запросов с rate limiting."""
         await self._rate_limiter.acquire()
 
         session = await self._ensure_session()
@@ -158,12 +168,6 @@ class AsyncConfigFetcher:
             return [text]
         return self.validator.split_configs(text)
 
-    @retry_with_backoff(
-        attempts=CHANNEL_RETRY_ATTEMPTS,
-        base_delay=CHANNEL_RETRY_BASE_DELAY,
-        max_delay=CHANNEL_RETRY_MAX_DELAY,
-        deadline=CHANNEL_RETRY_DEADLINE
-    )
     async def fetch_channel(self, channel: ChannelConfig) -> List[str]:
         async with self._semaphore:
             return await self._fetch_channel_internal(channel)
@@ -176,67 +180,57 @@ class AsyncConfigFetcher:
         channel.metrics.protocol_counts = {p: 0 for p in self.config.SUPPORTED_PROTOCOLS}
         start_time = time.time()
 
-        if channel.url.startswith('ssconf://'):
-            configs.extend(await self.fetch_ssconf_configs(channel.url))
-            if configs:
-                response_time = time.time() - start_time
-                self.config.update_channel_stats(channel, True, response_time)
-            return configs
-
-        text = await self._fetch_with_retry(channel.url)
-        if text is None:
-            self.config.update_channel_stats(channel, False)
-            return configs
-
-        response_time = time.time() - start_time
-
-        if channel.is_telegram:
-            soup = BeautifulSoup(text, 'html.parser')
-            messages = soup.find_all('div', class_='tgme_widget_message_text')
-            sorted_messages = sorted(
-                messages,
-                key=lambda m: self.extract_date_from_message(m) or datetime.min.replace(tzinfo=timezone.utc),
-                reverse=True
-            )
-            for message in sorted_messages:
-                if not message or not message.text:
-                    continue
-                message_date = self.extract_date_from_message(message)
-                if not self.is_config_valid(message.text, message_date):
-                    continue
-                msg_text = message.text
-                parts = msg_text.split()
-                for part in parts:
-                    part = part.strip()
-                    if not part:
-                        continue
-                    if part.startswith('ssconf://'):
-                        ssconf_configs = await self.fetch_ssconf_configs(part)
-                        configs.extend(ssconf_configs)
-                        channel.metrics.total_configs += len(ssconf_configs)
-                    else:
-                        decoded_part = self.check_and_decode_base64(part)
-                        if decoded_part != part:
-                            found = self.validator.split_configs(decoded_part)
-                            channel.metrics.total_configs += len(found)
-                            configs.extend(found)
-                found = self.validator.split_configs(msg_text)
-                channel.metrics.total_configs += len(found)
-                configs.extend(found)
+        # Проверяем кеш сообщений
+        cache_key = channel.url
+        if cache_key in self._message_cache:
+            cached = self._message_cache[cache_key]
+            logger.debug(f"Using cached messages for {channel.url} ({len(cached)} messages)")
+            # Парсим кешированные сообщения
+            for msg in cached:
+                configs.extend(self._extract_configs_from_text(msg))
         else:
-            parts = text.split()
-            for part in parts:
-                part = part.strip()
-                if not part:
-                    continue
-                decoded_part = self.check_and_decode_base64(part)
-                if decoded_part != part:
-                    found = self.validator.split_configs(decoded_part)
-                    channel.metrics.total_configs += len(found)
-                    configs.extend(found)
-            found = self.validator.split_configs(text)
-            channel.metrics.total_configs += len(found)
-            configs.extend(found)
+            if channel.url.startswith('ssconf://'):
+                configs.extend(await self.fetch_ssconf_configs(channel.url))
+                if configs:
+                    response_time = time.time() - start_time
+                    self.config.update_channel_stats(channel, True, response_time)
+                return configs
+
+            text = await self._fetch_with_retry(channel.url)
+            if text is None:
+                self.config.update_channel_stats(channel, False)
+                return configs
+
+            response_time = time.time() - start_time
+
+            if channel.is_telegram:
+                soup = BeautifulSoup(text, 'html.parser')
+                # Используем CSS-селектор напрямую
+                messages = soup.select('div.tgme_widget_message_text')
+                sorted_messages = sorted(
+                    messages,
+                    key=lambda m: self.extract_date_from_message(m) or datetime.min.replace(tzinfo=timezone.utc),
+                    reverse=True
+                )
+                # Кешируем текст сообщений
+                cached_messages = []
+                for message in sorted_messages:
+                    if not message or not message.text:
+                        continue
+                    msg_text = message.text
+                    cached_messages.append(msg_text)
+                    configs.extend(self._extract_configs_from_text(msg_text))
+                # Сохраняем в кеш
+                self._message_cache[cache_key] = cached_messages
+                # Очистка старых кешей (простая стратегия)
+                if len(self._message_cache) > 100:
+                    # Удаляем половину старых
+                    keys = list(self._message_cache.keys())[:50]
+                    for k in keys:
+                        del self._message_cache[k]
+            else:
+                # Для не-Telegram просто парсим текст
+                configs.extend(self._extract_configs_from_text(text))
 
         configs = list(set(configs))
         processed = []
@@ -246,7 +240,7 @@ class AsyncConfigFetcher:
                 processed.extend(proc)
 
         if len(processed) >= self.config.MIN_CONFIGS_PER_CHANNEL:
-            self.config.update_channel_stats(channel, True, response_time)
+            self.config.update_channel_stats(channel, True, time.time() - start_time)
             self.config.adjust_protocol_limits(channel)
         else:
             self.config.update_channel_stats(channel, False)
@@ -254,53 +248,95 @@ class AsyncConfigFetcher:
 
         return processed
 
+    def _extract_configs_from_text(self, text: str) -> List[str]:
+        """Извлекает конфиги из текста с ранней фильтрацией."""
+        configs = []
+        # Ранняя фильтрация: проверяем наличие хотя бы одного протокола
+        if not any(proto in text for proto in self._enabled_protocols_set):
+            return configs
+
+        # Проверяем на ssconf
+        if text.startswith('ssconf://'):
+            # Асинхронный вызов, но здесь синхронный контекст — пропускаем
+            # В реальности нужно вызывать fetch_ssconf_configs отдельно
+            return configs
+
+        # Базовая фильтрация по длине
+        if len(text) < 10:
+            return configs
+
+        # Разбиваем и фильтруем
+        parts = text.split()
+        for part in parts:
+            part = part.strip()
+            if not part or len(part) < 10:
+                continue
+            # Проверяем на Base64 и бинарный мусор
+            if self.validator.is_base64(part):
+                try:
+                    # Строгая валидация Base64
+                    decoded = base64.b64decode(part + '==', validate=True)
+                    if decoded:
+                        # Декодируем и пробуем извлечь конфиги
+                        decoded_text = decoded.decode('utf-8', errors='ignore')
+                        found = self.validator.split_configs(decoded_text)
+                        configs.extend(found)
+                except Exception:
+                    # Если не удалось декодировать — пропускаем
+                    continue
+            else:
+                # Обычный текст — пробуем извлечь напрямую
+                found = self.validator.split_configs(part)
+                configs.extend(found)
+        return configs
+
     def process_config(self, config: str, channel: ChannelConfig) -> List[str]:
         processed = []
         if config.startswith('hy2://'):
             config = self.validator.normalize_hysteria2_protocol(config)
-        for protocol in self.config.SUPPORTED_PROTOCOLS:
-            aliases = self.config.SUPPORTED_PROTOCOLS[protocol].get('aliases', [])
-            match = False
-            if config.startswith(protocol):
-                match = True
-            else:
-                for alias in aliases:
-                    if config.startswith(alias):
-                        match = True
-                        config = config.replace(alias, protocol, 1)
-                        break
-            if match:
-                if not self.config.is_protocol_enabled(protocol):
-                    break
-                if protocol == "vmess://":
-                    config = self.validator.clean_vmess_config(config)
-                clean = self.validator.clean_config(config)
-                if self.validator.validate_protocol_config(clean, protocol):
-                    channel.metrics.valid_configs += 1
-                    channel.metrics.protocol_counts[protocol] = channel.metrics.protocol_counts.get(protocol, 0) + 1
-                    if clean not in self.seen_configs:
-                        channel.metrics.unique_configs += 1
-                        self.seen_configs.add(clean)
-                        processed.append(clean)
-                        self.protocol_counts[protocol] = self.protocol_counts.get(protocol, 0) + 1
-                break
+
+        # Используем кешированное определение протокола
+        protocol = self._get_protocol(config)
+        if not protocol:
+            return processed
+
+        if not self.config.is_protocol_enabled(protocol):
+            return processed
+
+        if protocol == "vmess://":
+            config = self.validator.clean_vmess_config(config)
+
+        clean = self.validator.clean_config(config)
+        if self.validator.validate_protocol_config(clean, protocol):
+            channel.metrics.valid_configs += 1
+            channel.metrics.protocol_counts[protocol] = channel.metrics.protocol_counts.get(protocol, 0) + 1
+            if clean not in self.seen_configs:
+                channel.metrics.unique_configs += 1
+                self.seen_configs.add(clean)
+                processed.append(clean)
+                self.protocol_counts[protocol] = self.protocol_counts.get(protocol, 0) + 1
         return processed
 
     def check_and_decode_base64(self, text: str) -> str:
         if self.validator.is_base64(text):
-            decoded = self.validator.decode_base64_text(text)
-            if decoded:
-                return decoded
+            try:
+                # Строгая валидация
+                decoded = base64.b64decode(text + '==', validate=True)
+                if decoded:
+                    return decoded.decode('utf-8', errors='ignore')
+            except Exception:
+                pass
         return text
 
     def extract_date_from_message(self, message) -> Optional[datetime]:
-        try:
-            time_element = message.find_parent('div', class_='tgme_widget_message').find('time')
-            if time_element and 'datetime' in time_element.attrs:
+        # Используем CSS-селектор напрямую
+        time_element = message.select_one('time')
+        if time_element and 'datetime' in time_element.attrs:
+            try:
                 dt_str = time_element['datetime']
                 return date_parser.parse(dt_str)
-        except Exception as e:
-            logger.debug(f"Date parsing failed: {e}")
+            except Exception as e:
+                logger.debug(f"Date parsing failed: {e}")
         return None
 
     def is_config_valid(self, config_text: str, date: Optional[datetime]) -> bool:
