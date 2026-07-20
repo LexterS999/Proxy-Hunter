@@ -56,6 +56,33 @@ from handle_errors import handle_errors
 logger = logging.getLogger(__name__)
 
 # ============================
+# Глобальная функция для парсинга в отдельном процессе
+# ============================
+
+def _parse_config_worker(cfg: str, cache_key: str, parsed_cache: Dict) -> tuple:
+    """
+    Вспомогательная функция для параллельной валидации и парсинга.
+    Возвращает (cfg, method, data) или (None, 'failed', None).
+    """
+    if not ConfigValidator.is_valid_config(cfg):
+        return (None, 'failed', None)
+    if cache_key in parsed_cache:
+        data = parsed_cache[cache_key]
+        if data:
+            method = 'strict' if data.get('method') == 'strict' else 'heuristic'
+            return (cfg, method, None)
+        else:
+            return (None, 'failed', None)
+    else:
+        data, method = FallbackParser.parse_with_stats(cfg)
+        if data is None:
+            return (None, 'failed', None)
+        else:
+            if method not in ('strict', 'heuristic'):
+                method = 'heuristic'
+            return (cfg, method, data)
+
+# ============================
 # Вспомогательные классы
 # ============================
 
@@ -429,38 +456,30 @@ class OptimizedPipeline:
         parsed_cache = await self.db.get_parsed_cache_batch(cache_keys)
         new_cache_items = {}
 
-        def parse_one(cfg, cache_key):
-            try:
-                if self.validator.is_valid_config(cfg):
-                    if cache_key in parsed_cache:
-                        data = parsed_cache[cache_key]
-                        if data:
-                            return (cfg, 'strict' if data.get('method') == 'strict' else 'heuristic')
-                        else:
-                            return (None, 'failed')
-                    else:
-                        data, method = FallbackParser.parse_with_stats(cfg)
-                        if data is None:
-                            return (None, 'failed')
-                        new_cache_items[cache_key] = data
-                        if data:
-                            return (cfg, method if method in ('strict', 'heuristic') else 'heuristic')
-                        else:
-                            return (None, 'failed')
-            except Exception:
-                return (None, 'failed')
-
+        # Используем глобальную функцию _parse_config_worker
         for i in range(0, len(raw_configs), batch_size):
             if self._shutdown_requested:
                 return []
             batch = raw_configs[i:i+batch_size]
-            batch_keys = [self._get_cache_key(cfg) for cfg in batch]
-            futures = [loop.run_in_executor(self._process_executor, parse_one, cfg, key) for cfg, key in zip(batch, batch_keys)]
+            batch_keys = cache_keys[i:i+batch_size]
+            # Передаём копию parsed_cache (будет скопирована в каждый процесс)
+            futures = [
+                loop.run_in_executor(
+                    self._process_executor,
+                    _parse_config_worker,
+                    cfg,
+                    key,
+                    parsed_cache
+                )
+                for cfg, key in zip(batch, batch_keys)
+            ]
             for future in asyncio.as_completed(futures):
-                cfg, method = await future
+                cfg, method, data = await future
                 if cfg:
                     valid.append(cfg)
                     parse_stats[method] = parse_stats.get(method, 0) + 1
+                    if data is not None:
+                        new_cache_items[self._get_cache_key(cfg)] = data
                 else:
                     parse_stats['failed'] += 1
 
