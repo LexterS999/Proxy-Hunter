@@ -27,33 +27,6 @@ VENV_DIR="$INSTALL_DIR/venv"
 # Если передан флаг --install-xray-only, устанавливаем только Xray и выходим
 if [[ "$1" == "--install-xray-only" ]]; then
     echo "Installing Xray-core only..."
-    
-    # Проверяем наличие необходимых утилит
-    if ! command -v curl &> /dev/null; then
-        echo "curl not found. Please install curl."
-        exit 1
-    fi
-    if ! command -v unzip &> /dev/null; then
-        echo "unzip not found. Please install unzip."
-        exit 1
-    fi
-    # Устанавливаем jq, если его нет
-    if ! command -v jq &> /dev/null; then
-        echo "jq not found. Installing jq..."
-        if command -v apt-get &> /dev/null; then
-            sudo apt-get update && sudo apt-get install -y jq
-        elif command -v yum &> /dev/null; then
-            sudo yum install -y jq
-        elif command -v dnf &> /dev/null; then
-            sudo dnf install -y jq
-        elif command -v pacman &> /dev/null; then
-            sudo pacman -S --noconfirm jq
-        else
-            echo "Cannot install jq automatically. Please install jq manually."
-            exit 1
-        fi
-    fi
-
     ARCH=$(uname -m)
     case "$ARCH" in
         x86_64)  XRAY_FILE="Xray-linux-64.zip" ;;
@@ -62,19 +35,23 @@ if [[ "$1" == "--install-xray-only" ]]; then
         *)       echo "Unsupported architecture: $ARCH"; exit 1 ;;
     esac
 
-    echo "Fetching latest Xray version..."
-    XRAY_VERSION=""
-    # Пробуем через jq
-    if command -v jq &> /dev/null; then
-        XRAY_VERSION=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r '.tag_name')
-        if [ -z "$XRAY_VERSION" ] || [ "$XRAY_VERSION" == "null" ]; then
-            XRAY_VERSION=""
-        fi
+    # Проверяем наличие jq, curl, unzip
+    if ! command -v curl &> /dev/null; then
+        echo "curl not found. Please install curl."
+        exit 1
     fi
-    # Если jq не сработал, пробуем grep
-    if [ -z "$XRAY_VERSION" ]; then
-        echo "jq failed, trying fallback with grep..."
-        if command -v grep &> /dev/null && echo "test" | grep -qP "." 2>/dev/null; then
+    if ! command -v unzip &> /dev/null; then
+        echo "unzip not found. Please install unzip."
+        exit 1
+    fi
+
+    # Пробуем получить последнюю версию через GitHub API
+    echo "Fetching latest Xray version..."
+    XRAY_VERSION=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r '.tag_name')
+    if [ -z "$XRAY_VERSION" ] || [ "$XRAY_VERSION" == "null" ]; then
+        echo "Failed to get latest Xray version via jq, trying fallback..."
+        # fallback: пробуем через grep -oP (если доступно)
+        if command -v grep &> /dev/null && grep -P "" <<< "test" &> /dev/null; then
             XRAY_VERSION=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep -oP '"tag_name": "\K(.*?)(?=")')
         fi
         if [ -z "$XRAY_VERSION" ]; then
@@ -85,17 +62,15 @@ if [[ "$1" == "--install-xray-only" ]]; then
     echo "Xray version: $XRAY_VERSION"
 
     echo "Downloading $XRAY_FILE ..."
-    if ! curl -L -o /tmp/xray.zip "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/${XRAY_FILE}"; then
+    # Используем curl вместо wget для большей переносимости
+    curl -L -o /tmp/xray.zip "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/${XRAY_FILE}" || {
         echo "Download failed. Please check your internet connection."
         exit 1
-    fi
+    }
 
     echo "Extracting Xray..."
     mkdir -p /tmp/xray
-    if ! unzip -q -o /tmp/xray.zip -d /tmp/xray; then
-        echo "Unzip failed. Please check the downloaded file."
-        exit 1
-    fi
+    unzip -q -o /tmp/xray.zip -d /tmp/xray
     chmod +x /tmp/xray/xray
 
     # Устанавливаем в /usr/local/bin (требует sudo)
@@ -109,7 +84,6 @@ if [[ "$1" == "--install-xray-only" ]]; then
     fi
 
     rm -rf /tmp/xray /tmp/xray.zip
-    echo "Xray installed successfully!"
     xray version 2>&1 | head -1
     exit 0
 fi
