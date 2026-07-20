@@ -122,7 +122,12 @@ class CachedActiveChecker:
             self._tcp_cache.move_to_end(key)
             return self._tcp_cache[key]
 
-        latency = await self._tcp_latency_with_retry(host, port)
+        # <-- ОБЕРНУЛИ В try/except, чтобы любые исключения превращались в -1.0
+        try:
+            latency = await self._tcp_latency_with_retry(host, port)
+        except Exception:
+            latency = -1.0
+
         if len(self._tcp_cache) >= self._cache_max_size:
             self._tcp_cache.popitem(last=False)
         self._tcp_cache[key] = latency
