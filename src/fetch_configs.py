@@ -17,8 +17,7 @@ from config_validator import ConfigValidator
 from parse_fallback import FallbackParser
 from pathlib import Path
 from dateutil import parser as date_parser
-import base64
-from functools import lru_cache
+from collections import OrderedDict
 
 from retry_utils import retry_with_backoff, is_retryable
 from session_pool import SessionPool
@@ -34,18 +33,57 @@ from user_settings import (
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# ИСПРАВЛЕНИЕ #8: BoundedSet с LRU-эвикцией вместо неограниченного set
+# =============================================================================
+class BoundedSet:
+    """
+    Множество с ограничением размера и LRU-эвикцией.
+    Предотвращает неограниченный рост памяти при USE_MAXIMUM_POWER=True.
+    """
+
+    def __init__(self, maxsize: int = 50000):
+        self._maxsize = maxsize
+        self._data: OrderedDict[str, None] = OrderedDict()
+
+    def add(self, item: str) -> None:
+        if item in self._data:
+            self._data.move_to_end(item)
+        else:
+            if len(self._data) >= self._maxsize:
+                self._data.popitem(last=False)  # Удаляем самый старый
+            self._data[item] = None
+
+    def __contains__(self, item: str) -> bool:
+        return item in self._data
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    def clear(self) -> None:
+        self._data.clear()
+
+
 class AdaptiveRateLimiter:
     """Адаптивный Token Bucket с обратной связью по ошибкам."""
+
     def __init__(self, rate: float = 1.5, max_burst: int = 10):
         self.rate = rate
         self.max_tokens = max_burst
         self.tokens = max_burst
         self.last_refill = time.time()
-        self._lock = asyncio.Lock()
-        self.backoff_factor = 1.0
+        self._lock: Optional[asyncio.Lock] = None  # ИСПРАВЛЕНО: ленивое создание
+        self.backoff_factor = 1.0  # множитель скорости
 
-    async def acquire(self):
-        async with self._lock:
+    def _get_lock(self) -> asyncio.Lock:
+        """ИСПРАВЛЕНО: Ленивое создание Lock."""
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
+
+    async def acquire(self) -> None:
+        lock = self._get_lock()
+        async with lock:
             now = time.time()
             elapsed = now - self.last_refill
             self.tokens = min(self.max_tokens,
@@ -59,16 +97,19 @@ class AdaptiveRateLimiter:
             else:
                 self.tokens -= 1
 
-    def report_success(self):
+    def report_success(self) -> None:
+        """Увеличиваем скорость при успехе."""
         self.backoff_factor = min(2.0, self.backoff_factor * 1.02)
 
-    def report_error(self, is_429: bool = False):
+    def report_error(self, is_429: bool = False) -> None:
+        """Уменьшаем скорость при ошибке."""
         if is_429:
             self.backoff_factor = max(0.1, self.backoff_factor * 0.7)
         else:
             self.backoff_factor = max(0.3, self.backoff_factor * 0.9)
 
-    def set_retry_after(self, seconds: int):
+    def set_retry_after(self, seconds: int) -> None:
+        """Принудительно ждать."""
         self.last_refill = time.time() + seconds
 
 
@@ -79,28 +120,19 @@ class AsyncConfigFetcher:
         self.config = config
         self.validator = ConfigValidator()
         self.max_concurrent = max_concurrent
-        self._session = None
+        self._session: Optional[aiohttp.ClientSession] = None
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self.protocol_counts: Dict[str, int] = {p: 0 for p in config.SUPPORTED_PROTOCOLS}
-        self.seen_configs: Set[str] = set()
+        # ИСПРАВЛЕНИЕ #8: BoundedSet вместо неограниченного set
+        self.seen_configs: BoundedSet = BoundedSet(maxsize=50000)
         self.channel_protocol_counts: Dict[str, Dict[str, int]] = {}
-        self._message_cache: Dict[str, List[str]] = {}  # Кеш сообщений по каналу
-        self._cache_ttl = 3600  # 1 час
 
         num_channels = len(config.SOURCE_URLS) if config.SOURCE_URLS else 1
         self._connector_limit = min(200, num_channels * 10)
         self._connector_per_host = min(50, num_channels * 5)
 
+        # Используем адаптивный лимитер
         self._rate_limiter = AdaptiveRateLimiter(rate=TELEGRAM_CALLS_PER_SECOND)
-        self._enabled_protocols_set = {p for p, enabled in config.SUPPORTED_PROTOCOLS.items() if enabled}
-
-    @lru_cache(maxsize=128)
-    def _get_protocol(self, config: str) -> Optional[str]:
-        """Кешированное определение протокола."""
-        for protocol in self._enabled_protocols_set:
-            if config.startswith(protocol):
-                return protocol
-        return None
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
         pool = SessionPool()
@@ -114,7 +146,6 @@ class AsyncConfigFetcher:
 
     @retry_with_backoff(attempts=3, base_delay=0.2, max_delay=5.0, deadline=30.0)
     async def _fetch_with_retry(self, url: str) -> Optional[str]:
-        """Обёртка для всех внешних запросов с rate limiting."""
         await self._rate_limiter.acquire()
 
         session = await self._ensure_session()
@@ -168,79 +199,95 @@ class AsyncConfigFetcher:
             return [text]
         return self.validator.split_configs(text)
 
+    @retry_with_backoff(
+        attempts=CHANNEL_RETRY_ATTEMPTS,
+        base_delay=CHANNEL_RETRY_BASE_DELAY,
+        max_delay=CHANNEL_RETRY_MAX_DELAY,
+        deadline=CHANNEL_RETRY_DEADLINE
+    )
     async def fetch_channel(self, channel: ChannelConfig) -> List[str]:
         async with self._semaphore:
             return await self._fetch_channel_internal(channel)
 
     async def _fetch_channel_internal(self, channel: ChannelConfig) -> List[str]:
-        configs = []
+        configs: List[str] = []
         channel.metrics.total_configs = 0
         channel.metrics.valid_configs = 0
         channel.metrics.unique_configs = 0
         channel.metrics.protocol_counts = {p: 0 for p in self.config.SUPPORTED_PROTOCOLS}
         start_time = time.time()
 
-        # Проверяем кеш сообщений
-        cache_key = channel.url
-        if cache_key in self._message_cache:
-            cached = self._message_cache[cache_key]
-            logger.debug(f"Using cached messages for {channel.url} ({len(cached)} messages)")
-            # Парсим кешированные сообщения
-            for msg in cached:
-                configs.extend(self._extract_configs_from_text(msg))
-        else:
-            if channel.url.startswith('ssconf://'):
-                configs.extend(await self.fetch_ssconf_configs(channel.url))
-                if configs:
-                    response_time = time.time() - start_time
-                    self.config.update_channel_stats(channel, True, response_time)
-                return configs
+        if channel.url.startswith('ssconf://'):
+            configs.extend(await self.fetch_ssconf_configs(channel.url))
+            if configs:
+                response_time = time.time() - start_time
+                self.config.update_channel_stats(channel, True, response_time)
+            return configs
 
-            text = await self._fetch_with_retry(channel.url)
-            if text is None:
-                self.config.update_channel_stats(channel, False)
-                return configs
+        text = await self._fetch_with_retry(channel.url)
+        if text is None:
+            self.config.update_channel_stats(channel, False)
+            return configs
 
-            response_time = time.time() - start_time
+        response_time = time.time() - start_time
 
-            if channel.is_telegram:
-                soup = BeautifulSoup(text, 'html.parser')
-                # Используем CSS-селектор напрямую
-                messages = soup.select('div.tgme_widget_message_text')
-                sorted_messages = sorted(
-                    messages,
-                    key=lambda m: self.extract_date_from_message(m) or datetime.min.replace(tzinfo=timezone.utc),
-                    reverse=True
-                )
-                # Кешируем текст сообщений
-                cached_messages = []
-                for message in sorted_messages:
-                    if not message or not message.text:
+        if channel.is_telegram:
+            soup = BeautifulSoup(text, 'html.parser')
+            messages = soup.find_all('div', class_='tgme_widget_message_text')
+            sorted_messages = sorted(
+                messages,
+                key=lambda m: self.extract_date_from_message(m) or datetime.min.replace(tzinfo=timezone.utc),
+                reverse=True
+            )
+            for message in sorted_messages:
+                if not message or not message.text:
+                    continue
+                message_date = self.extract_date_from_message(message)
+                if not self.is_config_valid(message.text, message_date):
+                    continue
+                msg_text = message.text
+                parts = msg_text.split()
+                for part in parts:
+                    part = part.strip()
+                    if not part:
                         continue
-                    msg_text = message.text
-                    cached_messages.append(msg_text)
-                    configs.extend(self._extract_configs_from_text(msg_text))
-                # Сохраняем в кеш
-                self._message_cache[cache_key] = cached_messages
-                # Очистка старых кешей (простая стратегия)
-                if len(self._message_cache) > 100:
-                    # Удаляем половину старых
-                    keys = list(self._message_cache.keys())[:50]
-                    for k in keys:
-                        del self._message_cache[k]
-            else:
-                # Для не-Telegram просто парсим текст
-                configs.extend(self._extract_configs_from_text(text))
+                    if part.startswith('ssconf://'):
+                        ssconf_configs = await self.fetch_ssconf_configs(part)
+                        configs.extend(ssconf_configs)
+                        channel.metrics.total_configs += len(ssconf_configs)
+                    else:
+                        decoded_part = self.check_and_decode_base64(part)
+                        if decoded_part != part:
+                            found = self.validator.split_configs(decoded_part)
+                            channel.metrics.total_configs += len(found)
+                            configs.extend(found)
+                found = self.validator.split_configs(msg_text)
+                channel.metrics.total_configs += len(found)
+                configs.extend(found)
+        else:
+            parts = text.split()
+            for part in parts:
+                part = part.strip()
+                if not part:
+                    continue
+                decoded_part = self.check_and_decode_base64(part)
+                if decoded_part != part:
+                    found = self.validator.split_configs(decoded_part)
+                    channel.metrics.total_configs += len(found)
+                    configs.extend(found)
+            found = self.validator.split_configs(text)
+            channel.metrics.total_configs += len(found)
+            configs.extend(found)
 
         configs = list(set(configs))
-        processed = []
+        processed: List[str] = []
         for cfg in configs:
             proc = self.process_config(cfg, channel)
             if proc:
                 processed.extend(proc)
 
         if len(processed) >= self.config.MIN_CONFIGS_PER_CHANNEL:
-            self.config.update_channel_stats(channel, True, time.time() - start_time)
+            self.config.update_channel_stats(channel, True, response_time)
             self.config.adjust_protocol_limits(channel)
         else:
             self.config.update_channel_stats(channel, False)
@@ -248,95 +295,54 @@ class AsyncConfigFetcher:
 
         return processed
 
-    def _extract_configs_from_text(self, text: str) -> List[str]:
-        """Извлекает конфиги из текста с ранней фильтрацией."""
-        configs = []
-        # Ранняя фильтрация: проверяем наличие хотя бы одного протокола
-        if not any(proto in text for proto in self._enabled_protocols_set):
-            return configs
-
-        # Проверяем на ssconf
-        if text.startswith('ssconf://'):
-            # Асинхронный вызов, но здесь синхронный контекст — пропускаем
-            # В реальности нужно вызывать fetch_ssconf_configs отдельно
-            return configs
-
-        # Базовая фильтрация по длине
-        if len(text) < 10:
-            return configs
-
-        # Разбиваем и фильтруем
-        parts = text.split()
-        for part in parts:
-            part = part.strip()
-            if not part or len(part) < 10:
-                continue
-            # Проверяем на Base64 и бинарный мусор
-            if self.validator.is_base64(part):
-                try:
-                    # Строгая валидация Base64
-                    decoded = base64.b64decode(part + '==', validate=True)
-                    if decoded:
-                        # Декодируем и пробуем извлечь конфиги
-                        decoded_text = decoded.decode('utf-8', errors='ignore')
-                        found = self.validator.split_configs(decoded_text)
-                        configs.extend(found)
-                except Exception:
-                    # Если не удалось декодировать — пропускаем
-                    continue
-            else:
-                # Обычный текст — пробуем извлечь напрямую
-                found = self.validator.split_configs(part)
-                configs.extend(found)
-        return configs
-
     def process_config(self, config: str, channel: ChannelConfig) -> List[str]:
-        processed = []
+        processed: List[str] = []
         if config.startswith('hy2://'):
             config = self.validator.normalize_hysteria2_protocol(config)
-
-        # Используем кешированное определение протокола
-        protocol = self._get_protocol(config)
-        if not protocol:
-            return processed
-
-        if not self.config.is_protocol_enabled(protocol):
-            return processed
-
-        if protocol == "vmess://":
-            config = self.validator.clean_vmess_config(config)
-
-        clean = self.validator.clean_config(config)
-        if self.validator.validate_protocol_config(clean, protocol):
-            channel.metrics.valid_configs += 1
-            channel.metrics.protocol_counts[protocol] = channel.metrics.protocol_counts.get(protocol, 0) + 1
-            if clean not in self.seen_configs:
-                channel.metrics.unique_configs += 1
-                self.seen_configs.add(clean)
-                processed.append(clean)
-                self.protocol_counts[protocol] = self.protocol_counts.get(protocol, 0) + 1
+        for protocol in self.config.SUPPORTED_PROTOCOLS:
+            aliases = self.config.SUPPORTED_PROTOCOLS[protocol].get('aliases', [])
+            match = False
+            if config.startswith(protocol):
+                match = True
+            else:
+                for alias in aliases:
+                    if config.startswith(alias):
+                        match = True
+                        config = config.replace(alias, protocol, 1)
+                        break
+            if match:
+                if not self.config.is_protocol_enabled(protocol):
+                    break
+                if protocol == "vmess://":
+                    config = self.validator.clean_vmess_config(config)
+                clean = self.validator.clean_config(config)
+                if self.validator.validate_protocol_config(clean, protocol):
+                    channel.metrics.valid_configs += 1
+                    channel.metrics.protocol_counts[protocol] = channel.metrics.protocol_counts.get(protocol, 0) + 1
+                    # ИСПРАВЛЕНИЕ #8: BoundedSet с LRU-эвикцией
+                    if clean not in self.seen_configs:
+                        channel.metrics.unique_configs += 1
+                        self.seen_configs.add(clean)
+                        processed.append(clean)
+                    self.protocol_counts[protocol] = self.protocol_counts.get(protocol, 0) + 1
+                break
         return processed
 
     def check_and_decode_base64(self, text: str) -> str:
         if self.validator.is_base64(text):
-            try:
-                # Строгая валидация
-                decoded = base64.b64decode(text + '==', validate=True)
-                if decoded:
-                    return decoded.decode('utf-8', errors='ignore')
-            except Exception:
-                pass
+            decoded = self.validator.decode_base64_text(text)
+            if decoded:
+                return decoded
         return text
 
     def extract_date_from_message(self, message) -> Optional[datetime]:
-        # Используем CSS-селектор напрямую
-        time_element = message.select_one('time')
-        if time_element and 'datetime' in time_element.attrs:
-            try:
+        try:
+            time_element = message.find_parent('div', class_='tgme_widget_message').find('time')
+            if time_element and 'datetime' in time_element.attrs:
                 dt_str = time_element['datetime']
                 return date_parser.parse(dt_str)
-            except Exception as e:
-                logger.debug(f"Date parsing failed: {e}")
+        except Exception as e:
+            logger.debug(f"Date parsing failed: {e}")
         return None
 
     def is_config_valid(self, config_text: str, date: Optional[datetime]) -> bool:
@@ -346,7 +352,7 @@ class AsyncConfigFetcher:
         return date >= cutoff
 
     def balance_protocols(self, configs: List[str]) -> List[str]:
-        protocol_configs = {p: [] for p in self.config.SUPPORTED_PROTOCOLS}
+        protocol_configs: Dict[str, List[str]] = {p: [] for p in self.config.SUPPORTED_PROTOCOLS}
         for cfg in configs:
             if cfg.startswith('hy2://'):
                 cfg = self.validator.normalize_hysteria2_protocol(cfg)
@@ -357,7 +363,7 @@ class AsyncConfigFetcher:
         total = sum(len(c) for c in protocol_configs.values())
         if total == 0:
             return []
-        balanced = []
+        balanced: List[str] = []
         sorted_protocols = sorted(
             protocol_configs.items(),
             key=lambda x: (self.config.SUPPORTED_PROTOCOLS[x[0]]["priority"], len(x[1])),
@@ -381,7 +387,7 @@ class AsyncConfigFetcher:
         tasks = [self.fetch_channel(ch) for ch in enabled]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        all_configs = []
+        all_configs: List[str] = []
         for idx, result in enumerate(results):
             if isinstance(result, Exception):
                 logger.error(f"Channel {enabled[idx].url} failed after retries: {result}")
@@ -392,20 +398,20 @@ class AsyncConfigFetcher:
             all_configs = self.balance_protocols(sorted(set(all_configs)))
         return all_configs
 
-    async def close(self):
+    async def close(self) -> None:
         pass
 
 
 # Для обратной совместимости
 class ConfigFetcher:
-    def __init__(self, config):
+    def __init__(self, config: ProxyConfig):
         self.config = config
         self.validator = ConfigValidator()
-        self.protocol_counts = {}
-        self.seen_configs = set()
-        self.channel_protocol_counts = {}
+        self.protocol_counts: Dict[str, int] = {}
+        self.seen_configs: Set[str] = set()
+        self.channel_protocol_counts: Dict[str, Dict[str, int]] = {}
 
-    def fetch_all_configs(self):
+    def fetch_all_configs(self) -> List[str]:
         import asyncio
         fetcher = AsyncConfigFetcher(self.config)
         try:
