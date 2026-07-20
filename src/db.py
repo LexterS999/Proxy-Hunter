@@ -160,7 +160,7 @@ class HistoryDB:
         finally:
             conn.close()
 
-    # ----- Методы для работы с runs (без изменений) -----
+    # ----- Методы для работы с runs -----
     def add_run(self, stats: Dict) -> int:
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -207,7 +207,7 @@ class HistoryDB:
         runs = self.get_recent_runs(1)
         return runs[0] if runs else None
 
-    # ----- Методы для работы с каналами (без изменений) -----
+    # ----- Методы для работы с каналами -----
     def update_channel(self, url: str, metrics: Dict, enabled: bool = True):
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -245,7 +245,7 @@ class HistoryDB:
                 result.append(d)
             return result
 
-    # ----- Методы для работы с профилями (без изменений) -----
+    # ----- Методы для работы с профилями -----
     def update_profile(self, key: str, profile_data: Dict):
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -299,7 +299,7 @@ class HistoryDB:
                 result.append(d)
             return result
 
-    # ----- Методы для метаданных (без изменений) -----
+    # ----- Методы для метаданных -----
     def get_metadata(self, key: str, default: Any = None) -> Any:
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -320,7 +320,7 @@ class HistoryDB:
             ''', (key, json.dumps(value)))
             conn.commit()
 
-    # ----- Методы для истории каналов (без изменений) -----
+    # ----- Методы для истории каналов -----
     def add_channel_history(self, url: str, run_id: int, metrics: Dict):
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -377,6 +377,8 @@ class HistoryDB:
             return None
         return sum(valid_scores) / len(valid_scores)
 
+
+# Ленивая инициализация
 _db = None
 
 def get_db() -> HistoryDB:
