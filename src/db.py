@@ -267,14 +267,28 @@ class HistoryDB:
             logger.info(f"Schema upgraded to version {SCHEMA_VERSION}")
 
     async def _get_connection(self) -> aiosqlite.Connection:
-        """Возвращает соединение из пула."""
+        """Возвращает рабочее соединение из пула, пересоздавая при необходимости."""
         global _connection_pool
         async with _pool_lock:
-            if _connection_pool is None or await _connection_pool.closed():
-                _connection_pool = await aiosqlite.connect(DB_PATH)
-                await _connection_pool.execute("PRAGMA journal_mode=WAL")
-                await _connection_pool.execute("PRAGMA synchronous=NORMAL")
-                logger.info("Created new aiosqlite connection pool")
+            # Проверяем, существует ли соединение и не закрыто ли оно
+            if _connection_pool is not None:
+                try:
+                    # Пробуем выполнить простой запрос, чтобы проверить, живо ли соединение
+                    await _connection_pool.execute("SELECT 1")
+                    # Если успешно, возвращаем
+                    return _connection_pool
+                except Exception:
+                    # Если ошибка, закрываем и пересоздаём
+                    try:
+                        await _connection_pool.close()
+                    except:
+                        pass
+                    _connection_pool = None
+            # Создаём новое соединение
+            _connection_pool = await aiosqlite.connect(DB_PATH)
+            await _connection_pool.execute("PRAGMA journal_mode=WAL")
+            await _connection_pool.execute("PRAGMA synchronous=NORMAL")
+            logger.info("Created new aiosqlite connection pool")
             return _connection_pool
 
     @asynccontextmanager
