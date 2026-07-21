@@ -1,75 +1,131 @@
 # =============================================================================
 # Proxy-Hunter — requirements.txt
-# Все зависимости проекта в одном файле.
+# ИСЧЕРПЫВАЮЩИЙ список всех зависимостей проекта.
 # Python >= 3.11
+# =============================================================================
+#
+# Зависимости сгруппированы по модулям, которые их используют.
+# Транзитивные зависимости (certifi, charset-normalizer, pycares, multidict,
+# yarl, frozenlist, aiosignal, async-timeout, attrs) устанавливаются
+# автоматически через pip — их НЕ нужно указывать явно.
+#
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Асинхронный HTTP / сеть
+# 1. АСИНХРОННЫЙ HTTP / СЕТЬ
+#    Используется: fetch_configs.py, session_pool.py, active_checker.py,
+#                  multi_level_verifier.py, region_tester.py, pipeline_optimized.py
 # -----------------------------------------------------------------------------
-# Основной HTTP-клиент: fetch_configs.py, session_pool.py, active_checker.py
 aiohttp>=3.9.5,<4.0
 
-# Асинхронный DNS-резолвер: xray_balancer.py (замена socket.getaddrinfo)
+# Асинхронный DNS-резолвер (замена блокирующего socket.getaddrinfo)
+# Используется: xray_balancer.py, region_tester.py
+# Транзитивно тянет pycares
 aiodns>=3.2.0
 
-# Ускоренный event loop для Linux (CI = ubuntu).
-# На Windows не устанавливается — обёрнут в try/except в точке входа.
+# Ускоренный event loop для Linux/macOS (CI = ubuntu-22.04).
+# На Windows НЕ устанавливается. В коде обёрнут в try/except ImportError.
+# Используется: pipeline_optimized.py (точка входа)
 uvloop>=0.19.0; sys_platform != 'win32'
 
 # -----------------------------------------------------------------------------
-# Асинхронные файловые операции
+# 2. АСИНХРОННЫЕ ФАЙЛОВЫЕ ОПЕРАЦИИ
+#    Используется: pipeline_optimized.py, db.py
 # -----------------------------------------------------------------------------
-# Чтение/запись конфигов, архивов, кэшей без блокировки event loop
 aiofiles>=23.2.1
 
 # -----------------------------------------------------------------------------
-# Хеширование и дедупликация
+# 3. ХЕШИРОВАНИЕ И ДЕДУПЛИКАЦИЯ
+#    Используется: deep_deduplicate.py, bloom_async.py
 # -----------------------------------------------------------------------------
-# Быстрое хеширование для deep_deduplicate.py и bloom_async.py
 xxhash>=3.4.1
 
 # -----------------------------------------------------------------------------
-# Парсинг и валидация
+# 4. ПАРСИНГ КОНТЕНТА
 # -----------------------------------------------------------------------------
-# YAML-парсинг: Clash-конфиги, Xray outbound configs (xray_balancer.py)
-PyYAML>=6.0.1
-
-# HTML-парсинг: fetch_configs.py (извлечение конфигов из Telegram-страниц)
+# HTML-парсинг Telegram-страниц и веб-источников
+# Используется: fetch_configs.py (from bs4 import BeautifulSoup)
 beautifulsoup4>=4.12.3
 
 # Быстрый XML/HTML парсер-бэкенд для BeautifulSoup
+# Без lxml BS4 использует встроенный html.parser (медленнее в 3-5 раз)
+# Используется: fetch_configs.py
 lxml>=5.1.0
 
-# Синхронный HTTP-клиент (fallback, install.sh проверки)
+# YAML-парсинг: Clash-конфиги, Xray outbounds, sing-box
+# Используется: xray_balancer.py, parse_fallback.py (Clash YAML)
+PyYAML>=6.0.1
+
+# Синхронный HTTP-клиент (fallback, install.sh проверки, region_tester.py)
+# Используется: install.sh, region_tester.py (fallback)
 requests>=2.31.0
 
 # -----------------------------------------------------------------------------
-# Прогресс и логирование
+# 5. ПРОГРЕСС И ВИЗУАЛИЗАЦИЯ
+#    Используется: pipeline_optimized.py
 # -----------------------------------------------------------------------------
-# Прогресс-бары для пайплайна (pipeline_optimized.py)
 tqdm>=4.66.2
 
 # -----------------------------------------------------------------------------
-# ML / Скоринг / Feature Engineering
+# 6. ML / СКОРИНГ / FEATURE ENGINEERING
+#    Используется: feature_extractor.py, train_model.py
+#    НЕ используется в основном пайплайне, но нужно для обучения моделей.
 # -----------------------------------------------------------------------------
-# Числовые вычисления: feature_extractor.py, survival_model.py
+# Числовые вычисления, векторные операции
 numpy>=1.26.0,<3.0
 
-# Работа с табличными данными: feature_extractor.py, train_model.py
+# Табличные данные, DataFrame
 pandas>=2.2.0
 
-# ML-утилиты: train_model.py (метрики, split, preprocessing)
+# ML-утилиты: метрики, train/test split, preprocessing, pipeline
 scikit-learn>=1.4.0
 
-# Градиентный бустинг: train_model.py (основная модель скоринга)
+# Градиентный бустинг — основная модель скоринга профилей
 catboost>=1.2.3
 
 # -----------------------------------------------------------------------------
-# Утилиты
+# 7. КОНФИГУРАЦИЯ И СРЕДА
 # -----------------------------------------------------------------------------
-# Работа с переменными окружения и .env файлами (user_settings.py)
+# Загрузка .env файлов для локального запуска
+# Используется: user_settings.py
 python-dotenv>=1.0.1
 
-# Типизация для Python < 3.12 (если запуск на 3.11)
+# Бэкпорт типов (Protocol, TypeAlias, override) для Python 3.11
+# На Python 3.12+ не нужен
 typing-extensions>=4.10.0; python_version < '3.12'
+
+# -----------------------------------------------------------------------------
+# 8. СЕРИАЛИЗАЦИЯ / БИНАРНЫЕ ДАННЫЕ
+# -----------------------------------------------------------------------------
+# Быстрая бинарная сериализация (альтернатива pickle для bloom_async.py)
+# Используется: bloom_async.py (SafeBloomShard), region_tester.py
+msgpack>=1.0.7
+
+# -----------------------------------------------------------------------------
+# 9. МОНІТОРИНГ / ДИАГНОСТИКА (опционально, но рекомендуется)
+# -----------------------------------------------------------------------------
+# Структурированное логирование в JSON для CI
+# Используется: pipeline_optimized.py, region_tester.py
+python-json-logger>=2.0.7
+
+# =============================================================================
+# ЗАМЕТКИ:
+#
+# НЕ нужны (используется stdlib):
+#   sqlite3, json, re, base64, urllib, hashlib, hmac, ssl, socket,
+#   asyncio, subprocess, tempfile, dataclasses, enum, math, time,
+#   os, sys, argparse, logging, collections, functools, pathlib
+#
+# НЕ нужны (транзитивные, pip ставит сам):
+#   certifi, charset-normalizer, idna, multidict, yarl, frozenlist,
+#   aiosignal, async-timeout, attrs, pycares, six, python-dateutil,
+#   pytz, tzdata, joblib, threadpoolctl, graphviz, plotly
+#
+# ПРОВЕРКА УСТАНОВКИ (в CI):
+#   python -c "
+#   import aiohttp, aiofiles, xxhash, tqdm, yaml, requests;
+#   import bs4, lxml, numpy, pandas, sklearn, catboost;
+#   import aiodns, dotenv, msgpack;
+#   print('All dependencies OK')
+#   "
+# =============================================================================
