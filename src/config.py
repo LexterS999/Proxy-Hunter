@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 import logging
 from pathlib import Path
 from math import inf
+import numpy as np
 
 from user_settings import (
     SOURCE_URLS, USE_MAXIMUM_POWER, SPECIFIC_CONFIG_COUNT, ENABLED_PROTOCOLS,
@@ -42,6 +43,8 @@ class ChannelConfig:
         self.is_telegram: bool = bool(re.match(r'^https://t\.me/s/', self.url))
         self.error_count: int = 0
         self.last_check_time: Optional[datetime] = None
+        # Добавляем региональный бонус (будет вычислен позже)
+        self.region_bonus: float = 0.0
 
     def _validate_url(self, url: str) -> str:
         if not url or not isinstance(url, str):
@@ -66,8 +69,11 @@ class ChannelConfig:
             if self.metrics.avg_response_time > 0:
                 response_score = max(0.0, min(15.0, 15.0 * (1 - (self.metrics.avg_response_time / 10))))
 
+            # Добавляем региональный бонус (до 10 баллов)
+            region_bonus = getattr(self, 'region_bonus', 0.0)
+
             self.metrics.overall_score = round(
-                reliability_score + quality_score + uniqueness_score + response_score, 2
+                reliability_score + quality_score + uniqueness_score + response_score + region_bonus, 2
             )
         except Exception as e:
             logger.error(f"Error calculating score for {self.url}: {str(e)}")
@@ -86,6 +92,8 @@ class ProxyConfig:
         self._initialize_settings()
         self._set_smart_limits()
         self._analyzer: Optional[ChannelQualityAnalyzer] = None
+        # Определяем региональный бонус для каналов
+        self._apply_region_bonus()
 
     def _initialize_protocols(self) -> Dict[str, Dict]:
         return {
@@ -206,6 +214,23 @@ class ProxyConfig:
         except Exception:
             return False
 
+    def _apply_region_bonus(self) -> None:
+        """
+        Применяет бонус к каналам, в которых преобладают конфиги для РФ или IR.
+        Используется эвристика: анализируем URL канала (если в названии есть ru/ir) или будем считать
+        после сбора конфигов. В данном упрощённом варианте добавляем бонус вручную для некоторых каналов.
+        """
+        # В реальности это можно вычислять на основе анализа собранных конфигов.
+        # Здесь мы просто добавляем бонус к каналам с явным указанием региона в имени.
+        # Можно расширить: если канал содержит "IR" или "RU" в названии, даём бонус.
+        for ch in self.SOURCE_URLS:
+            url_lower = ch.url.lower()
+            if any(region in url_lower for region in ['ir', 'iran', 'ru', 'russia']):
+                ch.region_bonus = 8.0  # Бонус 8 баллов
+                logger.debug(f"Applied region bonus to {ch.url}")
+            else:
+                ch.region_bonus = 0.0
+
     def get_enabled_channels(self) -> List[ChannelConfig]:
         channels = [channel for channel in self.SOURCE_URLS if channel.enabled]
         self._apply_channel_health_filter()
@@ -213,6 +238,8 @@ class ProxyConfig:
         if not channels:
             self.save_empty_config_file()
             logger.error("No enabled channels found after health filter. Empty config file created.")
+        # Сортируем по общему скору (учитывая бонус)
+        channels.sort(key=lambda c: c.metrics.overall_score, reverse=True)
         return channels
 
     def _apply_channel_health_filter(self) -> None:
@@ -243,22 +270,16 @@ class ProxyConfig:
         success: bool,
         response_time: float = 0.0
     ) -> None:
-        """
-        ИСПРАВЛЕНИЕ #14: Добавлена защита от отрицательного response_time
-        и полные type hints.
-        """
         if success:
             channel.metrics.success_count += 1
             channel.metrics.last_success_time = datetime.now()
         else:
             channel.metrics.fail_count += 1
 
-        # ИСПРАВЛЕНИЕ #14: Защита от отрицательного response_time
         if response_time > 0:
             if channel.metrics.avg_response_time == 0:
                 channel.metrics.avg_response_time = response_time
             else:
-                # EMA с α=0.3
                 channel.metrics.avg_response_time = (
                     channel.metrics.avg_response_time * 0.7
                 ) + (response_time * 0.3)
