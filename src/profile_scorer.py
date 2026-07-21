@@ -1,6 +1,7 @@
 """
 Модуль для оценки качества прокси-профилей на основе истории,
 без использования активных пингов и без GeoIP.
+Добавлен фактор стабильности SNI/host.
 """
 
 import json
@@ -10,6 +11,7 @@ import numpy as np
 from typing import Dict, Optional, Tuple, List
 from datetime import datetime, timedelta
 import math
+from collections import deque
 
 from db import get_db
 from user_settings import SCORE_WEIGHTS
@@ -41,7 +43,6 @@ class ProfileScorer:
             self._profile_cache[key] = self.db.get_profile(key) or {}
         self._profile_cache[key].update(updates)
         self._dirty_keys.add(key)
-        # Периодический сброс
         if len(self._dirty_keys) >= self._batch_size or (datetime.now() - self._last_flush).seconds > self._flush_interval:
             self._flush_profiles()
 
@@ -75,7 +76,8 @@ class ProfileScorer:
         return f"{server}:{port}:{protocol}:{credential}"
 
     def update_profile_history(self, config: str, parsed: Dict,
-                               success: bool, latency: float = 0):
+                               success: bool, latency: float = 0,
+                               sni_used: str = None, host_used: str = None):
         key = self.get_profile_key(config, parsed)
         now = datetime.now().isoformat()
 
@@ -91,6 +93,8 @@ class ProfileScorer:
                 'fail_count': 0,
                 'latencies': [],
                 'timestamps': [],
+                'sni_history': [],
+                'host_history': [],
                 'is_active': True,
                 'stability': 0.0,
                 'lifetime': 0.0,
@@ -106,12 +110,15 @@ class ProfileScorer:
         if latency > 0:
             profile['latencies'].append(latency)
         profile['timestamps'].append(now)
+        if sni_used:
+            profile['sni_history'].append(sni_used)
+        if host_used:
+            profile['host_history'].append(host_used)
 
         max_history = 100
-        if len(profile['latencies']) > max_history:
-            profile['latencies'] = profile['latencies'][-max_history:]
-        if len(profile['timestamps']) > max_history:
-            profile['timestamps'] = profile['timestamps'][-max_history:]
+        for field in ['latencies', 'timestamps', 'sni_history', 'host_history']:
+            if len(profile.get(field, [])) > max_history:
+                profile[field] = profile[field][-max_history:]
 
         profile['stability'] = self.calculate_stability(profile)
         profile['lifetime'] = self.calculate_lifetime_prediction(profile)
@@ -134,7 +141,21 @@ class ProfileScorer:
         if total > 0:
             success_rate = profile['success_count'] / total
             stability = stability * 0.7 + success_rate * 0.3
-        return round(stability, 4)
+
+        # ДОБАВЛЕНО: фактор изменения SNI и host
+        sni_history = profile.get('sni_history', [])
+        if len(sni_history) > 2:
+            unique_sni = len(set(sni_history))
+            sni_drift = 1 - (unique_sni / len(sni_history))
+            stability -= sni_drift * 0.3
+
+        host_history = profile.get('host_history', [])
+        if len(host_history) > 2:
+            unique_host = len(set(host_history))
+            host_drift = 1 - (unique_host / len(host_history))
+            stability -= host_drift * 0.2
+
+        return max(0, min(1, stability))
 
     def calculate_lifetime_prediction(self, profile: Dict) -> float:
         """Использует байесовское оценивание для новых профилей."""
@@ -144,11 +165,9 @@ class ProfileScorer:
 
         times = [datetime.fromisoformat(ts) for ts in timestamps if ts]
         if len(times) < 2:
-            # Байесовский априор для новых профилей
             total = profile['success_count'] + profile['fail_count']
             if total == 0:
                 return 24.0
-            # Предполагаем, что если есть хотя бы одна проверка, вероятность успеха высока
             success_rate = profile['success_count'] / total
             return max(1, 24 * success_rate)
 
@@ -165,7 +184,6 @@ class ProfileScorer:
         score = 1.0
         protocol = config.split('://')[0].lower() if config else ''
         if protocol not in ('vless', 'vmess', 'trojan', 'ss', 'hysteria2', 'tuic'):
-            # Штраф за неизвестный протокол
             score -= 0.3
 
         if not parsed.get('address') and not parsed.get('add'):
@@ -203,13 +221,11 @@ class ProfileScorer:
         success_rate = profile['success_count'] / total if total > 0 else 0.5
         config_quality = self.calculate_config_quality('', parsed)
 
-        # Экспоненциальное затухание для старых проверок
         timestamps = profile.get('timestamps', [])
         if not timestamps:
             return 50.0
 
-        # Полураспад 7 дней
-        half_life = 7 * 24 * 3600  # в секундах
+        half_life = 7 * 24 * 3600
         now = datetime.now()
         weights = []
         for ts in timestamps:
@@ -221,15 +237,9 @@ class ProfileScorer:
                 weight = 0.5
             weights.append(weight)
 
-        # Взвешенный успех
-        successes = profile['success_count']
-        fails = profile['fail_count']
-        if sum(weights) > 0:
-            # Приблизительная оценка: используем веса для коррекции
-            # Чем старше проверка, тем меньше вес
-            weighted_success = successes * (weights[-1] if weights else 1)
-            weighted_total = (successes + fails) * (weights[-1] if weights else 1)
-            success_rate = weighted_success / weighted_total if weighted_total > 0 else 0.5
+        weighted_success = profile['success_count'] * (weights[-1] if weights else 1)
+        weighted_total = (profile['success_count'] + profile['fail_count']) * (weights[-1] if weights else 1)
+        success_rate = weighted_success / weighted_total if weighted_total > 0 else 0.5
 
         reputation = 0.5
 
@@ -248,8 +258,8 @@ class ProfileScorer:
         return round(score, 2)
 
     def score_profile(self, config: str, parsed: Dict, success: bool = True,
-                      latency: float = 0) -> Dict:
-        self.update_profile_history(config, parsed, success, latency)
+                      latency: float = 0, sni_used: str = None, host_used: str = None) -> Dict:
+        self.update_profile_history(config, parsed, success, latency, sni_used, host_used)
         key = self.get_profile_key(config, parsed)
         profile = self._get_cached_profile(key)
         if not profile:
