@@ -35,6 +35,12 @@ xxhash>=3.4.1
 # YAML-парсинг: Clash-конфиги, Xray outbound configs (xray_balancer.py)
 PyYAML>=6.0.1
 
+# HTML-парсинг: fetch_configs.py (извлечение конфигов из Telegram-страниц)
+beautifulsoup4>=4.12.3
+
+# Быстрый XML/HTML парсер-бэкенд для BeautifulSoup
+lxml>=5.1.0
+
 # Синхронный HTTP-клиент (fallback, install.sh проверки)
 requests>=2.31.0
 
