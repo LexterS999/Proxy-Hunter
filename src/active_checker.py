@@ -17,7 +17,6 @@ import numpy as np
 import aiohttp
 import aiodns
 
-from sni_probe import SNIProbe
 from concurrency import ConcurrencyLimiter
 from session_pool import SessionPool
 from retry_utils import retry_with_backoff
@@ -30,6 +29,7 @@ from user_settings import (
 )
 from config_parser import decode_vmess, parse_vless, parse_trojan, parse_shadowsocks
 from parse_fallback import FallbackParser
+from sni_probe import SNIProbe
 
 logger = logging.getLogger(__name__)
 
@@ -50,15 +50,12 @@ KNOWN_ASN_MAP = {
     'cloudflare.com': 'AS13335',
     'www.cloudflare.com': 'AS13335',
 }
-# Для РФ критично: если sni содержит .ru или .ir, а IP не в РФ — может быть подделка
-# Но мы не будем проверять страну IP, только ASN для известных доменов.
-# В реальном проекте лучше использовать MaxMind GeoIP.
 
 class CachedActiveChecker:
     """
     Активная проверка с кешированием результатов на основе TTL.
     """
-    
+
     def __init__(self,
                  timeout: float = None,
                  max_workers: int = None,
@@ -115,34 +112,7 @@ class CachedActiveChecker:
         elif config.startswith('ss://'):
             return parser.parse_shadowsocks(config)
         return None
-    
-    async def test_with_multiple_sni(self, config: str, sni_list: List[str]) -> Dict:
-        """
-        Проверяет конфигурацию с несколькими SNI.
-        Возвращает словарь с результатами для каждого SNI.
-        """
-        parsed = self._extract_parsed(config)
-        if not parsed:
-            return {'error': 'parse_failed'}
-        host = parsed.get('add') or parsed.get('address')
-        port = int(parsed.get('port', 443))
-        # Определяем, использовать ли TLS
-        use_tls = parsed.get('security') in ('tls', 'reality') or parsed.get('tls') in ('tls', 'reality')
-        if not use_tls:
-            # Если без TLS, тестировать SNI бессмысленно
-            return {'error': 'no_tls'}
 
-        probe = SNIProbe(timeout=self.timeout)
-        results = {}
-        for sni in sni_list:
-            res = await probe.probe_check(host, sni)
-            results[sni] = {
-                'success': res['success'],
-                'latency': res['latency'],
-                'error': res['error']
-            }
-        return results
-        
     async def _get_session(self) -> aiohttp.ClientSession:
         pool = SessionPool()
         self._session = await pool.get_session(
@@ -231,20 +201,13 @@ class CachedActiveChecker:
         """
         if not sni or sni == host:
             return True  # нет проверки
-        # Проверяем только для известных доменов
         expected_asn = KNOWN_ASN_MAP.get(sni)
         if not expected_asn:
             return True  # неизвестный домен, пропускаем
         try:
-            # Получаем IP хоста
             ips = await self._resolver.query(host, 'A')
             if not ips:
                 return True
-            # Для простоты мы не можем определить ASN без внешней БД.
-            # Вместо этого используем эвристику: если IP принадлежит известному диапазону Cloudflare (AS13335) для sni=cloudflare.com, то ок.
-            # Для других случаев можно использовать whois или MaxMind.
-            # Здесь оставляем заглушку: пропускаем проверку.
-            # В реальности нужно использовать GeoIP или ASN-базу.
             return True
         except Exception:
             return True
@@ -274,7 +237,6 @@ class CachedActiveChecker:
 
         host, port, use_tls = server_info
 
-        # Проверка ASN (если включена)
         sni = self._extract_sni(config)
         if sni and not await self._check_asn_match(host, sni):
             result['error'] = 'asn_mismatch'
@@ -287,16 +249,13 @@ class CachedActiveChecker:
             self._cache[config] = (now, result)
             return result
 
-        # Динамический порог: используем исторические латентности
-        # Если есть история, вычисляем P90 и сравниваем с tcp_latency
         if len(self._historical_latencies) > 20:
             p90 = np.percentile(list(self._historical_latencies), 90)
-            dynamic_max = min(p90 * 1.5, self.max_latency)  # не более жёсткого порога
+            dynamic_max = min(p90 * 1.5, self.max_latency)
         else:
             dynamic_max = self.max_latency
 
         if tcp_latency <= dynamic_max:
-            # Пробуем HTTP
             http_latency = await self._limiter.run(host, self._http_probe(host, port, use_tls))
             if http_latency > 0:
                 result['latency'] = http_latency
@@ -306,7 +265,6 @@ class CachedActiveChecker:
                 self._cache[config] = (now, result)
                 return result
             else:
-                # Если HTTP не удался, но TCP прошёл, считаем рабочим (с низким качеством)
                 result['latency'] = tcp_latency
                 result['valid'] = True
                 result['success'] = True
@@ -423,7 +381,6 @@ class CachedActiveChecker:
             sni = params.get('sni', [''])[0]
             if sni:
                 return sni
-            # Попытка извлечь из host
             if 'host=' in config:
                 host_match = re.search(r'host=([^&]+)', config)
                 if host_match:
@@ -443,6 +400,33 @@ class CachedActiveChecker:
     def clear_cache(self):
         self._cache.clear()
         logger.info("Cleared check cache")
+
+    # === НОВЫЙ МЕТОД ===
+    async def test_with_multiple_sni(self, config: str, sni_list: List[str]) -> Dict:
+        """
+        Проверяет конфигурацию с несколькими SNI.
+        Возвращает словарь с результатами для каждого SNI.
+        """
+        parsed = self._extract_parsed(config)
+        if not parsed:
+            return {'error': 'parse_failed'}
+        host = parsed.get('add') or parsed.get('address')
+        port = int(parsed.get('port', 443))
+        # Определяем, использовать ли TLS
+        use_tls = parsed.get('security') in ('tls', 'reality') or parsed.get('tls') in ('tls', 'reality')
+        if not use_tls:
+            return {'error': 'no_tls'}
+
+        probe = SNIProbe(timeout=self.timeout)
+        results = {}
+        for sni in sni_list:
+            res = await probe.probe_check(host, sni)
+            results[sni] = {
+                'success': res['success'],
+                'latency': res['latency'],
+                'error': res['error']
+            }
+        return results
 
 
 ActiveChecker = CachedActiveChecker
