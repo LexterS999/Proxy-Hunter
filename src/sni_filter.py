@@ -4,7 +4,7 @@ SNI-фильтр для эмуляции блокировок (Buildcage).
 """
 
 import logging
-from typing import List, Set
+from typing import List, Set, Dict
 
 logger = logging.getLogger(__name__)
 
