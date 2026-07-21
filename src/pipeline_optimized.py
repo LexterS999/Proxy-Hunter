@@ -1,20 +1,22 @@
 """
 Оптимизированный пайплайн Proxy-Hunter.
 
-ИСПРАВЛЕНО:
-- AsyncConfigFetcher() → AsyncConfigFetcher(ProxyConfig())
-  (конструктор требует ProxyConfig как обязательный аргумент)
-- XrayBalancer → ConfigToXray (реальное имя класса в xray_balancer.py)
-- HistoryDB(db_path) → HistoryDB() (синглтон без аргументов)
-- db.record_run() → db.add_run(stats_dict) (реальное имя метода)
-- ProfileScorer(db_path) → ProfileScorer() (без аргументов)
-- scorer.score(cfg) → scorer.score_profile(config, parsed) (реальная сигнатура)
-- scorer.flush() → scorer._flush_profiles() (приватный метод)
+ИСПРАВЛЕНО (итоговая версия):
+- AsyncConfigFetcher(ProxyConfig()) — конструктор требует ProxyConfig
+- parse_config() НЕ возвращает ключ 'config' → добавляем parsed['config'] = raw
+- DeepDeduplicator.deduplicate_configs_async(List[str], Dict) — не .deduplicate()
+  и принимает List[str] (URI-строки), а не List[Dict]
+- ConfigToXray(input, output).process_configs() — не XrayBalancer
+- HistoryDB() — синглтон без аргументов
+- db.add_run(stats_dict) — не db.record_run()
+- ProfileScorer() — без аргументов
+- scorer.score_profile(config, parsed) — не scorer.score()
+- scorer._flush_profiles() — не scorer.flush()
+- Закрытие aiohttp-сессии в _cleanup()
 - O(n²) → O(1) dict-индекс в шаге 5
-- CPU-bound парсинг вынесен в asyncio.to_thread()
-- BoundedDict вместо безграничного _parsed_cache
-- Осмысленный порог фильтрации (30 → 10)
-- Импорты новых модулей обёрнуты в try/except
+- CPU-bound парсинг в asyncio.to_thread()
+- BoundedDict вместо безграничного кеша
+- Порог фильтрации 30 → 10
 """
 
 import asyncio
@@ -31,7 +33,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from tqdm import tqdm
 
 # ---------------------------------------------------------------------------
-# Обязательные импорты (оригинальные модули проекта)
+# Обязательные импорты
 # ---------------------------------------------------------------------------
 from config import ProxyConfig
 from fetch_configs import AsyncConfigFetcher
@@ -44,7 +46,7 @@ from db import HistoryDB
 from user_settings import get_settings
 
 # ---------------------------------------------------------------------------
-# Опциональные импорты (новые модули — пайплайн работает и без них)
+# Опциональные импорты (новые модули)
 # ---------------------------------------------------------------------------
 try:
     from multi_level_verifier import MultiLevelVerifier, VerificationResult
@@ -93,11 +95,9 @@ logger = logging.getLogger(__name__)
 
 
 # ===========================================================================
-# BoundedDict — кеш с ограничением размера (LRU-эвикция)
+# BoundedDict
 # ===========================================================================
 class BoundedDict(OrderedDict):
-    """OrderedDict с максимальным размером. При переполнении удаляет старые."""
-
     def __init__(self, maxsize: int = 50000, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.maxsize = maxsize
@@ -111,25 +111,35 @@ class BoundedDict(OrderedDict):
 
 
 # ===========================================================================
-# Парсинг одного конфига (для asyncio.to_thread)
+# Парсинг
 # ===========================================================================
 def parse_config_once(raw: str) -> Optional[Dict[str, Any]]:
-    """Парсит одну URI-строку. Вызывается в отдельном потоке."""
+    """
+    Парсит одну URI-строку.
+    ИСПРАВЛЕНО: добавляет parsed['config'] = raw, потому что
+    parse_config() и FallbackParser НЕ возвращают оригинальную строку.
+    """
     raw = raw.strip()
     if not raw:
         return None
 
+    # Пробуем строгий парсер
     try:
         from config_parser import parse_config
         result = parse_config(raw)
         if result:
+            # ИСПРАВЛЕНО: сохраняем оригинальную URI-строку
+            result['config'] = raw
             return result
     except Exception:
         pass
 
+    # Fallback-парсер
     try:
         parsed, strategy = FallbackParser.parse_with_stats(raw)
         if parsed:
+            # ИСПРАВЛЕНО: сохраняем оригинальную URI-строку
+            parsed['config'] = raw
             return parsed
     except Exception:
         pass
@@ -151,13 +161,11 @@ def parse_batch_sync(raw_configs: List[str]) -> List[Dict[str, Any]]:
 # Основной пайплайн
 # ===========================================================================
 class OptimizedPipeline:
-    """Оптимизированный конвейер сбора и верификации прокси."""
 
     def __init__(self, args: argparse.Namespace):
         self.args = args
         self.settings = get_settings()
 
-        # CLI-аргументы
         self.target_region = args.target_region.upper()
         self.skip_verification = args.skip_verification.lower() in ('true', '1', 'yes')
         self.test_domain = args.test_domain or REGION_TEST_DOMAINS.get(
@@ -166,22 +174,18 @@ class OptimizedPipeline:
         self.xray_path = args.xray_path
         self.region_test_top_n = int(args.region_test_top_n)
 
-        # =================================================================
-        # ИСПРАВЛЕНО: ProxyConfig() создаётся и передаётся в AsyncConfigFetcher
-        # AsyncConfigFetcher.__init__(self, config: ProxyConfig, max_concurrent: int = 50)
-        # =================================================================
+        # ИСПРАВЛЕНО: ProxyConfig() → AsyncConfigFetcher(config)
         self.proxy_config = ProxyConfig()
         self.fetcher = AsyncConfigFetcher(self.proxy_config)
 
         self.validator = ConfigValidator()
         self.deduplicator = DeepDeduplicator()
-        # ИСПРАВЛЕНО: HistoryDB() — синглтон, без аргументов
+        # ИСПРАВЛЕНО: HistoryDB() — синглтон без аргументов
         self.db = HistoryDB()
 
-        # Shutdown event
         self.shutdown_event = asyncio.Event()
 
-        # Опциональные компоненты (новые модули)
+        # Опциональные компоненты
         self.verifier = None
         self.survival_model = None
         self.censorship_scorer = None
@@ -216,9 +220,7 @@ class OptimizedPipeline:
         if HAS_ACTIVE_CHECKER and not HAS_MULTI_LEVEL_VERIFIER:
             self.active_checker = ActiveChecker()
 
-        # ИСПРАВЛЕНО: BoundedDict вместо безграничного Dict
         self._parsed_cache: BoundedDict = BoundedDict(maxsize=50000)
-
         self._stats: Dict[str, Any] = {}
 
         logger.info(f"Modules: verifier={HAS_MULTI_LEVEL_VERIFIER}, "
@@ -228,7 +230,6 @@ class OptimizedPipeline:
                      f"active_checker={HAS_ACTIVE_CHECKER}")
 
     async def run(self) -> None:
-        """Запускает полный пайплайн."""
         start_time = time.time()
         logger.info(f"🚀 Pipeline started | region={self.target_region} | "
                      f"test_domain={self.test_domain} | "
@@ -281,8 +282,7 @@ class OptimizedPipeline:
             if (not self.skip_verification and self.region_test_top_n > 0
                     and self.region_tester is not None):
                 verified = await self._step_region_test(verified)
-                logger.info(f"🌐 Step 5b: Region test completed "
-                             f"({self.test_domain} / {self.target_region})")
+                logger.info(f"🌐 Step 5b: Region test completed")
 
             # Шаг 6: Дедупликация
             deduplicated = await self._step_deduplicate(verified)
@@ -293,7 +293,7 @@ class OptimizedPipeline:
             await self._step_archive(deduplicated)
             logger.info(f"📦 Step 7: Archived {len(deduplicated)} configs")
 
-            # Шаг 8: Генерация Xray-конфига
+            # Шаг 8: Xray-конфиг
             await self._step_xray_config()
             logger.info("⚙️ Step 8: Xray config generated")
 
@@ -324,7 +324,8 @@ class OptimizedPipeline:
             return []
 
     # =========================================================================
-    # Шаг 2: Парсинг (asyncio.to_thread)
+    # Шаг 2: Парсинг
+    # ИСПРАВЛЕНО: parsed['config'] = raw (parse_config НЕ возвращает URI)
     # =========================================================================
     async def _step_parse(self, raw_configs: List[str]) -> List[Dict[str, Any]]:
         to_parse = []
@@ -346,6 +347,7 @@ class OptimizedPipeline:
                 chunk = to_parse[i:i + chunk_size]
                 chunk_results = await asyncio.to_thread(parse_batch_sync, chunk)
                 parsed_new.extend(chunk_results)
+                # Кэшируем (parse_config_once уже добавляет 'config')
                 for raw in chunk:
                     self._parsed_cache[raw] = parse_config_once(raw)
             logger.info(f"  Parsed {len(parsed_new)} new configs in thread pool")
@@ -354,9 +356,6 @@ class OptimizedPipeline:
 
     # =========================================================================
     # Шаг 3: Скоринг
-    # ИСПРАВЛЕНО: ProfileScorer() без аргументов
-    # ИСПРАВЛЕНО: scorer.score_profile(config_str, cfg) вместо scorer.score(cfg)
-    # ИСПРАВЛЕНО: scorer._flush_profiles() вместо scorer.flush()
     # =========================================================================
     async def _step_score(self, parsed_configs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         scored = []
@@ -421,7 +420,6 @@ class OptimizedPipeline:
 
     # =========================================================================
     # Шаг 4: Фильтрация
-    # ИСПРАВЛЕНО: осмысленный порог (30 → 10)
     # =========================================================================
     def _step_filter(self, scored_configs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         min_score = self.settings.min_score
@@ -437,7 +435,6 @@ class OptimizedPipeline:
 
     # =========================================================================
     # Шаг 5: Верификация
-    # ИСПРАВЛЕНО: O(n²) → O(1) dict-индекс
     # =========================================================================
     async def _step_verify(self, filtered: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if self.verifier is not None:
@@ -568,10 +565,42 @@ class OptimizedPipeline:
 
     # =========================================================================
     # Шаг 6: Дедупликация
+    # ИСПРАВЛЕНО: deduplicate_configs_async(List[str], Dict[str, float])
+    #   принимает URI-строки, а не dict'ы
+    #   возвращает List[str] (URI-строки)
     # =========================================================================
     async def _step_deduplicate(self, configs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         try:
-            return self.deduplicator.deduplicate(configs)
+            # Извлекаем URI-строки и scores
+            uri_list: List[str] = []
+            quality_scores: Dict[str, float] = {}
+            uri_to_item: Dict[str, Dict[str, Any]] = {}
+
+            for item in configs:
+                uri = item.get('config', '')
+                if uri:
+                    uri_list.append(uri)
+                    quality_scores[uri] = item.get('score', 0.0)
+                    uri_to_item[uri] = item
+
+            if not uri_list:
+                return configs
+
+            # ИСПРАВЛЕНО: deduplicate_configs_async — реальное имя метода
+            # Принимает List[str] и Dict[str, float], возвращает List[str]
+            deduped_uris = await self.deduplicator.deduplicate_configs_async(
+                uri_list, quality_scores
+            )
+
+            # Маппим обратно в dict'ы, сохраняя порядок
+            result = []
+            for uri in deduped_uris:
+                item = uri_to_item.get(uri)
+                if item:
+                    result.append(item)
+
+            return result
+
         except Exception as e:
             logger.error(f"Deduplication failed: {e}")
             return configs
@@ -586,11 +615,15 @@ class OptimizedPipeline:
 
             with open(archive_path, 'w', encoding='utf-8') as f:
                 for cfg in configs:
-                    f.write(cfg.get('config', '') + '\n')
+                    uri = cfg.get('config', '')
+                    if uri:
+                        f.write(uri + '\n')
 
             with open(simple_path, 'w', encoding='utf-8') as f:
                 for cfg in configs:
-                    f.write(cfg.get('config', '') + '\n')
+                    uri = cfg.get('config', '')
+                    if uri:
+                        f.write(uri + '\n')
 
             logger.info(f"  Written {len(configs)} configs to {archive_path}")
         except Exception as e:
@@ -598,7 +631,7 @@ class OptimizedPipeline:
 
     # =========================================================================
     # Шаг 8: Xray-конфиг
-    # ИСПРАВЛЕНО: ConfigToXray(input_file, output_file).process_configs()
+    # ИСПРАВЛЕНО: ConfigToXray(input, output).process_configs()
     # =========================================================================
     async def _step_xray_config(self) -> None:
         try:
@@ -695,13 +728,27 @@ class OptimizedPipeline:
         except Exception as e:
             logger.error(f"Failed to save {path}: {e}")
 
+    # =========================================================================
+    # ИСПРАВЛЕНО: Закрытие aiohttp-сессии
+    # =========================================================================
     async def _cleanup(self) -> None:
-        """Очистка ресурсов."""
+        """Очистка ресурсов. Закрывает aiohttp-сессию fetcher'а."""
+        # Закрываем сессию fetcher'а (устраняет "Unclosed client session")
+        if hasattr(self.fetcher, '_session') and self.fetcher._session is not None:
+            try:
+                await self.fetcher._session.close()
+                # Даём время на graceful close
+                await asyncio.sleep(0.25)
+            except Exception:
+                pass
+
+        # Закрываем верификатор
         if self.verifier:
             try:
                 await self.verifier.close()
             except Exception:
                 pass
+
         # HistoryDB — синглтон, не имеет close()
 
 
