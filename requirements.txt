@@ -35,5 +35,5 @@ catboost>=1.2.0
 scikit-learn>=1.3.0
 pandas>=2.0.0
 
-# DNS-резолвер
+# DNS-резолвер для проверки ASN (используется в active_checker.py)
 aiodns>=3.0.0
