@@ -2,6 +2,7 @@
 Модуль для оценки качества прокси-профилей на основе истории,
 без использования активных пингов и без GeoIP.
 Добавлен фактор стабильности SNI/host.
+Интегрирован региональный скоринг и сбор статистики.
 """
 
 import json
@@ -15,17 +16,22 @@ from collections import deque
 
 from db import get_db
 from user_settings import SCORE_WEIGHTS
+from regional_scorer import RegionalScorer
+from regional_stats import RegionalStats
 
 logger = logging.getLogger(__name__)
 
 class ProfileScorer:
-    def __init__(self):
+    def __init__(self, region: str = 'RU'):
         self.db = get_db()
         self._profile_cache = {}
         self._dirty_keys = set()
         self._batch_size = 100
         self._last_flush = datetime.now()
         self._flush_interval = 60  # секунд
+        self.region = region
+        self.regional_scorer = RegionalScorer(region)
+        self.regional_stats = RegionalStats()
 
     def __del__(self):
         """Гарантированная запись при завершении."""
@@ -142,7 +148,6 @@ class ProfileScorer:
             success_rate = profile['success_count'] / total
             stability = stability * 0.7 + success_rate * 0.3
 
-        # ДОБАВЛЕНО: фактор изменения SNI и host
         sni_history = profile.get('sni_history', [])
         if len(sni_history) > 2:
             unique_sni = len(set(sni_history))
@@ -158,7 +163,6 @@ class ProfileScorer:
         return max(0, min(1, stability))
 
     def calculate_lifetime_prediction(self, profile: Dict) -> float:
-        """Использует байесовское оценивание для новых профилей."""
         timestamps = profile.get('timestamps', [])
         if not timestamps:
             return 24.0
@@ -249,13 +253,24 @@ class ProfileScorer:
             success_rate = 0.7
 
         w = SCORE_WEIGHTS
-        score = (w['stability'] * stability +
-                 w['success_rate'] * success_rate +
-                 w['reputation'] * reputation +
-                 w['lifetime'] * (lifetime / 48) +
-                 w['config_quality'] * config_quality)
-        score = max(0, min(100, score * 100))
-        return round(score, 2)
+        base_score = (w['stability'] * stability +
+                      w['success_rate'] * success_rate +
+                      w['reputation'] * reputation +
+                      w['lifetime'] * (lifetime / 48) +
+                      w['config_quality'] * config_quality)
+        base_score = max(0, min(100, base_score * 100))
+
+        # === РЕГИОНАЛЬНЫЙ БОНУС ===
+        region_multiplier = self.regional_scorer.calculate_region_score(
+            config='', parsed=parsed, base_score=base_score
+        )
+        # Корректировка из статистики
+        adjustment = self.regional_stats.compute_adjustment(
+            config=parsed.get('address', ''), parsed=parsed, region=self.region
+        )
+        final_score = region_multiplier * adjustment
+        final_score = max(0, min(100, final_score))
+        return round(final_score, 2)
 
     def score_profile(self, config: str, parsed: Dict, success: bool = True,
                       latency: float = 0, sni_used: str = None, host_used: str = None) -> Dict:
@@ -279,3 +294,7 @@ class ProfileScorer:
             'reputation': 0.5,
             'privacy': {}
         }
+
+    # === НОВЫЙ МЕТОД ===
+    def record_local_result(self, config: str, parsed: Dict, success: bool, latency: float):
+        self.regional_stats.record_local_check(config, parsed, success, latency, region=self.region)
