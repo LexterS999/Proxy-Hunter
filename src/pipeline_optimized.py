@@ -2,6 +2,8 @@
 Оптимизированный пайплайн Proxy-Hunter.
 
 ИСПРАВЛЕНО:
+- AsyncConfigFetcher() → AsyncConfigFetcher(ProxyConfig())
+  (конструктор требует ProxyConfig как обязательный аргумент)
 - XrayBalancer → ConfigToXray (реальное имя класса в xray_balancer.py)
 - HistoryDB(db_path) → HistoryDB() (синглтон без аргументов)
 - db.record_run() → db.add_run(stats_dict) (реальное имя метода)
@@ -31,6 +33,7 @@ from tqdm import tqdm
 # ---------------------------------------------------------------------------
 # Обязательные импорты (оригинальные модули проекта)
 # ---------------------------------------------------------------------------
+from config import ProxyConfig
 from fetch_configs import AsyncConfigFetcher
 from parse_fallback import FallbackParser
 from config_validator import ConfigValidator
@@ -163,17 +166,22 @@ class OptimizedPipeline:
         self.xray_path = args.xray_path
         self.region_test_top_n = int(args.region_test_top_n)
 
-        # ОБЯЗАТЕЛЬНЫЕ компоненты
-        # ИСПРАВЛЕНО: HistoryDB() — синглтон, без аргументов
-        self.fetcher = AsyncConfigFetcher()
+        # =================================================================
+        # ИСПРАВЛЕНО: ProxyConfig() создаётся и передаётся в AsyncConfigFetcher
+        # AsyncConfigFetcher.__init__(self, config: ProxyConfig, max_concurrent: int = 50)
+        # =================================================================
+        self.proxy_config = ProxyConfig()
+        self.fetcher = AsyncConfigFetcher(self.proxy_config)
+
         self.validator = ConfigValidator()
         self.deduplicator = DeepDeduplicator()
+        # ИСПРАВЛЕНО: HistoryDB() — синглтон, без аргументов
         self.db = HistoryDB()
 
         # Shutdown event
         self.shutdown_event = asyncio.Event()
 
-        # ОПЦИОНАЛЬНЫЕ компоненты (новые модули)
+        # Опциональные компоненты (новые модули)
         self.verifier = None
         self.survival_model = None
         self.censorship_scorer = None
@@ -347,12 +355,11 @@ class OptimizedPipeline:
     # =========================================================================
     # Шаг 3: Скоринг
     # ИСПРАВЛЕНО: ProfileScorer() без аргументов
-    # ИСПРАВЛЕНО: scorer.score_profile(config, parsed) вместо scorer.score(cfg)
+    # ИСПРАВЛЕНО: scorer.score_profile(config_str, cfg) вместо scorer.score(cfg)
     # ИСПРАВЛЕНО: scorer._flush_profiles() вместо scorer.flush()
     # =========================================================================
     async def _step_score(self, parsed_configs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         scored = []
-        # ИСПРАВЛЕНО: ProfileScorer() — конструктор без аргументов
         scorer = ProfileScorer()
 
         try:
@@ -361,13 +368,11 @@ class OptimizedPipeline:
                     config_str = cfg.get('config', '')
                     protocol = cfg.get('protocol', '')
 
-                    # ИСПРАВЛЕНО: score_profile(config_str, parsed_dict)
                     score_result = scorer.score_profile(
                         config_str, cfg, success=True, latency=0
                     )
                     base_score = score_result.get('score', 50.0)
 
-                    # SurvivalModel (если доступен)
                     survival_score = base_score
                     if self.survival_model is not None:
                         config_hash = cfg.get('hash', config_str[:64])
@@ -379,13 +384,11 @@ class OptimizedPipeline:
                         )
                         survival_score = self.survival_model.get_score(config_hash)
 
-                    # CensorshipScorer (если доступен)
                     censorship_score = 50.0
                     if self.censorship_scorer is not None:
                         censorship_result = self.censorship_scorer.score_parsed_config(cfg)
                         censorship_score = censorship_result.total_score
 
-                    # Композитный score
                     if self.survival_model and self.censorship_scorer:
                         composite = (
                             base_score * 0.35 +
@@ -409,7 +412,6 @@ class OptimizedPipeline:
                     logger.debug(f"Scoring failed: {e}")
                     continue
         finally:
-            # ИСПРАВЛЕНО: _flush_profiles() — реальное имя метода
             try:
                 scorer._flush_profiles()
             except Exception:
@@ -422,11 +424,11 @@ class OptimizedPipeline:
     # ИСПРАВЛЕНО: осмысленный порог (30 → 10)
     # =========================================================================
     def _step_filter(self, scored_configs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        min_score = self.settings.min_score  # 30.0
+        min_score = self.settings.min_score
         filtered = [item for item in scored_configs if item.get('score', 0) >= min_score]
 
         if not filtered:
-            min_score = self.settings.min_score_fallback  # 10.0
+            min_score = self.settings.min_score_fallback
             filtered = [item for item in scored_configs if item.get('score', 0) >= min_score]
             logger.info(f"  Lowered threshold to {min_score}, got {len(filtered)} configs")
 
@@ -459,7 +461,6 @@ class OptimizedPipeline:
 
         results = await self.verifier.verify_batch(verify_items)
 
-        # ИСПРАВЛЕНО: O(1) dict-индекс
         config_index: Dict[str, Dict[str, Any]] = {
             item['config']: item for item in filtered
         }
@@ -603,7 +604,6 @@ class OptimizedPipeline:
         try:
             input_file = self.settings.output_simple
             output_file = 'configs/xray_loadbalanced_config.json'
-            # ИСПРАВЛЕНО: ConfigToXray — реальное имя класса
             converter = ConfigToXray(input_file, output_file)
             converter.process_configs()
         except Exception as e:
@@ -611,7 +611,7 @@ class OptimizedPipeline:
 
     # =========================================================================
     # Шаг 9: Статистика
-    # ИСПРАВЛЕНО: db.add_run(stats_dict) вместо db.record_run(...)
+    # ИСПРАВЛЕНО: db.add_run(stats_dict)
     # =========================================================================
     async def _step_write_stats(self, configs: List[Dict[str, Any]]) -> None:
         try:
@@ -626,7 +626,6 @@ class OptimizedPipeline:
                 g = cfg.get('geo', 'unknown')
                 geo[g] = geo.get(g, 0) + 1
 
-            # ИСПРАВЛЕНО: add_run(stats_dict) — реальное имя метода
             run_stats = {
                 'timestamp': datetime.now().isoformat(),
                 'total_raw': self._stats.get('total_raw', 0),
@@ -643,7 +642,6 @@ class OptimizedPipeline:
             }
             self.db.add_run(run_stats)
 
-            # Survival stats
             if self.survival_model:
                 survival_stats = self.survival_model.get_stats()
                 self._save_json(self.settings.survival_states_path, {
@@ -652,7 +650,6 @@ class OptimizedPipeline:
                 })
                 self._save_json('configs/survival_stats.json', survival_stats)
 
-            # Censorship stats
             if self.censorship_scorer:
                 censorship_scores = [cfg.get('censorship_score', 0) for cfg in configs]
                 by_protocol: Dict[str, Dict[str, Any]] = {}
@@ -705,7 +702,7 @@ class OptimizedPipeline:
                 await self.verifier.close()
             except Exception:
                 pass
-        # ИСПРАВЛЕНО: HistoryDB не имеет close() — пропускаем
+        # HistoryDB — синглтон, не имеет close()
 
 
 # ===========================================================================
