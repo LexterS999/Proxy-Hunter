@@ -1,15 +1,15 @@
 {
   "region": "GENERIC",
   "test_domain": "google.com",
-  "total_scored": 2121,
+  "total_scored": 1046,
   "high_resistance": 0,
-  "medium_resistance": 2121,
+  "medium_resistance": 1046,
   "low_resistance": 0,
-  "avg_score": 53.742574257425744,
+  "avg_score": 53.72323135755258,
   "by_protocol": {
     "unknown": {
-      "avg_score": 53.742574257425744,
-      "count": 2121
+      "avg_score": 53.72323135755258,
+      "count": 1046
     }
   }
 }
