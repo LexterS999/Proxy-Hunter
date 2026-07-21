@@ -4,10 +4,12 @@
 активной проверкой (асинхронной), кешированием, graceful shutdown,
 и использованием aiofiles для всех файловых операций.
 
-ИСПРАВЛЕНО:
-- #7: run_id больше не используется до определения
-- #11: Единый ParsedConfig dataclass для устранения тройного парсинга
-- #16: Удалён неиспользуемый импорт EnhancedQualityAnalyzer
+Добавлены:
+- SNI Probe для тестирования с несколькими SNI
+- Региональный скоринг с бонусами/штрафами
+- Сбор статистики локальных проверок
+- Интеграция RealitySNIHunter
+- Автоматическое обновление весов
 """
 
 import sys
@@ -43,6 +45,14 @@ from session_pool import SessionPool
 from channel_quality_analyzer import ChannelQualityAnalyzer
 from db import HistoryDB
 
+# Новые импорты
+from sni_probe import SNIProbe
+from reality_sni_hunter import RealitySNIHunter
+from regional_scorer import RegionalScorer
+from regional_stats import RegionalStats
+from sni_filter import SNIFilter
+from weight_updater import WeightUpdater
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -51,16 +61,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# ИСПРАВЛЕНИЕ #11: Единый ParsedConfig dataclass
-# =============================================================================
 @dataclass
 class ParsedConfig:
-    """
-    Единый формат представления распарсенной конфигурации.
-    Создаётся один раз при первом парсинге и передаётся по цепочке,
-    устраняя тройное повторное парсирование.
-    """
     raw: str
     protocol: str
     server: str
@@ -78,17 +80,14 @@ class ParsedConfig:
 
     @property
     def cache_key(self) -> str:
-        """Уникальный ключ для кеширования."""
         return hashlib.md5(self.raw.encode()).hexdigest()
 
     @property
     def dedup_key(self) -> str:
-        """Ключ для дедупликации: server:port:protocol:credential."""
         return f"{self.server}:{self.port}:{self.protocol}:{self.credential}"
 
     @property
     def prefix_key(self) -> str:
-        """Ключ префикса для индексации похожих серверов."""
         parts = self.server.split('.')
         if len(parts) >= 3:
             prefix = '.'.join(parts[:3])
@@ -98,18 +97,11 @@ class ParsedConfig:
 
 
 def parse_config_once(raw: str) -> Optional[ParsedConfig]:
-    """
-    Парсит конфигурацию ЕДИНОЖДЫ и возвращает ParsedConfig.
-    Все последующие этапы используют этот объект вместо повторного парсинга.
-    """
     try:
         data, method = FallbackParser.parse_with_stats(raw)
         if not data:
             return None
-
         protocol = raw.split('://')[0].lower()
-
-        # Извлекаем server/port/credential в зависимости от протокола
         if protocol == 'vmess':
             server = data.get('add', '')
             port = int(data.get('port', 0))
@@ -134,18 +126,12 @@ def parse_config_once(raw: str) -> Optional[ParsedConfig]:
             server = data.get('address', '')
             port = int(data.get('port', 0))
             credential = f"{data.get('uuid', '')}:{data.get('password', '')}"
-        elif protocol == 'wireguard':
-            server = data.get('address', '')
-            port = int(data.get('port', 0))
-            credential = data.get('private_key', '')
         else:
             server = data.get('address') or data.get('add') or data.get('host') or ''
             port = int(data.get('port', 0))
             credential = ''
-
         if not server or port <= 0:
             return None
-
         return ParsedConfig(
             raw=raw,
             protocol=protocol,
@@ -164,10 +150,11 @@ def parse_config_once(raw: str) -> Optional[ParsedConfig]:
 class OptimizedPipeline:
     def __init__(self) -> None:
         self.config = ProxyConfig()
+        self.region = self.config.region
         self.validator = ConfigValidator()
         self.deduplicator = DeepDeduplicator()
         self.quality_checker = ConfigQualityChecker(timeout=0, max_workers=1)
-        self.scorer = ProfileScorer()
+        self.scorer = ProfileScorer(region=self.region)
         self.output_file = 'configs/output_archive.txt'
         self.simple_file = 'configs/output_simple.txt'
         self.parsed_cache_file = 'configs/parsed_cache.json'
@@ -178,12 +165,15 @@ class OptimizedPipeline:
         self._state: Dict = {}
         self.db = HistoryDB()
         self.ARCHIVE_RETENTION_DAYS = 7
-
-        # Кеш для ActiveChecker (будет создан позже)
         self.checker_cache: Optional[ActiveChecker] = None
-
-        # ИСПРАВЛЕНИЕ #11: Кеш ParsedConfig для устранения повторного парсинга
         self._parsed_cache: Dict[str, ParsedConfig] = {}
+        # Новые компоненты
+        self.sni_probe = SNIProbe(timeout=5.0)
+        self.reality_hunter = RealitySNIHunter(xray_core_path="xray", timeout=5.0)
+        self.regional_scorer = RegionalScorer(region=self.region)
+        self.regional_stats = RegionalStats()
+        self.sni_filter = SNIFilter(allowed_snis=['cloudflare.com', 'www.cloudflare.com'])
+        self.weight_updater = WeightUpdater(region=self.region)
 
         self._check_dependencies()
         self._setup_signal_handlers()
@@ -230,9 +220,6 @@ class OptimizedPipeline:
         return hashlib.md5(config.encode()).hexdigest()
 
     def _get_or_parse_config(self, raw: str) -> Optional[ParsedConfig]:
-        """
-        ИСПРАВЛЕНИЕ #11: Возвращает ParsedConfig из кеша или парсит единожды.
-        """
         cache_key = self._get_cache_key(raw)
         if cache_key in self._parsed_cache:
             return self._parsed_cache[cache_key]
@@ -248,10 +235,8 @@ class OptimizedPipeline:
                     content = await f.read()
                     if content:
                         return json.loads(content)
-                    else:
-                        logger.warning(f"Parsed cache file {self.parsed_cache_file} is empty, starting fresh.")
-            except (json.JSONDecodeError, ValueError, OSError) as e:
-                logger.warning(f"Failed to load parsed cache: {e}, starting fresh.")
+            except:
+                pass
         return {}
 
     async def _save_parsed_cache_async(self, cache: Dict) -> None:
@@ -268,8 +253,8 @@ class OptimizedPipeline:
                 async with aiofiles.open(self.name_mapping_file, 'r', encoding='utf-8') as f:
                     content = await f.read()
                     return json.loads(content)
-            except Exception as e:
-                logger.warning(f"Failed to load name mapping: {e}")
+            except:
+                pass
         return {}
 
     async def _save_name_mapping_async(self, mapping: Dict[str, str]) -> None:
@@ -281,7 +266,6 @@ class OptimizedPipeline:
             logger.error(f"Failed to save name mapping: {e}")
 
     def _get_config_key(self, config: str) -> str:
-        """ИСПРАВЛЕНИЕ #11: Использует ParsedConfig из кеша."""
         parsed = self._get_or_parse_config(config)
         if parsed:
             return hashlib.md5(parsed.dedup_key.encode()).hexdigest()
@@ -311,8 +295,7 @@ class OptimizedPipeline:
             key = self._get_config_key(cfg)
             if key not in mapping:
                 mapping[key] = self._generate_name(cfg)
-
-        lines: List[str] = []
+        lines = []
         for cfg in configs:
             key = self._get_config_key(cfg)
             name = mapping.get(key, '')
@@ -324,7 +307,6 @@ class OptimizedPipeline:
                     lines.append(f"{cfg}#{name}")
             else:
                 lines.append(cfg)
-
         try:
             Path(self.output_file).parent.mkdir(parents=True, exist_ok=True)
             async with aiofiles.open(self.output_file, 'w', encoding='utf-8') as f:
@@ -334,7 +316,7 @@ class OptimizedPipeline:
             logger.error(f"Failed to save archive: {e}")
 
     async def _save_simple_async(self, configs: List[str], mapping: Dict[str, str]) -> None:
-        lines: List[str] = []
+        lines = []
         for cfg in configs:
             key = self._get_config_key(cfg)
             name = mapping.get(key, '')
@@ -388,7 +370,6 @@ class OptimizedPipeline:
                     logger.info(f"Channel {ch.url} disabled (state: inactive).")
                 else:
                     ch.enabled = True
-                    logger.debug(f"Channel {ch.url} enabled (state: {state}).")
             report = self.channel_analyzer.get_health_report()
             summary = report.get('summary', {})
             logger.info(
@@ -423,10 +404,7 @@ class OptimizedPipeline:
                 await self.save_state()
                 return False
 
-            # =================================================================
-            # ИСПРАВЛЕНИЕ #7: run_id определяется ДО использования
-            # =================================================================
-            run_stats: Dict = {
+            run_stats = {
                 'timestamp': datetime.now().isoformat(),
                 'total_raw': len(raw_configs),
                 'total_valid': 0,
@@ -449,19 +427,16 @@ class OptimizedPipeline:
                 return False
             logger.info(f"✅ Raw configs: {len(raw_configs)}")
 
-            # Шаг 2: Парсинг и валидация (асинхронно)
-            # ИСПРАВЛЕНИЕ #11: Используем parse_config_once вместо тройного парсинга
+            # Шаг 2: Парсинг и валидация
             logger.info("🔍 Validating and extracting server info...")
             parsed_cache = await self._load_parsed_cache_async()
-            valid_configs: List[str] = []
-            parse_stats: Dict[str, int] = {'strict': 0, 'heuristic': 0, 'failed': 0}
-
+            valid_configs = []
+            parse_stats = {'strict': 0, 'heuristic': 0, 'failed': 0}
             with tqdm(total=len(raw_configs), desc="Parsing configs") as pbar:
                 for cfg in raw_configs:
                     if self._shutdown_requested:
                         break
                     try:
-                        # Используем единый парсинг
                         parsed = self._get_or_parse_config(cfg)
                         if parsed and parsed.is_valid:
                             valid_configs.append(cfg)
@@ -469,7 +444,6 @@ class OptimizedPipeline:
                                 parse_stats['strict'] += 1
                             else:
                                 parse_stats['heuristic'] += 1
-                            # Сохраняем в файловый кеш
                             cache_key = self._get_cache_key(cfg)
                             parsed_cache[cache_key] = parsed.parsed_data
                         else:
@@ -489,12 +463,23 @@ class OptimizedPipeline:
                 logger.error("No valid configs found.")
                 return False
 
+            # Шаг 2.1: SNI-фильтрация (эмуляция блокировок)
+            logger.info("🔍 Applying SNI filtering (Buildcage emulation)...")
+            filtered_by_sni = []
+            for cfg in valid_configs:
+                parsed = self._get_or_parse_config(cfg)
+                if parsed and self.sni_filter.filter_config(cfg, parsed.parsed_data):
+                    filtered_by_sni.append(cfg)
+            logger.info(f"After SNI filtering: {len(filtered_by_sni)} configs (removed {len(valid_configs) - len(filtered_by_sni)})")
+            if not filtered_by_sni:
+                logger.warning("No configs passed SNI filter, using all valid configs")
+                filtered_by_sni = valid_configs
+
             # Шаг 3: Оценка
-            # ИСПРАВЛЕНИЕ #11: Используем ParsedConfig из кеша
             logger.info("⚡ Scoring profiles...")
-            scored_configs: List[Dict] = []
-            with tqdm(total=len(valid_configs), desc="Scoring configs") as pbar:
-                for idx, cfg in enumerate(valid_configs):
+            scored_configs = []
+            with tqdm(total=len(filtered_by_sni), desc="Scoring configs") as pbar:
+                for idx, cfg in enumerate(filtered_by_sni):
                     if self._shutdown_requested:
                         break
                     try:
@@ -542,7 +527,6 @@ class OptimizedPipeline:
             # Шаг 5: Активная проверка (с кешированием)
             logger.info("🔌 Active checking (TCP, HTTP HEAD, async, cached)...")
             history = self._safe_load_history()
-            # Используем кешированный чекер
             if self.checker_cache is None:
                 self.checker_cache = ActiveChecker(
                     timeout=5.0,
@@ -562,6 +546,18 @@ class OptimizedPipeline:
 
             await SessionPool().close()
 
+            # Сохраняем локальную статистику
+            for result in check_results:
+                if result.get('valid', False):
+                    config = result['config']
+                    parsed = self._get_or_parse_config(config)
+                    if parsed:
+                        self.scorer.record_local_result(
+                            config, parsed.parsed_data,
+                            success=result.get('success', False),
+                            latency=result.get('latency', -1)
+                        )
+
             good_configs = [
                 r['config'] for r in check_results
                 if r.get('valid', False) and r.get('latency', -1) > 0
@@ -569,14 +565,12 @@ class OptimizedPipeline:
             logger.info(f"✅ Active check: {len(good_configs)} configs passed")
 
             if not good_configs:
-                error_counts: Dict[str, int] = {}
+                error_counts = {}
                 for r in check_results:
                     err = r.get('error', 'unknown')
                     error_counts[err] = error_counts.get(err, 0) + 1
                 logger.error("❌ No configs passed active check!")
                 logger.error(f"   Error breakdown: {error_counts}")
-                for i, r in enumerate(check_results[:5]):
-                    logger.error(f"   Sample {i+1}: error={r.get('error')}, config={r.get('config', '')[:80]}")
                 return False
 
             # Обновляем скоры
@@ -588,6 +582,38 @@ class OptimizedPipeline:
                         if item['config'] == result['config']:
                             item['score'] = min(100, item['score'] + latency_bonus)
                             break
+
+            # Шаг 5.1: SNI-тестирование для топ-10 конфигов
+            logger.info("🔬 SNI multi-test for top 10 configs...")
+            top_configs = filtered[:10]
+            sni_list = ['cloudflare.com', 'google.com', 'youtube.com', 'speedtest.net', 'dl.google.com']
+            for item in top_configs:
+                cfg = item['config']
+                try:
+                    sni_results = await checker.test_with_multiple_sni(cfg, sni_list)
+                    if sni_results and 'error' not in sni_results:
+                        working_snis = [s for s, res in sni_results.items() if res.get('success')]
+                        if working_snis:
+                            item['score'] += 10 * len(working_snis) / len(sni_list)
+                except Exception as e:
+                    logger.debug(f"SNI test failed for {cfg[:50]}: {e}")
+
+            # Шаг 5.2: Интеграция RealitySNIHunter (сканирование SNI)
+            logger.info("🔍 Scanning for working SNIs via RealitySNIHunter...")
+            try:
+                ip_range = "104.16.0.0/16"  # Cloudflare IP range
+                found_snis = await self.reality_hunter.hunt(ip_range, top_n=10)
+                if found_snis:
+                    logger.info(f"Found {len(found_snis)} working SNIs: {[s['sni'] for s in found_snis]}")
+                    for item in filtered:
+                        server = item.get('parsed', {}).get('address') or item.get('parsed', {}).get('add')
+                        if server:
+                            for entry in found_snis:
+                                if entry['ip'] == server:
+                                    item['score'] *= 1.2
+                                    break
+            except Exception as e:
+                logger.warning(f"RealitySNIHunter scan failed: {e}")
 
             # Шаг 6: Дедупликация
             logger.info("🧹 Deep deduplication (new configs)...")
@@ -603,23 +629,20 @@ class OptimizedPipeline:
             # Шаг 7: Архивация с именами
             logger.info("💾 Archiving logic (with name mapping)...")
             name_mapping = await self._load_name_mapping_async()
-
-            new_configs_with_names: List[str] = []
+            new_configs_with_names = []
             for cfg in deduped:
                 key = self._get_config_key(cfg)
                 if key not in name_mapping:
                     name_mapping[key] = self._generate_name(cfg)
                 new_configs_with_names.append(cfg)
-
             archive_configs = await self._load_archive_async()
-            seen_keys: Set[str] = set()
-            merged_configs: List[str] = []
+            seen_keys = set()
+            merged_configs = []
             for cfg in archive_configs + new_configs_with_names:
                 key = self._get_config_key(cfg)
                 if key not in seen_keys:
                     seen_keys.add(key)
                     merged_configs.append(cfg)
-
             logger.info(f"🔄 Merged archive: {len(archive_configs)} old + {len(new_configs_with_names)} new → {len(merged_configs)} unique")
 
             await self._save_archive_with_names_async(merged_configs, name_mapping)
@@ -639,7 +662,7 @@ class OptimizedPipeline:
 
             # Шаг 9: Обновление статистики
             logger.info("📊 Updating run statistics in SQLite...")
-            final_stats: Dict = {
+            final_stats = {
                 'total_raw': len(raw_configs),
                 'total_valid': len(valid_configs),
                 'total_final': len(merged_configs),
@@ -684,6 +707,13 @@ class OptimizedPipeline:
                 ))
                 conn.commit()
             logger.info("✅ Run statistics updated.")
+
+            # Шаг 10: Периодическое обновление весов
+            logger.info("⚖️ Updating regional weights...")
+            try:
+                self.weight_updater.update()
+            except Exception as e:
+                logger.warning(f"Weight update failed: {e}")
 
             elapsed = time.time() - start_time
             logger.info("=" * 60)
