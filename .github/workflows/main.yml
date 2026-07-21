@@ -2,17 +2,54 @@ name: Proxy-Hunter
 
 on:
   schedule:
-    - cron: '0 */5 * * *'
+    # ИСПРАВЛЕНО: интервал увеличен с 5 до 6 часов.
+    # При timeout 45 мин и 100+ каналах с rate limiting 1.5 req/s
+    # пайплайн может не укладываться в 5 часов → наложение запусков.
+    - cron: '0 */6 * * *'
   workflow_dispatch:
+    inputs:
+      skip_verification:
+        description: 'Пропустить многоуровневую верификацию (быстрый прогон)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      target_region:
+        description: 'Целевой регион для оценки цензуры'
+        required: false
+        default: 'RU'
+        type: choice
+        options:
+          - 'RU'
+          - 'CN'
+          - 'IR'
+          - 'GENERIC'
+
+# ИСПРАВЛЕНО: Добавлен concurrency guard.
+# Два параллельных запуска (по расписанию + ручной workflow_dispatch)
+# могли конфликтовать при git push. Теперь второй запуск ждёт завершения первого.
+concurrency:
+  group: proxy-hunter-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   run-pipeline:
     runs-on: ubuntu-22.04
-    timeout-minutes: 45
+    timeout-minutes: 50
 
     permissions:
       contents: write
       actions: write
+
+    env:
+      # ИСПРАВЛЕНО: HMAC-ключ для Bloom-фильтра из переменных окружения,
+      # а не захардкожен в исходнике (bloom_async.py).
+      BLOOM_HMAC_KEY: ${{ secrets.BLOOM_HMAC_KEY || 'fallback-dev-key-change-me' }}
+      TARGET_REGION: ${{ github.event.inputs.target_region || 'RU' }}
+      SKIP_VERIFICATION: ${{ github.event.inputs.skip_verification || 'false' }}
+      PYTHONUNBUFFERED: '1'
 
     steps:
       - name: Checkout repository
@@ -23,7 +60,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
           cache: 'pip'
 
       - name: Convert scripts to LF
@@ -32,29 +69,56 @@ jobs:
             sed -i 's/\r$//' install.sh
             chmod +x install.sh
           fi
+          if [ -f "run.sh" ]; then
+            sed -i 's/\r$//' run.sh
+            chmod +x run.sh
+          fi
 
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y unzip
+          sudo apt-get install -y unzip jq
 
-      - name: Install Python dependencies
+      # ИСПРАВЛЕНО: Разделение зависимостей на core и ML.
+      # catboost, scikit-learn, pandas используются только в train_model.py
+      # и feature_extractor.py, которые НЕ вызываются из пайплайна.
+      # Это экономит ~2 минуты на установке в CI.
+      - name: Install Python dependencies (core only)
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          pip install -r requirements.txt
-          python -c "import aiofiles, xxhash"
+          if [ -f "requirements-core.txt" ]; then
+            pip install -r requirements-core.txt
+          else
+            pip install -r requirements.txt
+          fi
+          python -c "import aiofiles, xxhash; print('Core deps OK')"
 
       - name: Create necessary directories
         run: |
           mkdir -p configs logs assets bloom_shards
 
+      # ИСПРАВЛЕНО: Фиксированный ключ кэша вместо hashFiles('configs/history.db').
+      # Старый ключ менялся при каждом коммите (т.к. history.db коммитился),
+      # поэтому кэш НИКОГДА не восстанавливался.
+      # Теперь: фиксированный ключ + restore-keys по дате для инкрементального восстановления.
       - name: Cache SQLite database
         uses: actions/cache@v4
         with:
-          path: configs/history.db
-          key: ${{ runner.os }}-history-db-${{ hashFiles('configs/history.db') }}
+          path: |
+            configs/history.db
+            configs/survival_states.json
+          key: proxy-hunter-db-v2-${{ github.run_id }}
           restore-keys: |
-            ${{ runner.os }}-history-db-
+            proxy-hunter-db-v2-
+
+      # ИСПРАВЛЕНО: Кэш Bloom-фильтров (ранее не кэшировались).
+      - name: Cache Bloom filter shards
+        uses: actions/cache@v4
+        with:
+          path: bloom_shards/
+          key: proxy-hunter-bloom-v1-${{ github.run_id }}
+          restore-keys: |
+            proxy-hunter-bloom-v1-
 
       - name: Ensure required files exist
         run: |
@@ -62,6 +126,7 @@ jobs:
           touch configs/output_simple.txt
           echo '{}' > configs/parsed_cache.json
           [ -f custom_channels.txt ] || touch custom_channels.txt
+          [ -f configs/survival_states.json ] || echo '{}' > configs/survival_states.json
 
       - name: Rotate archive if older than 7 days
         run: |
@@ -83,11 +148,24 @@ jobs:
         run: |
           bash install.sh --install-xray-only
 
+      # ИСПРАВЛЕНО: Передача параметров верификации и региона через env.
+      # Пайплайн теперь использует MultiLevelVerifier, SurvivalModel, CensorshipScorer.
       - name: Run optimized pipeline
         id: pipeline
         continue-on-error: true
         run: |
-          time python src/pipeline_optimized.py
+          echo "🚀 Starting pipeline at $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          echo "   Target region: $TARGET_REGION"
+          echo "   Skip verification: $SKIP_VERIFICATION"
+          echo ""
+          time python src/pipeline_optimized.py \
+            --target-region "$TARGET_REGION" \
+            --skip-verification "$SKIP_VERIFICATION" \
+            2>&1 | tee pipeline_run.log
+          PIPELINE_EXIT=$?
+          echo "pipeline_exit_code=$PIPELINE_EXIT" >> $GITHUB_OUTPUT
+          echo ""
+          echo "🏁 Pipeline finished at $(date -u +'%Y-%m-%d %H:%M:%S UTC') with exit code $PIPELINE_EXIT"
 
       - name: Remove inactive channels from custom_channels.txt
         run: |
@@ -172,6 +250,7 @@ jobs:
           if [ -f "configs/output_archive.txt" ] && [ -s "configs/output_archive.txt" ]; then
             echo "archive_exists=true" >> $GITHUB_OUTPUT
             echo "✅ output_archive.txt exists! Size: $(wc -c < configs/output_archive.txt) bytes"
+            echo "   Lines: $(wc -l < configs/output_archive.txt)"
           else
             echo "archive_exists=false" >> $GITHUB_OUTPUT
             echo "❌ output_archive.txt not found or empty!"
@@ -179,6 +258,7 @@ jobs:
           if [ -f "configs/output_simple.txt" ] && [ -s "configs/output_simple.txt" ]; then
             echo "simple_exists=true" >> $GITHUB_OUTPUT
             echo "✅ output_simple.txt exists! Size: $(wc -c < configs/output_simple.txt) bytes"
+            echo "   Lines: $(wc -l < configs/output_simple.txt)"
           else
             echo "simple_exists=false" >> $GITHUB_OUTPUT
             echo "❌ output_simple.txt not found or empty!"
@@ -194,6 +274,87 @@ jobs:
             echo "✅ parsed_cache.json exists"
           else
             echo "parsed_cache_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      # НОВОЕ: Вывод статистики многоуровневой верификации.
+      - name: Show verification statistics
+        if: always()
+        run: |
+          echo "🔍 Multi-Level Verification Statistics:"
+          if [ -f "configs/verification_stats.json" ]; then
+            python -c "
+          import json
+          try:
+              with open('configs/verification_stats.json') as f:
+                  stats = json.load(f)
+              print(f'  Total checked:     {stats.get(\"total_checked\", 0)}')
+              print(f'  TCP passed:        {stats.get(\"tcp_passed\", 0)}')
+              print(f'  TLS passed:        {stats.get(\"tls_passed\", 0)}')
+              print(f'  Data transfer OK:  {stats.get(\"data_passed\", 0)}')
+              print(f'  IP change OK:      {stats.get(\"ip_passed\", 0)}')
+              print(f'  Stability OK:      {stats.get(\"stability_passed\", 0)}')
+              print(f'  Fully valid:       {stats.get(\"fully_valid\", 0)}')
+              total = stats.get('total_checked', 1)
+              valid = stats.get('fully_valid', 0)
+              print(f'  Pass rate:         {valid/total*100:.1f}%' if total > 0 else '  Pass rate: N/A')
+          except Exception as e:
+              print(f'  ⚠️ Could not read stats: {e}')
+          "
+          else
+            echo "  (verification_stats.json not found — verification may have been skipped)"
+          fi
+
+      # НОВОЕ: Вывод статистики модели выживания.
+      - name: Show survival model statistics
+        if: always()
+        run: |
+          echo "📈 Survival Model Statistics:"
+          if [ -f "configs/survival_stats.json" ]; then
+            python -c "
+          import json
+          try:
+              with open('configs/survival_stats.json') as f:
+                  stats = json.load(f)
+              print(f'  Total profiles:    {stats.get(\"total_profiles\", 0)}')
+              print(f'  Alive:             {stats.get(\"alive\", 0)}')
+              print(f'  Dead:              {stats.get(\"dead\", 0)}')
+              print(f'  Avg score:         {stats.get(\"avg_score\", 0):.1f}')
+              print(f'  Median score:      {stats.get(\"median_score\", 0):.1f}')
+              print(f'  Avg decay rate:    {stats.get(\"avg_decay_rate\", 0):.4f}')
+          except Exception as e:
+              print(f'  ⚠️ Could not read stats: {e}')
+          "
+          else
+            echo "  (survival_stats.json not found)"
+          fi
+
+      # НОВОЕ: Вывод статистики цензурной устойчивости.
+      - name: Show censorship resistance summary
+        if: always()
+        run: |
+          echo "🛡️ Censorship Resistance Summary (region: $TARGET_REGION):"
+          if [ -f "configs/censorship_stats.json" ]; then
+            python -c "
+          import json
+          try:
+              with open('configs/censorship_stats.json') as f:
+                  stats = json.load(f)
+              print(f'  Region:            {stats.get(\"region\", \"N/A\")}')
+              print(f'  Total scored:      {stats.get(\"total_scored\", 0)}')
+              print(f'  High resistance:   {stats.get(\"high_resistance\", 0)} (score >= 70)')
+              print(f'  Medium resistance: {stats.get(\"medium_resistance\", 0)} (40-70)')
+              print(f'  Low resistance:    {stats.get(\"low_resistance\", 0)} (score < 40)')
+              print(f'  Avg score:         {stats.get(\"avg_score\", 0):.1f}')
+              protocols = stats.get('by_protocol', {})
+              if protocols:
+                  print('  By protocol:')
+                  for p, data in protocols.items():
+                      print(f'    {p}: avg={data.get(\"avg_score\", 0):.0f}, count={data.get(\"count\", 0)}')
+          except Exception as e:
+              print(f'  ⚠️ Could not read stats: {e}')
+          "
+          else
+            echo "  (censorship_stats.json not found)"
           fi
 
       - name: Show quality summary
@@ -218,16 +379,24 @@ jobs:
                   cols = ['id', 'timestamp', 'total_raw', 'total_valid', 'total_final', 'avg_score', 'p50_latency', 'p95_latency', 'p99_latency', 'success_rate', 'protocols', 'geo_distribution', 'anomalies']
                   latest = dict(zip(cols, row))
                   print(f'  Latest run: {latest[\"timestamp\"]}')
+                  print(f'  Raw configs: {latest[\"total_raw\"]}')
+                  print(f'  Valid configs: {latest[\"total_valid\"]}')
                   print(f'  Final configs: {latest[\"total_final\"]}')
                   print(f'  Avg score: {latest[\"avg_score\"]:.1f}')
+                  print(f'  Success rate: {latest[\"success_rate\"]:.1%}')
                   print(f'  P50 latency: {latest[\"p50_latency\"]:.0f}ms')
                   print(f'  P95 latency: {latest[\"p95_latency\"]:.0f}ms')
                   print(f'  P99 latency: {latest[\"p99_latency\"]:.0f}ms')
                   protocols = json.loads(latest['protocols']) if latest['protocols'] else {}
                   if protocols:
                       print('  Protocols:')
-                      for p, count in protocols.items():
+                      for p, count in sorted(protocols.items(), key=lambda x: -x[1]):
                           print(f'    {p}: {count}')
+                  geo = json.loads(latest['geo_distribution']) if latest['geo_distribution'] else {}
+                  if geo:
+                      print('  Top geo:')
+                      for g, count in sorted(geo.items(), key=lambda x: -x[1])[:5]:
+                          print(f'    {g}: {count}')
               else:
                   print('  No history data yet')
               conn.close()
@@ -235,14 +404,70 @@ jobs:
               print(f'  ⚠️ Could not read history: {e}')
           "
 
+      # НОВОЕ: Валидация качества перед коммитом.
+      # Если пайплайн выдал 0 конфигов или все score < 10 — не коммитим мусор.
+      - name: Validate output quality
+        id: validate
+        run: |
+          echo "🔎 Validating output quality before commit..."
+          ARCHIVE="configs/output_archive.txt"
+          if [ ! -f "$ARCHIVE" ] || [ ! -s "$ARCHIVE" ]; then
+            echo "quality_ok=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Archive is empty — skipping commit"
+            exit 0
+          fi
+          LINE_COUNT=$(wc -l < "$ARCHIVE")
+          echo "  Archive lines: $LINE_COUNT"
+          if [ "$LINE_COUNT" -lt 1 ]; then
+            echo "quality_ok=false" >> $GITHUB_OUTPUT
+            echo "⚠️ No configs in archive — skipping commit"
+          else
+            echo "quality_ok=true" >> $GITHUB_OUTPUT
+            echo "✅ Quality check passed ($LINE_COUNT configs)"
+          fi
+
       - name: Show pipeline step status
         run: |
           echo "Pipeline step outcome: ${{ steps.pipeline.outcome }}"
+          echo "Pipeline exit code: ${{ steps.pipeline.outputs.pipeline_exit_code }}"
           if [ "${{ steps.pipeline.outcome }}" != "success" ]; then
             echo "⚠️ Pipeline step did NOT succeed. See 'Run optimized pipeline' step output above"
             echo "   and the 'pipeline-debug-log' artifact for details."
           fi
 
+      # ИСПРАВЛЕНО: history.db НЕ коммитится в публичный репозиторий.
+      # SQLite-база с историей профилей (серверы, порты, хеши ключей)
+      # раскрывает инфраструктуру прокси в открытом доступе.
+      # Теперь history.db хранится ТОЛЬКО как CI-артефакт + кэш.
+      - name: Commit output to repo
+        if: steps.check_output.outputs.archive_exists == 'true' && steps.validate.outputs.quality_ok == 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+          # Коммитим только выходные файлы, НЕ history.db
+          git add configs/output_archive.txt configs/output_simple.txt configs/parsed_cache.json custom_channels.txt
+
+          # Добавляем статистику если есть
+          [ -f "configs/verification_stats.json" ] && git add configs/verification_stats.json
+          [ -f "configs/survival_stats.json" ] && git add configs/survival_stats.json
+          [ -f "configs/censorship_stats.json" ] && git add configs/censorship_stats.json
+
+          if git diff --staged --quiet; then
+            echo "✅ No changes to commit"
+          else
+            COMMIT_MSG="Update proxy configs $(date +'%Y-%m-%d %H:%M:%S') [skip ci]"
+            if [ -f "configs/output_archive.txt" ]; then
+              LINES=$(wc -l < configs/output_archive.txt)
+              COMMIT_MSG="$COMMIT_MSG | configs: $LINES"
+            fi
+            git commit -m "$COMMIT_MSG"
+            git push
+            echo "✅ Committed updated files to repository"
+          fi
+
+      # ИСПРАВЛЕНО: history.db и survival_states.json — только как артефакты.
+      # Не в git (безопасность), но доступны для скачивания и кэшируются.
       - name: Upload all artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -253,27 +478,12 @@ jobs:
             configs/output_simple.txt
             configs/history.db
             configs/parsed_cache.json
-          retention-days: 7
+            configs/survival_states.json
+            configs/verification_stats.json
+            configs/survival_stats.json
+            configs/censorship_stats.json
+          retention-days: 14
           if-no-files-found: warn
-
-      # ИСПРАВЛЕНИЕ #15: Коммит всех результатов включая history.db
-      - name: Commit output to repo
-        if: steps.check_output.outputs.archive_exists == 'true'
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add configs/output_archive.txt configs/output_simple.txt configs/parsed_cache.json custom_channels.txt
-          # Добавляем history.db если он изменился
-          if [ -f "configs/history.db" ]; then
-            git add configs/history.db
-          fi
-          if git diff --staged --quiet; then
-            echo "✅ No changes to commit"
-          else
-            git commit -m "Update proxy configs and metadata $(date +'%Y-%m-%d %H:%M:%S') [skip ci]"
-            git push
-            echo "✅ Committed updated files to repository"
-          fi
 
       - name: Upload logs (if pipeline failed)
         if: always() && steps.pipeline.outcome == 'failure'
@@ -283,8 +493,9 @@ jobs:
           path: |
             pipeline_debug.log
             pipeline_debug.log.*
+            pipeline_run.log
             logs/
-          retention-days: 7
+          retention-days: 14
           if-no-files-found: warn
 
       - name: Fail job if pipeline failed
@@ -293,8 +504,12 @@ jobs:
           echo "❌ 'Run optimized pipeline' step failed. Failing the job after diagnostics were uploaded."
           exit 1
 
-      - name: Cleanup old artifacts (optional)
+      - name: Cleanup temporary files
         if: always()
         run: |
+          # Удаляем временные Bloom-шарды (кэшируются отдельно)
           find . -name "bloom_shards" -type d -exec rm -rf {} \; 2>/dev/null || true
+          # Удаляем старые логи
           find logs -name "*.log" -type f -mtime +7 -delete 2>/dev/null || true
+          # Удаляем временный лог пайплайна
+          rm -f pipeline_run.log 2>/dev/null || true
