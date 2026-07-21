@@ -17,6 +17,7 @@ import numpy as np
 import aiohttp
 import aiodns
 
+from sni_probe import SNIProbe
 from concurrency import ConcurrencyLimiter
 from session_pool import SessionPool
 from retry_utils import retry_with_backoff
@@ -57,7 +58,7 @@ class CachedActiveChecker:
     """
     Активная проверка с кешированием результатов на основе TTL.
     """
-
+    
     def __init__(self,
                  timeout: float = None,
                  max_workers: int = None,
@@ -114,7 +115,34 @@ class CachedActiveChecker:
         elif config.startswith('ss://'):
             return parser.parse_shadowsocks(config)
         return None
+    
+    async def test_with_multiple_sni(self, config: str, sni_list: List[str]) -> Dict:
+        """
+        Проверяет конфигурацию с несколькими SNI.
+        Возвращает словарь с результатами для каждого SNI.
+        """
+        parsed = self._extract_parsed(config)
+        if not parsed:
+            return {'error': 'parse_failed'}
+        host = parsed.get('add') or parsed.get('address')
+        port = int(parsed.get('port', 443))
+        # Определяем, использовать ли TLS
+        use_tls = parsed.get('security') in ('tls', 'reality') or parsed.get('tls') in ('tls', 'reality')
+        if not use_tls:
+            # Если без TLS, тестировать SNI бессмысленно
+            return {'error': 'no_tls'}
 
+        probe = SNIProbe(timeout=self.timeout)
+        results = {}
+        for sni in sni_list:
+            res = await probe.probe_check(host, sni)
+            results[sni] = {
+                'success': res['success'],
+                'latency': res['latency'],
+                'error': res['error']
+            }
+        return results
+        
     async def _get_session(self) -> aiohttp.ClientSession:
         pool = SessionPool()
         self._session = await pool.get_session(
