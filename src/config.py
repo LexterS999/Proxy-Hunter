@@ -18,6 +18,9 @@ from user_settings import (
 )
 from channel_quality_analyzer import ChannelQualityAnalyzer
 
+# === НОВАЯ ПЕРЕМЕННАЯ ===
+REGION = os.getenv('PROXY_HUNTER_REGION', 'RU')
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -43,7 +46,6 @@ class ChannelConfig:
         self.is_telegram: bool = bool(re.match(r'^https://t\.me/s/', self.url))
         self.error_count: int = 0
         self.last_check_time: Optional[datetime] = None
-        # Добавляем региональный бонус (будет вычислен позже)
         self.region_bonus: float = 0.0
 
     def _validate_url(self, url: str) -> str:
@@ -69,7 +71,6 @@ class ChannelConfig:
             if self.metrics.avg_response_time > 0:
                 response_score = max(0.0, min(15.0, 15.0 * (1 - (self.metrics.avg_response_time / 10))))
 
-            # Добавляем региональный бонус (до 10 баллов)
             region_bonus = getattr(self, 'region_bonus', 0.0)
 
             self.metrics.overall_score = round(
@@ -85,6 +86,7 @@ class ProxyConfig:
         self.use_maximum_power: bool = USE_MAXIMUM_POWER
         self.specific_config_count: int = SPECIFIC_CONFIG_COUNT
         self.MAX_CONFIG_AGE_DAYS: int = MAX_CONFIG_AGE_DAYS
+        self.region: str = REGION  # НОВОЕ
 
         initial_urls: List[ChannelConfig] = [ChannelConfig(url=url) for url in SOURCE_URLS]
         self.SOURCE_URLS: List[ChannelConfig] = self._remove_duplicate_urls(initial_urls)
@@ -92,7 +94,6 @@ class ProxyConfig:
         self._initialize_settings()
         self._set_smart_limits()
         self._analyzer: Optional[ChannelQualityAnalyzer] = None
-        # Определяем региональный бонус для каналов
         self._apply_region_bonus()
 
     def _initialize_protocols(self) -> Dict[str, Dict]:
@@ -215,18 +216,10 @@ class ProxyConfig:
             return False
 
     def _apply_region_bonus(self) -> None:
-        """
-        Применяет бонус к каналам, в которых преобладают конфиги для РФ или IR.
-        Используется эвристика: анализируем URL канала (если в названии есть ru/ir) или будем считать
-        после сбора конфигов. В данном упрощённом варианте добавляем бонус вручную для некоторых каналов.
-        """
-        # В реальности это можно вычислять на основе анализа собранных конфигов.
-        # Здесь мы просто добавляем бонус к каналам с явным указанием региона в имени.
-        # Можно расширить: если канал содержит "IR" или "RU" в названии, даём бонус.
         for ch in self.SOURCE_URLS:
             url_lower = ch.url.lower()
             if any(region in url_lower for region in ['ir', 'iran', 'ru', 'russia']):
-                ch.region_bonus = 8.0  # Бонус 8 баллов
+                ch.region_bonus = 8.0
                 logger.debug(f"Applied region bonus to {ch.url}")
             else:
                 ch.region_bonus = 0.0
@@ -238,7 +231,6 @@ class ProxyConfig:
         if not channels:
             self.save_empty_config_file()
             logger.error("No enabled channels found after health filter. Empty config file created.")
-        # Сортируем по общему скору (учитывая бонус)
         channels.sort(key=lambda c: c.metrics.overall_score, reverse=True)
         return channels
 
