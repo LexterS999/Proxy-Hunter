@@ -14,7 +14,7 @@ on:
           - 'false'
           - 'true'
       target_region:
-        description: 'Целевой регион для оценки цензуры'
+        description: 'Целевой регион для оценки цензуры и тестирования'
         required: false
         default: 'RU'
         type: choice
@@ -23,6 +23,16 @@ on:
           - 'CN'
           - 'IR'
           - 'GENERIC'
+      test_domain:
+        description: 'Домен для проверки доступности через прокси (пусто = авто по региону)'
+        required: false
+        default: ''
+        type: string
+      region_test_top_n:
+        description: 'Сколько топ-конфигов тестировать через xray-core'
+        required: false
+        default: '50'
+        type: string
 
 concurrency:
   group: proxy-hunter-${{ github.ref }}
@@ -31,7 +41,7 @@ concurrency:
 jobs:
   run-pipeline:
     runs-on: ubuntu-22.04
-    timeout-minutes: 50
+    timeout-minutes: 55
 
     permissions:
       contents: write
@@ -41,6 +51,7 @@ jobs:
       BLOOM_HMAC_KEY: ${{ secrets.BLOOM_HMAC_KEY || 'fallback-dev-key-change-me' }}
       TARGET_REGION: ${{ github.event.inputs.target_region || 'RU' }}
       SKIP_VERIFICATION: ${{ github.event.inputs.skip_verification || 'false' }}
+      REGION_TEST_TOP_N: ${{ github.event.inputs.region_test_top_n || '50' }}
       PYTHONUNBUFFERED: '1'
 
     steps:
@@ -48,6 +59,42 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # НОВОЕ: Определяем тестовый домен по региону.
+      # Домен выбирается из списка ЗАБЛОКИРОВАННЫХ в целевом регионе сайтов.
+      # Если прокси может открыть этот домен → он работает в данном регионе.
+      - name: Resolve test domain for region
+        id: resolve_domain
+        run: |
+          REGION="${{ env.TARGET_REGION }}"
+          CUSTOM_DOMAIN="${{ github.event.inputs.test_domain }}"
+
+          if [ -n "$CUSTOM_DOMAIN" ]; then
+            echo "test_domain=$CUSTOM_DOMAIN" >> $GITHUB_OUTPUT
+            echo "🌐 Using custom test domain: $CUSTOM_DOMAIN"
+          else
+            case "$REGION" in
+              RU)
+                # Заблокированы Роскомнадзором / ТСПУ
+                echo "test_domain=rutracker.org" >> $GITHUB_OUTPUT
+                echo "🇷🇺 Region RU → test domain: rutracker.org (blocked by Roskomnadzor)"
+                ;;
+              CN)
+                # Заблокированы GFW (Great Firewall)
+                echo "test_domain=google.com" >> $GITHUB_OUTPUT
+                echo "🇨🇳 Region CN → test domain: google.com (blocked by GFW)"
+                ;;
+              IR)
+                # Заблокированы GFI (Government Filtering Infrastructure)
+                echo "test_domain=twitter.com" >> $GITHUB_OUTPUT
+                echo "🇮🇷 Region IR → test domain: twitter.com (blocked by GFI)"
+                ;;
+              *)
+                echo "test_domain=google.com" >> $GITHUB_OUTPUT
+                echo "🌐 Region GENERIC → test domain: google.com"
+                ;;
+            esac
+          fi
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -69,13 +116,18 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y unzip jq
+          sudo apt-get install -y unzip jq curl
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
           pip install -r requirements.txt
-          python -c "import aiofiles, xxhash, bs4, lxml; print('All deps OK')"
+          python -c "
+          import aiohttp, aiofiles, xxhash, tqdm, yaml, requests
+          import bs4, lxml, numpy, pandas, sklearn, catboost
+          import aiodns, dotenv, msgpack
+          print('✅ All dependencies verified OK')
+          "
 
       - name: Create necessary directories
         run: |
@@ -126,10 +178,16 @@ jobs:
       - name: Install Xray-core
         run: |
           bash install.sh --install-xray-only
+          # Проверяем что xray доступен
+          if command -v xray &> /dev/null; then
+            echo "✅ xray-core installed: $(xray version 2>/dev/null | head -1)"
+          elif [ -f "./xray" ]; then
+            echo "✅ xray-core found at ./xray"
+            echo "$(pwd)/xray" > configs/xray_path.txt
+          else
+            echo "⚠️ xray-core not found, region test will be skipped"
+          fi
 
-      # ИСПРАВЛЕНО: set -o pipefail для корректного捕获 exit code.
-      # Без pipefail: `python ... | tee` → $? = код tee (всегда 0).
-      # С pipefail: $? = код python (первой упавшей команды в пайпе).
       - name: Run optimized pipeline
         id: pipeline
         continue-on-error: true
@@ -137,17 +195,66 @@ jobs:
           set -o pipefail
           echo "🚀 Starting pipeline at $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
           echo "   Target region: $TARGET_REGION"
+          echo "   Test domain: ${{ steps.resolve_domain.outputs.test_domain }}"
           echo "   Skip verification: $SKIP_VERIFICATION"
+          echo "   Region test top N: $REGION_TEST_TOP_N"
           echo ""
+
+          # Определяем путь к xray
+          XRAY_PATH="xray"
+          if [ -f "configs/xray_path.txt" ]; then
+            XRAY_PATH=$(cat configs/xray_path.txt)
+          fi
+
           time python src/pipeline_optimized.py \
             --target-region "$TARGET_REGION" \
             --skip-verification "$SKIP_VERIFICATION" \
+            --test-domain "${{ steps.resolve_domain.outputs.test_domain }}" \
+            --xray-path "$XRAY_PATH" \
+            --region-test-top-n "$REGION_TEST_TOP_N" \
             2>&1 | tee pipeline_run.log
           PIPELINE_EXIT=$?
           echo "pipeline_exit_code=$PIPELINE_EXIT" >> $GITHUB_OUTPUT
           echo ""
           echo "🏁 Pipeline finished at $(date -u +'%Y-%m-%d %H:%M:%S UTC') with exit code $PIPELINE_EXIT"
           exit $PIPELINE_EXIT
+
+      # НОВОЕ: Отдельный шаг регионального тестирования через xray-core.
+      # Берёт топ-N конфигов из output_simple.txt и проверяет,
+      # могут ли они открыть заблокированный в регионе домен.
+      - name: Region connectivity test via xray-core
+        id: region_test
+        if: steps.pipeline.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          TEST_DOMAIN="${{ steps.resolve_domain.outputs.test_domain }}"
+          TOP_N="$REGION_TEST_TOP_N"
+
+          echo "🌐 Region Connectivity Test"
+          echo "   Region: $TARGET_REGION"
+          echo "   Test domain: $TEST_DOMAIN"
+          echo "   Top N configs: $TOP_N"
+          echo ""
+
+          XRAY_PATH="xray"
+          if [ -f "configs/xray_path.txt" ]; then
+            XRAY_PATH=$(cat configs/xray_path.txt)
+          fi
+
+          python src/region_tester.py \
+            --test-domain "$TEST_DOMAIN" \
+            --region "$TARGET_REGION" \
+            --input configs/output_simple.txt \
+            --output configs/region_test_results.json \
+            --top-n "$TOP_N" \
+            --xray-path "$XRAY_PATH" \
+            --timeout 15 \
+            --max-concurrent 3 \
+            2>&1 | tee region_test.log
+          REGION_EXIT=$?
+          echo "region_test_exit=$REGION_EXIT" >> $GITHUB_OUTPUT
+          exit $REGION_EXIT
 
       - name: Remove inactive channels from custom_channels.txt
         run: |
@@ -282,7 +389,45 @@ jobs:
               print(f'  ⚠️ Could not read stats: {e}')
           "
           else
-            echo "  (verification_stats.json not found — verification may have been skipped)"
+            echo "  (verification_stats.json not found)"
+          fi
+
+      # НОВОЕ: Вывод результатов регионального тестирования.
+      - name: Show region test results
+        if: always()
+        run: |
+          echo "🌐 Region Connectivity Test Results ($TARGET_REGION → ${{ steps.resolve_domain.outputs.test_domain }}):"
+          if [ -f "configs/region_test_results.json" ]; then
+            python -c "
+          import json
+          try:
+              with open('configs/region_test_results.json') as f:
+                  data = json.load(f)
+              stats = data.get('stats', {})
+              print(f'  Region:            {data.get(\"region\", \"N/A\")}')
+              print(f'  Test domain:       {data.get(\"test_domain\", \"N/A\")}')
+              print(f'  Total tested:      {stats.get(\"tested\", 0)}')
+              print(f'  Passed:            {stats.get(\"passed\", 0)}')
+              print(f'  Failed:            {stats.get(\"failed\", 0)}')
+              print(f'  Skipped:           {stats.get(\"skipped\", 0)}')
+              tested = stats.get('tested', 0)
+              passed = stats.get('passed', 0)
+              if tested > 0:
+                  print(f'  Region pass rate:  {passed/tested*100:.1f}%')
+              results = data.get('results', [])
+              if results:
+                  print('  Top results:')
+                  for r in results[:10]:
+                      status = '✅' if r.get('success') else '❌'
+                      lat = r.get('latency_ms', -1)
+                      lat_str = f'{lat:.0f}ms' if lat >= 0 else 'N/A'
+                      proto = r.get('protocol', '?')
+                      print(f'    {status} [{proto}] {lat_str} — {r.get(\"server\", \"?\")}:{r.get(\"port\", \"?\")}')
+          except Exception as e:
+              print(f'  ⚠️ Could not read results: {e}')
+          "
+          else
+            echo "  (region_test_results.json not found — test may have been skipped)"
           fi
 
       - name: Show survival model statistics
@@ -407,9 +552,9 @@ jobs:
         run: |
           echo "Pipeline step outcome: ${{ steps.pipeline.outcome }}"
           echo "Pipeline exit code: ${{ steps.pipeline.outputs.pipeline_exit_code }}"
+          echo "Region test outcome: ${{ steps.region_test.outcome }}"
           if [ "${{ steps.pipeline.outcome }}" != "success" ]; then
-            echo "⚠️ Pipeline step did NOT succeed. See 'Run optimized pipeline' step output above"
-            echo "   and the 'pipeline-debug-log' artifact for details."
+            echo "⚠️ Pipeline step did NOT succeed."
           fi
 
       - name: Commit output to repo
@@ -421,6 +566,7 @@ jobs:
           [ -f "configs/verification_stats.json" ] && git add configs/verification_stats.json
           [ -f "configs/survival_stats.json" ] && git add configs/survival_stats.json
           [ -f "configs/censorship_stats.json" ] && git add configs/censorship_stats.json
+          [ -f "configs/region_test_results.json" ] && git add configs/region_test_results.json
           if git diff --staged --quiet; then
             echo "✅ No changes to commit"
           else
@@ -428,6 +574,18 @@ jobs:
             if [ -f "configs/output_archive.txt" ]; then
               LINES=$(wc -l < configs/output_archive.txt)
               COMMIT_MSG="$COMMIT_MSG | configs: $LINES"
+            fi
+            if [ -f "configs/region_test_results.json" ]; then
+              PASS_RATE=$(python -c "
+          import json
+          try:
+              d = json.load(open('configs/region_test_results.json'))
+              s = d.get('stats', {})
+              t, p = s.get('tested', 0), s.get('passed', 0)
+              print(f'{p/t*100:.0f}%' if t > 0 else 'N/A')
+          except: print('N/A')
+          " 2>/dev/null)
+              COMMIT_MSG="$COMMIT_MSG | region($TARGET_REGION): $PASS_RATE"
             fi
             git commit -m "$COMMIT_MSG"
             git push
@@ -448,6 +606,7 @@ jobs:
             configs/verification_stats.json
             configs/survival_stats.json
             configs/censorship_stats.json
+            configs/region_test_results.json
           retention-days: 14
           if-no-files-found: warn
 
@@ -460,6 +619,7 @@ jobs:
             pipeline_debug.log
             pipeline_debug.log.*
             pipeline_run.log
+            region_test.log
             logs/
           retention-days: 14
           if-no-files-found: warn
@@ -475,4 +635,5 @@ jobs:
         run: |
           find . -name "bloom_shards" -type d -exec rm -rf {} \; 2>/dev/null || true
           find logs -name "*.log" -type f -mtime +7 -delete 2>/dev/null || true
-          rm -f pipeline_run.log 2>/dev/null || true
+          rm -f pipeline_run.log region_test.log 2>/dev/null || true
+          find /tmp -name "xray_test_*.json" -delete 2>/dev/null || true
