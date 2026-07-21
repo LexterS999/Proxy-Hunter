@@ -2,9 +2,6 @@ name: Proxy-Hunter
 
 on:
   schedule:
-    # ИСПРАВЛЕНО: интервал увеличен с 5 до 6 часов.
-    # При timeout 45 мин и 100+ каналах с rate limiting 1.5 req/s
-    # пайплайн может не укладываться в 5 часов → наложение запусков.
     - cron: '0 */6 * * *'
   workflow_dispatch:
     inputs:
@@ -27,9 +24,6 @@ on:
           - 'IR'
           - 'GENERIC'
 
-# ИСПРАВЛЕНО: Добавлен concurrency guard.
-# Два параллельных запуска (по расписанию + ручной workflow_dispatch)
-# могли конфликтовать при git push. Теперь второй запуск ждёт завершения первого.
 concurrency:
   group: proxy-hunter-${{ github.ref }}
   cancel-in-progress: false
@@ -44,8 +38,6 @@ jobs:
       actions: write
 
     env:
-      # ИСПРАВЛЕНО: HMAC-ключ для Bloom-фильтра из переменных окружения,
-      # а не захардкожен в исходнике (bloom_async.py).
       BLOOM_HMAC_KEY: ${{ secrets.BLOOM_HMAC_KEY || 'fallback-dev-key-change-me' }}
       TARGET_REGION: ${{ github.event.inputs.target_region || 'RU' }}
       SKIP_VERIFICATION: ${{ github.event.inputs.skip_verification || 'false' }}
@@ -79,28 +71,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y unzip jq
 
-      # ИСПРАВЛЕНО: Разделение зависимостей на core и ML.
-      # catboost, scikit-learn, pandas используются только в train_model.py
-      # и feature_extractor.py, которые НЕ вызываются из пайплайна.
-      # Это экономит ~2 минуты на установке в CI.
-      - name: Install Python dependencies (core only)
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          if [ -f "requirements-core.txt" ]; then
-            pip install -r requirements-core.txt
-          else
-            pip install -r requirements.txt
-          fi
-          python -c "import aiofiles, xxhash; print('Core deps OK')"
+          pip install -r requirements.txt
+          python -c "import aiofiles, xxhash, bs4, lxml; print('All deps OK')"
 
       - name: Create necessary directories
         run: |
           mkdir -p configs logs assets bloom_shards
 
-      # ИСПРАВЛЕНО: Фиксированный ключ кэша вместо hashFiles('configs/history.db').
-      # Старый ключ менялся при каждом коммите (т.к. history.db коммитился),
-      # поэтому кэш НИКОГДА не восстанавливался.
-      # Теперь: фиксированный ключ + restore-keys по дате для инкрементального восстановления.
       - name: Cache SQLite database
         uses: actions/cache@v4
         with:
@@ -111,7 +91,6 @@ jobs:
           restore-keys: |
             proxy-hunter-db-v2-
 
-      # ИСПРАВЛЕНО: Кэш Bloom-фильтров (ранее не кэшировались).
       - name: Cache Bloom filter shards
         uses: actions/cache@v4
         with:
@@ -148,12 +127,14 @@ jobs:
         run: |
           bash install.sh --install-xray-only
 
-      # ИСПРАВЛЕНО: Передача параметров верификации и региона через env.
-      # Пайплайн теперь использует MultiLevelVerifier, SurvivalModel, CensorshipScorer.
+      # ИСПРАВЛЕНО: set -o pipefail для корректного捕获 exit code.
+      # Без pipefail: `python ... | tee` → $? = код tee (всегда 0).
+      # С pipefail: $? = код python (первой упавшей команды в пайпе).
       - name: Run optimized pipeline
         id: pipeline
         continue-on-error: true
         run: |
+          set -o pipefail
           echo "🚀 Starting pipeline at $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
           echo "   Target region: $TARGET_REGION"
           echo "   Skip verification: $SKIP_VERIFICATION"
@@ -166,6 +147,7 @@ jobs:
           echo "pipeline_exit_code=$PIPELINE_EXIT" >> $GITHUB_OUTPUT
           echo ""
           echo "🏁 Pipeline finished at $(date -u +'%Y-%m-%d %H:%M:%S UTC') with exit code $PIPELINE_EXIT"
+          exit $PIPELINE_EXIT
 
       - name: Remove inactive channels from custom_channels.txt
         run: |
@@ -276,7 +258,6 @@ jobs:
             echo "parsed_cache_exists=false" >> $GITHUB_OUTPUT
           fi
 
-      # НОВОЕ: Вывод статистики многоуровневой верификации.
       - name: Show verification statistics
         if: always()
         run: |
@@ -304,7 +285,6 @@ jobs:
             echo "  (verification_stats.json not found — verification may have been skipped)"
           fi
 
-      # НОВОЕ: Вывод статистики модели выживания.
       - name: Show survival model statistics
         if: always()
         run: |
@@ -328,7 +308,6 @@ jobs:
             echo "  (survival_stats.json not found)"
           fi
 
-      # НОВОЕ: Вывод статистики цензурной устойчивости.
       - name: Show censorship resistance summary
         if: always()
         run: |
@@ -404,8 +383,6 @@ jobs:
               print(f'  ⚠️ Could not read history: {e}')
           "
 
-      # НОВОЕ: Валидация качества перед коммитом.
-      # Если пайплайн выдал 0 конфигов или все score < 10 — не коммитим мусор.
       - name: Validate output quality
         id: validate
         run: |
@@ -435,24 +412,15 @@ jobs:
             echo "   and the 'pipeline-debug-log' artifact for details."
           fi
 
-      # ИСПРАВЛЕНО: history.db НЕ коммитится в публичный репозиторий.
-      # SQLite-база с историей профилей (серверы, порты, хеши ключей)
-      # раскрывает инфраструктуру прокси в открытом доступе.
-      # Теперь history.db хранится ТОЛЬКО как CI-артефакт + кэш.
       - name: Commit output to repo
         if: steps.check_output.outputs.archive_exists == 'true' && steps.validate.outputs.quality_ok == 'true'
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-
-          # Коммитим только выходные файлы, НЕ history.db
           git add configs/output_archive.txt configs/output_simple.txt configs/parsed_cache.json custom_channels.txt
-
-          # Добавляем статистику если есть
           [ -f "configs/verification_stats.json" ] && git add configs/verification_stats.json
           [ -f "configs/survival_stats.json" ] && git add configs/survival_stats.json
           [ -f "configs/censorship_stats.json" ] && git add configs/censorship_stats.json
-
           if git diff --staged --quiet; then
             echo "✅ No changes to commit"
           else
@@ -466,8 +434,6 @@ jobs:
             echo "✅ Committed updated files to repository"
           fi
 
-      # ИСПРАВЛЕНО: history.db и survival_states.json — только как артефакты.
-      # Не в git (безопасность), но доступны для скачивания и кэшируются.
       - name: Upload all artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -507,9 +473,6 @@ jobs:
       - name: Cleanup temporary files
         if: always()
         run: |
-          # Удаляем временные Bloom-шарды (кэшируются отдельно)
           find . -name "bloom_shards" -type d -exec rm -rf {} \; 2>/dev/null || true
-          # Удаляем старые логи
           find logs -name "*.log" -type f -mtime +7 -delete 2>/dev/null || true
-          # Удаляем временный лог пайплайна
           rm -f pipeline_run.log 2>/dev/null || true
