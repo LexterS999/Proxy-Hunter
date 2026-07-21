@@ -2,8 +2,8 @@ name: Proxy-Hunter
 
 on:
   schedule:
-    - cron: '0 */5 * * *'
-  workflow_dispatch:
+    - cron: '0 */5 * * *'          # каждые 5 часов
+  workflow_dispatch:                # ручной запуск
 
 jobs:
   run-pipeline:
@@ -36,7 +36,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y unzip jq   # jq необходим для install.sh при получении версии Xray
+          sudo apt-get install -y unzip jq
 
       - name: Install Python dependencies
         run: |
@@ -48,6 +48,7 @@ jobs:
         run: |
           mkdir -p configs logs assets bloom_shards
 
+      # ===== Кэширование =====
       - name: Cache SQLite database
         uses: actions/cache@v4
         with:
@@ -56,6 +57,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-history-db-
 
+      - name: Cache Bloom shards
+        uses: actions/cache@v4
+        with:
+          path: bloom_shards
+          key: ${{ runner.os }}-bloom-shards-${{ hashFiles('bloom_shards/**') }}
+          restore-keys: |
+            ${{ runner.os }}-bloom-shards-
+
+      # ===== Подготовка файлов =====
       - name: Ensure required files exist
         run: |
           touch configs/output_archive.txt
@@ -83,12 +93,14 @@ jobs:
         run: |
           bash install.sh --install-xray-only
 
+      # ===== Основной запуск =====
       - name: Run optimized pipeline
         id: pipeline
         continue-on-error: true
         run: |
-          time python src/pipeline_optimized.py
+          time python src/pipeline_optimized.py 2>&1 | tee pipeline_debug.log
 
+      # ===== Удаление неактивных каналов =====
       - name: Remove inactive channels from custom_channels.txt
         run: |
           python -c "
@@ -165,6 +177,7 @@ jobs:
           print(f'Removed {removed_count} inactive channels')
           "
 
+      # ===== Проверка выходных файлов =====
       - name: Check output files
         id: check_output
         run: |
@@ -196,6 +209,7 @@ jobs:
             echo "parsed_cache_exists=false" >> $GITHUB_OUTPUT
           fi
 
+      # ===== Краткая статистика =====
       - name: Show quality summary
         if: steps.check_output.outputs.history_db_exists == 'true'
         run: |
@@ -235,6 +249,7 @@ jobs:
               print(f'  ⚠️ Could not read history: {e}')
           "
 
+      # ===== Статус шага pipeline =====
       - name: Show pipeline step status
         run: |
           echo "Pipeline step outcome: ${{ steps.pipeline.outcome }}"
@@ -243,6 +258,7 @@ jobs:
             echo "   and the 'pipeline-debug-log' artifact for details."
           fi
 
+      # ===== Загрузка артефактов =====
       - name: Upload all artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -256,6 +272,7 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
+      # ===== Коммит изменений в репозиторий =====
       - name: Commit output to repo
         if: steps.check_output.outputs.archive_exists == 'true'
         run: |
@@ -273,6 +290,7 @@ jobs:
             echo "✅ Committed updated files to repository"
           fi
 
+      # ===== Логи при ошибке =====
       - name: Upload logs (if pipeline failed)
         if: always() && steps.pipeline.outcome == 'failure'
         uses: actions/upload-artifact@v4
@@ -285,12 +303,14 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
+      # ===== Принудительный провал, если pipeline не удался =====
       - name: Fail job if pipeline failed
         if: steps.pipeline.outcome == 'failure'
         run: |
           echo "❌ 'Run optimized pipeline' step failed. Failing the job after diagnostics were uploaded."
           exit 1
 
+      # ===== Очистка старых логов =====
       - name: Cleanup old artifacts (optional)
         if: always()
         run: |
