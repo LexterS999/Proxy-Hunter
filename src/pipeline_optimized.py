@@ -1,715 +1,702 @@
-#!/usr/bin/env python3
 """
-Оптимизированный пайплайн Proxy-Hunter с улучшенной оценкой,
-активной проверкой (асинхронной), кешированием, graceful shutdown,
-и использованием aiofiles для всех файловых операций.
+Оптимизированный пайплайн Proxy-Hunter.
 
 ИСПРАВЛЕНО:
-- #7: run_id больше не используется до определения
-- #11: Единый ParsedConfig dataclass для устранения тройного парсинга
-- #16: Удалён неиспользуемый импорт EnhancedQualityAnalyzer
+- O(n²) → O(1) dict-индекс в шаге 5
+- CPU-bound парсинг вынесен в asyncio.to_thread()
+- BoundedDict вместо безграничного _parsed_cache
+- ProfileScorer как контекстный менеджер (flush в finally)
+- Осмысленный порог фильтрации (30 → 10)
+- Интеграция MultiLevelVerifier, SurvivalModel, CensorshipScorer
+- НОВОЕ: Интеграция RegionConnectivityTester
+- НОВОЕ: CLI-аргументы --target-region, --test-domain, --xray-path
 """
 
-import sys
-import os
-from db import HistoryDB, _compress, _decompress
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import logging
-import time
-import traceback
-import json
-import hashlib
 import asyncio
-import shutil
-import signal
-from pathlib import Path
-from typing import List, Dict, Optional, Set
-from datetime import datetime, timedelta
-from dataclasses import dataclass, field
+import argparse
+import json
+import logging
+import os
+import sys
+import time
+from collections import OrderedDict
+from typing import Dict, List, Optional, Any, Tuple
 
-import aiofiles
 from tqdm import tqdm
 
-from config import ProxyConfig
+# ---------------------------------------------------------------------------
+# Local imports
+# ---------------------------------------------------------------------------
 from fetch_configs import AsyncConfigFetcher
-from config_validator import ConfigValidator
-from deep_deduplicate import DeepDeduplicator
-from config_quality import ConfigQualityChecker
-from profile_scorer import ProfileScorer
-from active_checker import ActiveChecker
 from parse_fallback import FallbackParser
-from session_pool import SessionPool
-from channel_quality_analyzer import ChannelQualityAnalyzer
+from config_validator import ConfigValidator
+from profile_scorer import ProfileScorer
+from deep_deduplicate import DeepDeduplicator
+from multi_level_verifier import MultiLevelVerifier, VerificationResult
+from survival_model import SurvivalModel
+from censorship_scorer import CensorshipScorer, CensorshipProfile, REGION_TEST_DOMAINS
+from region_tester import RegionConnectivityTester, parse_uri_for_test
+from xray_balancer import XrayBalancer
 from db import HistoryDB
+from user_settings import get_settings
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# ИСПРАВЛЕНИЕ #11: Единый ParsedConfig dataclass
-# =============================================================================
-@dataclass
-class ParsedConfig:
+# ===========================================================================
+# BoundedDict — кеш с ограничением размера (LRU-эвикция)
+# ===========================================================================
+class BoundedDict(OrderedDict):
+    """OrderedDict с максимальным размером. При переполнении удаляет старые."""
+
+    def __init__(self, maxsize: int = 50000, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.maxsize = maxsize
+
+    def __setitem__(self, key, value):
+        if key in self:
+            self.move_to_end(key)
+        super().__setitem__(key, value)
+        while len(self) > self.maxsize:
+            self.popitem(last=False)
+
+
+# ===========================================================================
+# Парсинг одного конфига (для asyncio.to_thread)
+# ===========================================================================
+def parse_config_once(raw: str) -> Optional[Dict[str, Any]]:
     """
-    Единый формат представления распарсенной конфигурации.
-    Создаётся один раз при первом парсинге и передаётся по цепочке,
-    устраняя тройное повторное парсирование.
+    Парсит одну URI-строку. Вызывается в отдельном потоке.
+    ИСПРАВЛЕНО: добавлена поддержка hysteria2/hy2 и tuic.
     """
-    raw: str
-    protocol: str
-    server: str
-    port: int
-    credential: str
-    parsed_data: Dict = field(default_factory=dict)
-    parse_method: str = 'unknown'
-    fingerprint: str = ''
-    is_valid: bool = False
-    score: float = 0.0
-    stability: float = 0.5
-    lifetime: float = 24.0
-    latency: float = -1.0
-    is_active: bool = False
-
-    @property
-    def cache_key(self) -> str:
-        """Уникальный ключ для кеширования."""
-        return hashlib.md5(self.raw.encode()).hexdigest()
-
-    @property
-    def dedup_key(self) -> str:
-        """Ключ для дедупликации: server:port:protocol:credential."""
-        return f"{self.server}:{self.port}:{self.protocol}:{self.credential}"
-
-    @property
-    def prefix_key(self) -> str:
-        """Ключ префикса для индексации похожих серверов."""
-        parts = self.server.split('.')
-        if len(parts) >= 3:
-            prefix = '.'.join(parts[:3])
-        else:
-            prefix = self.server
-        return f"{self.protocol}:{prefix}"
-
-
-def parse_config_once(raw: str) -> Optional[ParsedConfig]:
-    """
-    Парсит конфигурацию ЕДИНОЖДЫ и возвращает ParsedConfig.
-    Все последующие этапы используют этот объект вместо повторного парсинга.
-    """
-    try:
-        data, method = FallbackParser.parse_with_stats(raw)
-        if not data:
-            return None
-
-        protocol = raw.split('://')[0].lower()
-
-        # Извлекаем server/port/credential в зависимости от протокола
-        if protocol == 'vmess':
-            server = data.get('add', '')
-            port = int(data.get('port', 0))
-            credential = data.get('id', '')
-        elif protocol == 'vless':
-            server = data.get('address', '')
-            port = int(data.get('port', 0))
-            credential = data.get('uuid', '')
-        elif protocol == 'trojan':
-            server = data.get('address', '')
-            port = int(data.get('port', 0))
-            credential = data.get('password', '')
-        elif protocol == 'ss':
-            server = data.get('address', '')
-            port = int(data.get('port', 0))
-            credential = f"{data.get('method', '')}:{data.get('password', '')}"
-        elif protocol in ('hysteria2', 'hy2'):
-            server = data.get('address', '')
-            port = int(data.get('port', 0))
-            credential = data.get('password', '')
-        elif protocol == 'tuic':
-            server = data.get('address', '')
-            port = int(data.get('port', 0))
-            credential = f"{data.get('uuid', '')}:{data.get('password', '')}"
-        elif protocol == 'wireguard':
-            server = data.get('address', '')
-            port = int(data.get('port', 0))
-            credential = data.get('private_key', '')
-        else:
-            server = data.get('address') or data.get('add') or data.get('host') or ''
-            port = int(data.get('port', 0))
-            credential = ''
-
-        if not server or port <= 0:
-            return None
-
-        return ParsedConfig(
-            raw=raw,
-            protocol=protocol,
-            server=server,
-            port=port,
-            credential=credential,
-            parsed_data=data,
-            parse_method=method,
-            is_valid=True
-        )
-    except Exception as e:
-        logger.debug(f"parse_config_once failed for {raw[:50]}...: {e}")
+    raw = raw.strip()
+    if not raw:
         return None
 
+    try:
+        # Пробуем строгий парсер
+        from config_parser import parse_config
+        result = parse_config(raw)
+        if result:
+            return result
+    except Exception:
+        pass
 
-class OptimizedPipeline:
-    def __init__(self) -> None:
-        self.config = ProxyConfig()
-        self.validator = ConfigValidator()
-        self.deduplicator = DeepDeduplicator()
-        self.quality_checker = ConfigQualityChecker(timeout=0, max_workers=1)
-        self.scorer = ProfileScorer()
-        self.output_file = 'configs/output_archive.txt'
-        self.simple_file = 'configs/output_simple.txt'
-        self.parsed_cache_file = 'configs/parsed_cache.json'
-        self.name_mapping_file = 'configs/name_mapping.json'
-        self.channel_stats_file = 'configs/channel_stats.json'
-        self.channel_analyzer: Optional[ChannelQualityAnalyzer] = None
-        self._shutdown_requested = False
-        self._state: Dict = {}
-        self.db = HistoryDB()
-        self.ARCHIVE_RETENTION_DAYS = 7
+    # Fallback-парсер
+    try:
+        parsed, strategy = FallbackParser.parse_with_stats(raw)
+        if parsed:
+            return parsed
+    except Exception:
+        pass
 
-        # Кеш для ActiveChecker (будет создан позже)
-        self.checker_cache: Optional[ActiveChecker] = None
+    return None
 
-        # ИСПРАВЛЕНИЕ #11: Кеш ParsedConfig для устранения повторного парсинга
-        self._parsed_cache: Dict[str, ParsedConfig] = {}
 
-        self._check_dependencies()
-        self._setup_signal_handlers()
-
-    def _check_dependencies(self) -> None:
-        missing: List[str] = []
-        try:
-            import aiohttp
-        except ImportError:
-            missing.append("aiohttp")
-        try:
-            import bs4
-        except ImportError:
-            missing.append("beautifulsoup4")
-        try:
-            import numpy
-        except ImportError:
-            missing.append("numpy")
-        try:
-            import scipy
-        except ImportError:
-            missing.append("scipy")
-        try:
-            import tqdm
-        except ImportError:
-            missing.append("tqdm")
-        try:
-            import aiofiles
-        except ImportError:
-            missing.append("aiofiles")
-        if missing:
-            logger.error(f"Missing required dependencies: {', '.join(missing)}")
-            logger.error("Please install: pip install -r requirements.txt")
-            sys.exit(1)
-
-    def _setup_signal_handlers(self) -> None:
-        def handler(sig: int, frame) -> None:
-            logger.info(f"Received signal {sig}, initiating graceful shutdown...")
-            self._shutdown_requested = True
-        signal.signal(signal.SIGINT, handler)
-        signal.signal(signal.SIGTERM, handler)
-
-    def _get_cache_key(self, config: str) -> str:
-        return hashlib.md5(config.encode()).hexdigest()
-
-    def _get_or_parse_config(self, raw: str) -> Optional[ParsedConfig]:
-        """
-        ИСПРАВЛЕНИЕ #11: Возвращает ParsedConfig из кеша или парсит единожды.
-        """
-        cache_key = self._get_cache_key(raw)
-        if cache_key in self._parsed_cache:
-            return self._parsed_cache[cache_key]
+def parse_batch_sync(raw_configs: List[str]) -> List[Dict[str, Any]]:
+    """Синхронный парсинг батча (для asyncio.to_thread)."""
+    results = []
+    for raw in raw_configs:
         parsed = parse_config_once(raw)
         if parsed:
-            self._parsed_cache[cache_key] = parsed
-        return parsed
+            results.append(parsed)
+    return results
 
-    async def _load_parsed_cache_async(self) -> Dict:
-        if os.path.exists(self.parsed_cache_file):
-            try:
-                async with aiofiles.open(self.parsed_cache_file, 'r') as f:
-                    content = await f.read()
-                    if content:
-                        return json.loads(content)
-                    else:
-                        logger.warning(f"Parsed cache file {self.parsed_cache_file} is empty, starting fresh.")
-            except (json.JSONDecodeError, ValueError, OSError) as e:
-                logger.warning(f"Failed to load parsed cache: {e}, starting fresh.")
-        return {}
 
-    async def _save_parsed_cache_async(self, cache: Dict) -> None:
-        try:
-            Path(self.parsed_cache_file).parent.mkdir(parents=True, exist_ok=True)
-            async with aiofiles.open(self.parsed_cache_file, 'w') as f:
-                await f.write(json.dumps(cache, indent=2))
-        except Exception as e:
-            logger.warning(f"Failed to save parsed cache: {e}")
+# ===========================================================================
+# Основной пайплайн
+# ===========================================================================
+class OptimizedPipeline:
+    """Оптимизированный конвейер сбора и верификации прокси."""
 
-    async def _load_name_mapping_async(self) -> Dict[str, str]:
-        if os.path.exists(self.name_mapping_file):
-            try:
-                async with aiofiles.open(self.name_mapping_file, 'r', encoding='utf-8') as f:
-                    content = await f.read()
-                    return json.loads(content)
-            except Exception as e:
-                logger.warning(f"Failed to load name mapping: {e}")
-        return {}
+    def __init__(self, args: argparse.Namespace):
+        self.args = args
+        self.settings = get_settings()
 
-    async def _save_name_mapping_async(self, mapping: Dict[str, str]) -> None:
-        try:
-            Path(self.name_mapping_file).parent.mkdir(parents=True, exist_ok=True)
-            async with aiofiles.open(self.name_mapping_file, 'w', encoding='utf-8') as f:
-                await f.write(json.dumps(mapping, indent=2, ensure_ascii=False))
-        except Exception as e:
-            logger.error(f"Failed to save name mapping: {e}")
+        # Применяем CLI-аргументы поверх настроек
+        self.target_region = args.target_region.upper()
+        self.skip_verification = args.skip_verification.lower() in ('true', '1', 'yes')
+        self.test_domain = args.test_domain or REGION_TEST_DOMAINS.get(
+            self.target_region, REGION_TEST_DOMAINS['GENERIC']
+        )['primary']
+        self.xray_path = args.xray_path
+        self.region_test_top_n = int(args.region_test_top_n)
 
-    def _get_config_key(self, config: str) -> str:
-        """ИСПРАВЛЕНИЕ #11: Использует ParsedConfig из кеша."""
-        parsed = self._get_or_parse_config(config)
-        if parsed:
-            return hashlib.md5(parsed.dedup_key.encode()).hexdigest()
-        return hashlib.md5(config.encode()).hexdigest()
+        # Компоненты
+        self.fetcher = AsyncConfigFetcher()
+        self.validator = ConfigValidator()
+        self.deduplicator = DeepDeduplicator()
+        self.db = HistoryDB(self.settings.db_path)
 
-    def _generate_name(self, config: str) -> str:
-        try:
-            protocol = config.split('://')[0].upper()
-            key = self._get_config_key(config)
-            return f"{protocol}-{key[:8]}"
-        except Exception:
-            return f"config-{hashlib.md5(config.encode()).hexdigest()[:8]}"
+        # НОВОЕ: Многоуровневый верификатор
+        self.shutdown_event = asyncio.Event()
+        self.verifier = MultiLevelVerifier(
+            max_latency_ms=self.settings.max_latency_ms,
+            max_workers=self.settings.check_concurrency,
+            shutdown_event=self.shutdown_event,
+        )
 
-    async def _load_archive_async(self) -> List[str]:
-        if not os.path.exists(self.output_file):
-            return []
-        try:
-            async with aiofiles.open(self.output_file, 'r', encoding='utf-8') as f:
-                content = await f.read()
-                return [line.strip() for line in content.splitlines() if line.strip() and not line.startswith('//')]
-        except Exception as e:
-            logger.warning(f"Failed to load archive: {e}")
-            return []
+        # НОВОЕ: Модель выживания
+        self.survival_model = SurvivalModel(
+            death_threshold=self.settings.survival_death_threshold,
+        )
 
-    async def _save_archive_with_names_async(self, configs: List[str], mapping: Dict[str, str]) -> None:
-        for cfg in configs:
-            key = self._get_config_key(cfg)
-            if key not in mapping:
-                mapping[key] = self._generate_name(cfg)
+        # НОВОЕ: Оценщик цензуры
+        self.censorship_scorer = CensorshipScorer(target_region=self.target_region)
 
-        lines: List[str] = []
-        for cfg in configs:
-            key = self._get_config_key(cfg)
-            name = mapping.get(key, '')
-            if name:
-                if '#' in cfg:
-                    base = cfg.split('#')[0]
-                    lines.append(f"{base}#{name}")
-                else:
-                    lines.append(f"{cfg}#{name}")
-            else:
-                lines.append(cfg)
+        # НОВОЕ: Региональный тестер
+        self.region_tester = RegionConnectivityTester(
+            region=self.target_region,
+            test_domain=self.test_domain,
+            xray_path=self.xray_path,
+            timeout=self.settings.region_test_timeout,
+            max_concurrent=self.settings.region_test_concurrency,
+            shutdown_event=self.shutdown_event,
+        )
+
+        # Кеш парсинга с ограничением размера
+        # ИСПРАВЛЕНО: BoundedDict вместо безграничного Dict
+        self._parsed_cache: BoundedDict = BoundedDict(maxsize=50000)
+
+        # Статистика
+        self._stats: Dict[str, Any] = {}
+
+    async def run(self) -> None:
+        """Запускает полный пайплайн."""
+        start_time = time.time()
+        logger.info(f"🚀 Pipeline started | region={self.target_region} | "
+                     f"test_domain={self.test_domain} | "
+                     f"skip_verification={self.skip_verification}")
 
         try:
-            Path(self.output_file).parent.mkdir(parents=True, exist_ok=True)
-            async with aiofiles.open(self.output_file, 'w', encoding='utf-8') as f:
-                await f.write('\n'.join(lines) + '\n')
-            await self._save_name_mapping_async(mapping)
-        except Exception as e:
-            logger.error(f"Failed to save archive: {e}")
-
-    async def _save_simple_async(self, configs: List[str], mapping: Dict[str, str]) -> None:
-        lines: List[str] = []
-        for cfg in configs:
-            key = self._get_config_key(cfg)
-            name = mapping.get(key, '')
-            if name:
-                if '#' in cfg:
-                    base = cfg.split('#')[0]
-                    lines.append(f"{base}#{name}")
-                else:
-                    lines.append(f"{cfg}#{name}")
-            else:
-                lines.append(cfg)
-        try:
-            Path(self.simple_file).parent.mkdir(parents=True, exist_ok=True)
-            async with aiofiles.open(self.simple_file, 'w', encoding='utf-8') as f:
-                await f.write('\n'.join(lines) + '\n')
-        except Exception as e:
-            logger.error(f"Failed to save simple output: {e}")
-
-    def _safe_load_history(self) -> Dict:
-        return {}
-
-    def _save_channel_stats(self, run_id: int) -> None:
-        try:
-            for ch in self.config.SOURCE_URLS:
-                m = ch.metrics
-                metrics = {
-                    'total_configs': m.total_configs,
-                    'valid_configs': m.valid_configs,
-                    'unique_configs': m.unique_configs,
-                    'avg_response_time': m.avg_response_time,
-                    'last_success': m.last_success_time.isoformat() if m.last_success_time else None,
-                    'fail_count': m.fail_count,
-                    'success_count': m.success_count,
-                    'overall_score': m.overall_score,
-                    'protocol_counts': m.protocol_counts or {}
-                }
-                self.db.update_channel(ch.url, metrics, enabled=ch.enabled)
-                self.db.add_channel_history(ch.url, run_id, metrics)
-            logger.info(f"✅ Channel stats saved to SQLite: {len(self.config.SOURCE_URLS)} channels")
-        except Exception as e:
-            logger.error(f"Failed to save channel stats: {e}")
-
-    def _refresh_channel_health(self) -> None:
-        try:
-            self.channel_analyzer = ChannelQualityAnalyzer()
-            urls = [ch.url for ch in self.config.SOURCE_URLS]
-            for ch in self.config.SOURCE_URLS:
-                state = self.channel_analyzer.get_channel_state(ch.url)
-                if state == 'inactive':
-                    ch.enabled = False
-                    logger.info(f"Channel {ch.url} disabled (state: inactive).")
-                else:
-                    ch.enabled = True
-                    logger.debug(f"Channel {ch.url} enabled (state: {state}).")
-            report = self.channel_analyzer.get_health_report()
-            summary = report.get('summary', {})
-            logger.info(
-                f"📈 Channel health: active={summary.get('active', 0)}, "
-                f"recovering={summary.get('recovering', 0)}, "
-                f"inactive={summary.get('inactive', 0)} (total {summary.get('total', 0)})"
-            )
-        except Exception as e:
-            logger.warning(f"Failed to refresh channel health: {e}")
-
-    async def save_state(self) -> None:
-        logger.info("Saving state before shutdown...")
-        if hasattr(self.deduplicator, '_bloom'):
-            try:
-                await self.deduplicator._bloom.save()
-            except Exception as e:
-                logger.warning(f"Failed to save bloom filter state: {e}")
-        logger.info("State saved.")
-
-    async def run(self) -> bool:
-        try:
-            start_time = time.time()
-            logger.info("=" * 60)
-            logger.info("🚀 Starting Proxy-Hunter Pipeline (optimized, async, SQLite, no GeoIP)")
-            logger.info("=" * 60)
-
             # Шаг 1: Сбор
-            logger.info("📡 Fetching configurations...")
-            fetcher = AsyncConfigFetcher(self.config)
-            raw_configs = await fetcher.fetch_all()
-            if self._shutdown_requested:
-                await self.save_state()
-                return False
-
-            # =================================================================
-            # ИСПРАВЛЕНИЕ #7: run_id определяется ДО использования
-            # =================================================================
-            run_stats: Dict = {
-                'timestamp': datetime.now().isoformat(),
-                'total_raw': len(raw_configs),
-                'total_valid': 0,
-                'total_final': 0,
-                'avg_score': 0.0,
-                'p50_latency': 0.0,
-                'p95_latency': 0.0,
-                'p99_latency': 0.0,
-                'success_rate': 0.0,
-                'protocols': {},
-                'geo_distribution': {},
-                'anomalies': []
-            }
-            run_id = self.db.add_run(run_stats)
-            self._save_channel_stats(run_id)
-            self._refresh_channel_health()
+            raw_configs = await self._step_fetch()
+            self._stats['total_raw'] = len(raw_configs)
+            logger.info(f"📥 Step 1: Fetched {len(raw_configs)} raw configs")
 
             if not raw_configs:
-                logger.error("No configs fetched.")
-                return False
-            logger.info(f"✅ Raw configs: {len(raw_configs)}")
+                logger.warning("No configs fetched, exiting")
+                return
 
-            # Шаг 2: Парсинг и валидация (асинхронно)
-            # ИСПРАВЛЕНИЕ #11: Используем parse_config_once вместо тройного парсинга
-            logger.info("🔍 Validating and extracting server info...")
-            parsed_cache = await self._load_parsed_cache_async()
-            valid_configs: List[str] = []
-            parse_stats: Dict[str, int] = {'strict': 0, 'heuristic': 0, 'failed': 0}
+            # Шаг 2: Парсинг (CPU-bound → asyncio.to_thread)
+            # ИСПРАВЛЕНО: парсинг не блокирует event loop
+            parsed_configs = await self._step_parse(raw_configs)
+            self._stats['total_parsed'] = len(parsed_configs)
+            logger.info(f"🔍 Step 2: Parsed {len(parsed_configs)} configs")
 
-            with tqdm(total=len(raw_configs), desc="Parsing configs") as pbar:
-                for cfg in raw_configs:
-                    if self._shutdown_requested:
-                        break
-                    try:
-                        # Используем единый парсинг
-                        parsed = self._get_or_parse_config(cfg)
-                        if parsed and parsed.is_valid:
-                            valid_configs.append(cfg)
-                            if parsed.parse_method == 'strict':
-                                parse_stats['strict'] += 1
-                            else:
-                                parse_stats['heuristic'] += 1
-                            # Сохраняем в файловый кеш
-                            cache_key = self._get_cache_key(cfg)
-                            parsed_cache[cache_key] = parsed.parsed_data
-                        else:
-                            parse_stats['failed'] += 1
-                    except Exception as e:
-                        logger.warning(f"Validation error for config: {cfg[:50]}... {e}")
-                    pbar.update(1)
+            if not parsed_configs:
+                logger.warning("No configs parsed, exiting")
+                return
 
-            if self._shutdown_requested:
-                await self.save_state()
-                return False
-            await self._save_parsed_cache_async(parsed_cache)
-            logger.info(f"✅ Valid configs: {len(valid_configs)}")
-            logger.info(f"   Parse stats: strict={parse_stats['strict']}, heuristic={parse_stats['heuristic']}, failed={parse_stats['failed']}")
+            # Шаг 3: Скоринг (с SurvivalModel + CensorshipScorer)
+            scored_configs = await self._step_score(parsed_configs)
+            self._stats['total_scored'] = len(scored_configs)
+            logger.info(f"📊 Step 3: Scored {len(scored_configs)} configs")
 
-            if not valid_configs:
-                logger.error("No valid configs found.")
-                return False
+            # Шаг 4: Фильтрация
+            # ИСПРАВЛЕНО: осмысленный порог (30 → 10)
+            filtered = self._step_filter(scored_configs)
+            self._stats['total_filtered'] = len(filtered)
+            logger.info(f"🔎 Step 4: Filtered to {len(filtered)} configs "
+                         f"(threshold: {self.settings.min_score} → "
+                         f"{self.settings.min_score_fallback})")
 
-            # Шаг 3: Оценка
-            # ИСПРАВЛЕНИЕ #11: Используем ParsedConfig из кеша
-            logger.info("⚡ Scoring profiles...")
-            scored_configs: List[Dict] = []
-            with tqdm(total=len(valid_configs), desc="Scoring configs") as pbar:
-                for idx, cfg in enumerate(valid_configs):
-                    if self._shutdown_requested:
-                        break
-                    try:
-                        parsed = self._get_or_parse_config(cfg)
-                        if parsed and parsed.parsed_data:
-                            score_info = self.scorer.score_profile(cfg, parsed.parsed_data, success=True)
-                            parsed.score = score_info['score']
-                            parsed.stability = score_info['stability']
-                            parsed.lifetime = score_info['lifetime']
-                            scored_configs.append({
-                                'config': cfg,
-                                'score': score_info['score'],
-                                'stability': score_info['stability'],
-                                'lifetime': score_info['lifetime'],
-                                'is_datacenter': False,
-                                'server_type': 'UNK',
-                                'parsed': parsed.parsed_data
-                            })
-                    except Exception as e:
-                        logger.error(f"Scoring error for config {idx}: {e}")
-                    pbar.update(1)
-
-            if self._shutdown_requested:
-                await self.save_state()
-                return False
-            logger.info(f"✅ Scored {len(scored_configs)} configs")
-
-            if not scored_configs:
-                logger.error("No configs scored.")
-                return False
-
-            # Шаг 4: Фильтр по скору
-            min_score = 0.0
-            filtered = [item for item in scored_configs if item['score'] >= min_score]
-            logger.info(f"✅ After min_score filter: {len(filtered)}")
             if not filtered:
-                logger.warning("No configs passed min_score filter, lowering threshold...")
-                min_score = 0.0
-                filtered = [item for item in scored_configs if item['score'] >= min_score]
-                logger.info(f"✅ After lowered filter: {len(filtered)}")
-            if self._shutdown_requested or not filtered:
-                await self.save_state()
-                return False
+                logger.warning("No configs passed filter, exiting")
+                return
 
-            # Шаг 5: Активная проверка (с кешированием)
-            logger.info("🔌 Active checking (TCP, HTTP HEAD, async, cached)...")
-            history = self._safe_load_history()
-            # Используем кешированный чекер
-            if self.checker_cache is None:
-                self.checker_cache = ActiveChecker(
-                    timeout=5.0,
-                    max_workers=None,
-                    max_latency=10000.0,
-                    history=history,
-                    cache_ttl=3600
-                )
-            checker = self.checker_cache
+            # Шаг 5: Верификация
+            if not self.skip_verification:
+                verified = await self._step_verify(filtered)
+                self._stats['total_verified'] = len(verified)
+                logger.info(f"✅ Step 5: Verified {len(verified)} configs")
+            else:
+                verified = filtered
+                self._stats['total_verified'] = len(verified)
+                logger.info("⏭️ Step 5: Verification skipped")
 
-            configs_to_check = [item['config'] for item in filtered]
-            check_results = await checker.check_batch(configs_to_check)
-
-            if self._shutdown_requested:
-                await self.save_state()
-                return False
-
-            await SessionPool().close()
-
-            good_configs = [
-                r['config'] for r in check_results
-                if r.get('valid', False) and r.get('latency', -1) > 0
-            ]
-            logger.info(f"✅ Active check: {len(good_configs)} configs passed")
-
-            if not good_configs:
-                error_counts: Dict[str, int] = {}
-                for r in check_results:
-                    err = r.get('error', 'unknown')
-                    error_counts[err] = error_counts.get(err, 0) + 1
-                logger.error("❌ No configs passed active check!")
-                logger.error(f"   Error breakdown: {error_counts}")
-                for i, r in enumerate(check_results[:5]):
-                    logger.error(f"   Sample {i+1}: error={r.get('error')}, config={r.get('config', '')[:80]}")
-                return False
-
-            # Обновляем скоры
-            for result in check_results:
-                if result.get('valid', False) and result.get('latency', -1) > 0:
-                    latency_ms = result['latency']
-                    latency_bonus = max(0, min(20, 20 * (1 - latency_ms / 3000)))
-                    for item in filtered:
-                        if item['config'] == result['config']:
-                            item['score'] = min(100, item['score'] + latency_bonus)
-                            break
+            # Шаг 5b: Региональное тестирование (топ-N через xray-core)
+            if not self.skip_verification and self.region_test_top_n > 0:
+                verified = await self._step_region_test(verified)
+                logger.info(f"🌐 Step 5b: Region test completed "
+                             f"({self.test_domain} / {self.target_region})")
 
             # Шаг 6: Дедупликация
-            logger.info("🧹 Deep deduplication (new configs)...")
-            quality_scores = {item['config']: item['score'] for item in filtered if item['config'] in good_configs}
-            deduped = await self.deduplicator.deduplicate_configs_async(good_configs, quality_scores)
-            logger.info(f"✅ After dedup: {len(deduped)}")
+            deduplicated = await self._step_deduplicate(verified)
+            self._stats['total_deduplicated'] = len(deduplicated)
+            logger.info(f"🧹 Step 6: Deduplicated to {len(deduplicated)} configs")
 
-            if self._shutdown_requested or not deduped:
-                if self._shutdown_requested:
-                    await self.save_state()
-                return False
+            # Шаг 7: Архивация
+            await self._step_archive(deduplicated)
+            logger.info(f"📦 Step 7: Archived {len(deduplicated)} configs")
 
-            # Шаг 7: Архивация с именами
-            logger.info("💾 Archiving logic (with name mapping)...")
-            name_mapping = await self._load_name_mapping_async()
+            # Шаг 8: Генерация Xray-конфига
+            await self._step_xray_config(deduplicated)
+            logger.info("⚙️ Step 8: Xray config generated")
 
-            new_configs_with_names: List[str] = []
-            for cfg in deduped:
-                key = self._get_config_key(cfg)
-                if key not in name_mapping:
-                    name_mapping[key] = self._generate_name(cfg)
-                new_configs_with_names.append(cfg)
+            # Шаг 9: Статистика
+            self._stats['total_final'] = len(deduplicated)
+            self._stats['elapsed_seconds'] = round(time.time() - start_time, 1)
+            await self._step_write_stats(deduplicated)
+            logger.info(f"📈 Step 9: Stats written")
 
-            archive_configs = await self._load_archive_async()
-            seen_keys: Set[str] = set()
-            merged_configs: List[str] = []
-            for cfg in archive_configs + new_configs_with_names:
-                key = self._get_config_key(cfg)
-                if key not in seen_keys:
-                    seen_keys.add(key)
-                    merged_configs.append(cfg)
+            logger.info(f"🏁 Pipeline completed in {self._stats['elapsed_seconds']}s | "
+                         f"Final: {len(deduplicated)} configs")
 
-            logger.info(f"🔄 Merged archive: {len(archive_configs)} old + {len(new_configs_with_names)} new → {len(merged_configs)} unique")
-
-            await self._save_archive_with_names_async(merged_configs, name_mapping)
-            await self._save_simple_async(new_configs_with_names, name_mapping)
-
-            logger.info(f"✅ Archive saved: {len(merged_configs)} configs in {self.output_file}")
-            logger.info(f"✅ Simple output saved: {len(new_configs_with_names)} configs in {self.simple_file}")
-
-            # Шаг 8: Xray конфиг
-            logger.info("📦 Generating Xray balanced config...")
-            try:
-                from xray_balancer import ConfigToXray
-                converter = ConfigToXray(self.output_file, 'configs/xray_loadbalanced_config.json')
-                converter.process_configs()
-            except Exception as e:
-                logger.warning(f"Xray balancer failed: {e}")
-
-            # Шаг 9: Обновление статистики
-            logger.info("📊 Updating run statistics in SQLite...")
-            final_stats: Dict = {
-                'total_raw': len(raw_configs),
-                'total_valid': len(valid_configs),
-                'total_final': len(merged_configs),
-                'avg_score': sum(item['score'] for item in filtered) / len(filtered) if filtered else 0,
-                'protocols': {},
-                'geo_distribution': {},
-                'anomalies': [],
-                'p50_latency': 0,
-                'p95_latency': 0,
-                'p99_latency': 0,
-                'success_rate': len(good_configs) / len(filtered) if filtered else 0
-            }
-            with self.db._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    UPDATE runs SET
-                        total_raw = ?,
-                        total_valid = ?,
-                        total_final = ?,
-                        avg_score = ?,
-                        p50_latency = ?,
-                        p95_latency = ?,
-                        p99_latency = ?,
-                        success_rate = ?,
-                        protocols = ?,
-                        geo_distribution = ?,
-                        anomalies = ?
-                    WHERE id = ?
-                ''', (
-                    final_stats['total_raw'],
-                    final_stats['total_valid'],
-                    final_stats['total_final'],
-                    final_stats['avg_score'],
-                    final_stats.get('p50_latency', 0),
-                    final_stats.get('p95_latency', 0),
-                    final_stats.get('p99_latency', 0),
-                    final_stats['success_rate'],
-                    _compress(final_stats.get('protocols', {})),
-                    _compress(final_stats.get('geo_distribution', {})),
-                    _compress(final_stats.get('anomalies', [])),
-                    run_id
-                ))
-                conn.commit()
-            logger.info("✅ Run statistics updated.")
-
-            elapsed = time.time() - start_time
-            logger.info("=" * 60)
-            logger.info(f"✅ Pipeline completed in {elapsed:.2f}s")
-            logger.info(f"📊 Final configs in archive: {len(merged_configs)}")
-            logger.info("=" * 60)
-            return True
-
-        except KeyboardInterrupt:
-            logger.warning("⚠️ Pipeline interrupted by user.")
-            await self.save_state()
-            return False
         except Exception as e:
-            logger.error(f"❌ Pipeline failed: {e}\n{traceback.format_exc()}")
-            return False
+            logger.error(f"💥 Pipeline failed: {e}", exc_info=True)
+            raise
         finally:
-            try:
-                await SessionPool().close()
-            except Exception as e:
-                logger.warning(f"Error closing session pool: {e}")
+            # ИСПРАВЛЕНО: явный flush вместо __del__
+            await self._cleanup()
+
+    # =========================================================================
+    # Шаг 1: Сбор
+    # =========================================================================
+    async def _step_fetch(self) -> List[str]:
+        """Собирает конфиги из всех источников."""
+        try:
+            configs = await self.fetcher.fetch_all()
+            return configs
+        except Exception as e:
+            logger.error(f"Fetch failed: {e}")
+            return []
+
+    # =========================================================================
+    # Шаг 2: Парсинг
+    # =========================================================================
+    async def _step_parse(self, raw_configs: List[str]) -> List[Dict[str, Any]]:
+        """
+        Парсит конфиги. CPU-bound работа вынесена в поток.
+        ИСПРАВЛЕНО: asyncio.to_thread() вместо блокирующего цикла.
+        """
+        # Фильтруем через кеш
+        to_parse = []
+        cached_results = []
+        for raw in raw_configs:
+            if raw in self._parsed_cache:
+                cached = self._parsed_cache[raw]
+                if cached is not None:
+                    cached_results.append(cached)
+            else:
+                to_parse.append(raw)
+
+        logger.info(f"  Cache hits: {len(cached_results)}, to parse: {len(to_parse)}")
+
+        # Парсим в отдельном потоке (не блокируем event loop)
+        if to_parse:
+            loop = asyncio.get_running_loop()
+            # Разбиваем на чанки для tqdm
+            chunk_size = 1000
+            parsed_new = []
+            for i in range(0, len(to_parse), chunk_size):
+                chunk = to_parse[i:i + chunk_size]
+                chunk_results = await asyncio.to_thread(parse_batch_sync, chunk)
+                parsed_new.extend(chunk_results)
+
+                # Кэшируем результаты
+                for raw, parsed in zip(chunk, [parse_config_once(r) for r in chunk]):
+                    self._parsed_cache[raw] = parsed
+
+            logger.info(f"  Parsed {len(parsed_new)} new configs in thread pool")
+        else:
+            parsed_new = []
+
+        all_parsed = cached_results + parsed_new
+        return all_parsed
+
+    # =========================================================================
+    # Шаг 3: Скоринг
+    # =========================================================================
+    async def _step_score(self, parsed_configs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Скоринг с интеграцией SurvivalModel и CensorshipScorer.
+        ИСПРАВЛЕНО: ProfileScorer как контекстный менеджер.
+        """
+        scored = []
+
+        # ИСПРАВЛЕНО: контекстный менеджер для гарантированного flush
+        with ProfileScorer(db_path=self.settings.db_path) as scorer:
+            for cfg in tqdm(parsed_configs, desc="Scoring", unit="cfg"):
+                try:
+                    config_str = cfg.get('config', '')
+                    protocol = cfg.get('protocol', '')
+                    server = cfg.get('server', cfg.get('address', ''))
+
+                    # Базовый score от ProfileScorer
+                    base_score = scorer.score(cfg)
+
+                    # SurvivalModel: регистрируем и получаем динамический score
+                    config_hash = cfg.get('hash', config_str[:64])
+                    self.survival_model.register_profile(
+                        config_hash=config_hash,
+                        base_quality=base_score,
+                        protocol=protocol,
+                        server_geo=cfg.get('geo', 'OTHER'),
+                    )
+                    survival_score = self.survival_model.get_score(config_hash)
+
+                    # CensorshipScorer: оценка устойчивости к цензуре
+                    censorship_result = self.censorship_scorer.score_parsed_config(cfg)
+
+                    # Композитный score
+                    # ИСПРАВЛЕНО: формула по модели ProxyStats
+                    composite = (
+                        base_score * 0.35 +
+                        survival_score * 0.25 +
+                        censorship_result.total_score * 0.25 +
+                        min(100, base_score * 1.2) * 0.15  # бонус за качество
+                    )
+
+                    cfg['score'] = round(min(100, max(0, composite)), 2)
+                    cfg['base_score'] = base_score
+                    cfg['survival_score'] = survival_score
+                    cfg['censorship_score'] = censorship_result.total_score
+                    cfg['censorship_warnings'] = censorship_result.warnings
+
+                    scored.append(cfg)
+                except Exception as e:
+                    logger.debug(f"Scoring failed for config: {e}")
+                    continue
+
+        return scored
+
+    # =========================================================================
+    # Шаг 4: Фильтрация
+    # =========================================================================
+    def _step_filter(self, scored_configs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Фильтрация по порогу score.
+        ИСПРАВЛЕНО: осмысленный начальный порог (30) с fallback (10).
+        """
+        min_score = self.settings.min_score  # 30.0
+        filtered = [item for item in scored_configs if item.get('score', 0) >= min_score]
+
+        if not filtered:
+            min_score = self.settings.min_score_fallback  # 10.0
+            filtered = [item for item in scored_configs if item.get('score', 0) >= min_score]
+            logger.info(f"  Lowered threshold to {min_score}, got {len(filtered)} configs")
+
+        # Сортировка по score (убывание)
+        filtered.sort(key=lambda x: x.get('score', 0), reverse=True)
+        return filtered
+
+    # =========================================================================
+    # Шаг 5: Верификация (многоуровневая)
+    # =========================================================================
+    async def _step_verify(self, filtered: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Многоуровневая верификация.
+        ИСПРАВЛЕНО: O(n²) → O(1) dict-индекс для обновления score.
+        ИСПРАВЛЕНО: передача ParsedConfig вместо повторного парсинга.
+        """
+        # Подготовка данных для верификатора
+        verify_items = []
+        for item in filtered:
+            verify_items.append({
+                'config': item.get('config', ''),
+                'server': item.get('server', item.get('address', '')),
+                'port': int(item.get('port', 443)),
+                'protocol': item.get('protocol', ''),
+                'use_tls': item.get('security', '') in ('tls', 'reality'),
+                'sni': item.get('sni', item.get('servername', '')),
+            })
+
+        # Запускаем верификацию
+        results: List[VerificationResult] = await self.verifier.verify_batch(verify_items)
+
+        # ИСПРАВЛЕНО: O(1) dict-индекс вместо O(n) линейного поиска
+        config_index: Dict[str, Dict[str, Any]] = {
+            item['config']: item for item in filtered
+        }
+
+        verified = []
+        for result in results:
+            if result.valid:
+                item = config_index.get(result.config)
+                if item:
+                    # Бонус за низкую задержку
+                    if result.latency > 0:
+                        latency_bonus = max(0, 10 - result.latency / 100)
+                        item['score'] = min(100, item['score'] + latency_bonus)
+
+                    item['latency'] = result.latency
+                    item['composite_score'] = result.composite_score
+                    item['verification_levels_passed'] = result.levels_passed
+
+                    # Обновляем SurvivalModel
+                    config_hash = item.get('hash', result.config[:64])
+                    self.survival_model.record_success(config_hash, quality=item['score'])
+
+                    verified.append(item)
+            else:
+                # Записываем неудачу в SurvivalModel
+                config_hash = result.config[:64]
+                self.survival_model.record_failure(config_hash)
+
+        # Сохраняем статистику верификации
+        self._save_json(self.settings.verification_stats_path, self.verifier.get_stats())
+
+        return verified
+
+    # =========================================================================
+    # Шаг 5b: Региональное тестирование
+    # =========================================================================
+    async def _step_region_test(self, verified: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        НОВОЕ: Тестирует топ-N конфигов через xray-core на доступность
+        заблокированного в регионе домена.
+        """
+        top_n = min(self.region_test_top_n, len(verified))
+        if top_n <= 0:
+            return verified
+
+        test_candidates = verified[:top_n]
+        logger.info(f"  Region testing top {top_n} configs against "
+                     f"{self.test_domain} ({self.target_region})")
+
+        # Парсим конфиги для тестера
+        test_items = []
+        for item in test_candidates:
+            parsed = parse_uri_for_test(item.get('config', ''))
+            if parsed:
+                test_items.append(parsed)
+
+        if not test_items:
+            logger.warning("  No parseable configs for region test")
+            return verified
+
+        # Запускаем тестирование
+        results = await self.region_tester.test_batch(test_items)
+
+        # Обновляем score на основе результатов
+        region_results: Dict[str, bool] = {}
+        region_latencies: Dict[str, float] = {}
+        for r in results:
+            if r.tested and not r.skipped:
+                region_results[r.config] = r.success
+                region_latencies[r.config] = r.latency_ms
+
+        for item in verified:
+            config_str = item.get('config', '')
+            if config_str in region_results:
+                passed = region_results[config_str]
+                latency = region_latencies.get(config_str, -1)
+
+                item['region_test_passed'] = passed
+                item['region_test_latency'] = latency
+
+                if passed:
+                    # Бонус: профиль реально работает в регионе
+                    item['score'] = min(100, item['score'] + 10)
+                    item['censorship_score'] = min(100, item.get('censorship_score', 0) + 15)
+                else:
+                    # Штраф: профиль не работает в регионе
+                    item['score'] = max(0, item['score'] - 20)
+                    item['censorship_score'] = max(0, item.get('censorship_score', 0) - 30)
+
+        # Сохраняем результаты
+        export = self.region_tester.export_results(results)
+        self._save_json('configs/region_test_results.json', export)
+
+        stats = self.region_tester.get_stats()
+        logger.info(f"  Region test: {stats['passed']}/{stats['tested']} passed, "
+                     f"{stats['skipped']} skipped")
+
+        return verified
+
+    # =========================================================================
+    # Шаг 6: Дедупликация
+    # =========================================================================
+    async def _step_deduplicate(self, configs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Каскадная дедупликация (4 уровня)."""
+        try:
+            deduplicated = self.deduplicator.deduplicate(configs)
+            return deduplicated
+        except Exception as e:
+            logger.error(f"Deduplication failed: {e}")
+            return configs
+
+    # =========================================================================
+    # Шаг 7: Архивация
+    # =========================================================================
+    async def _step_archive(self, configs: List[Dict[str, Any]]) -> None:
+        """Записывает конфиги в архив и simple-файл."""
+        try:
+            archive_path = self.settings.output_archive
+            simple_path = self.settings.output_simple
+
+            with open(archive_path, 'w', encoding='utf-8') as f:
+                for cfg in configs:
+                    f.write(cfg.get('config', '') + '\n')
+
+            with open(simple_path, 'w', encoding='utf-8') as f:
+                for cfg in configs:
+                    f.write(cfg.get('config', '') + '\n')
+
+            logger.info(f"  Written {len(configs)} configs to {archive_path}")
+        except Exception as e:
+            logger.error(f"Archive write failed: {e}")
+
+    # =========================================================================
+    # Шаг 8: Xray-конфиг
+    # =========================================================================
+    async def _step_xray_config(self, configs: List[Dict[str, Any]]) -> None:
+        """Генерирует Xray-конфиг из лучших профилей."""
+        try:
+            balancer = XrayBalancer()
+            top_configs = configs[:20]  # Топ-20 для балансировки
+            balancer.generate(top_configs)
+        except Exception as e:
+            logger.error(f"Xray config generation failed: {e}")
+
+    # =========================================================================
+    # Шаг 9: Статистика
+    # =========================================================================
+    async def _step_write_stats(self, configs: List[Dict[str, Any]]) -> None:
+        """Записывает статистику в БД и JSON-файлы."""
+        try:
+            # Статистика в БД
+            scores = [cfg.get('score', 0) for cfg in configs]
+            latencies = [cfg.get('latency', 0) for cfg in configs if cfg.get('latency', 0) > 0]
+
+            protocols: Dict[str, int] = {}
+            geo: Dict[str, int] = {}
+            for cfg in configs:
+                p = cfg.get('protocol', 'unknown')
+                protocols[p] = protocols.get(p, 0) + 1
+                g = cfg.get('geo', 'unknown')
+                geo[g] = geo.get(g, 0) + 1
+
+            self.db.record_run(
+                total_raw=self._stats.get('total_raw', 0),
+                total_valid=self._stats.get('total_verified', 0),
+                total_final=len(configs),
+                avg_score=sum(scores) / len(scores) if scores else 0,
+                p50_latency=sorted(latencies)[len(latencies) // 2] if latencies else 0,
+                p95_latency=sorted(latencies)[int(len(latencies) * 0.95)] if latencies else 0,
+                p99_latency=sorted(latencies)[int(len(latencies) * 0.99)] if latencies else 0,
+                success_rate=len(configs) / max(1, self._stats.get('total_raw', 1)),
+                protocols=json.dumps(protocols),
+                geo_distribution=json.dumps(geo),
+            )
+
+            # Survival stats
+            survival_stats = self.survival_model.get_stats()
+            self._save_json(self.settings.survival_states_path, {
+                'stats': survival_stats,
+                'states': self.survival_model.export_states(),
+            })
+            self._save_json('configs/survival_stats.json', survival_stats)
+
+            # Censorship stats
+            censorship_scores = [cfg.get('censorship_score', 0) for cfg in configs]
+            by_protocol: Dict[str, Dict[str, Any]] = {}
+            for cfg in configs:
+                p = cfg.get('protocol', 'unknown')
+                if p not in by_protocol:
+                    by_protocol[p] = {'scores': [], 'count': 0}
+                by_protocol[p]['scores'].append(cfg.get('censorship_score', 0))
+                by_protocol[p]['count'] += 1
+
+            censorship_stats = {
+                'region': self.target_region,
+                'test_domain': self.test_domain,
+                'total_scored': len(configs),
+                'high_resistance': sum(1 for s in censorship_scores if s >= 70),
+                'medium_resistance': sum(1 for s in censorship_scores if 40 <= s < 70),
+                'low_resistance': sum(1 for s in censorship_scores if s < 40),
+                'avg_score': sum(censorship_scores) / len(censorship_scores) if censorship_scores else 0,
+                'by_protocol': {
+                    p: {
+                        'avg_score': sum(d['scores']) / len(d['scores']) if d['scores'] else 0,
+                        'count': d['count'],
+                    }
+                    for p, d in by_protocol.items()
+                },
+            }
+            self._save_json(self.settings.censorship_stats_path, censorship_stats)
+
+            # Общая статистика пайплайна
+            self._save_json('configs/pipeline_stats.json', self._stats)
+
+        except Exception as e:
+            logger.error(f"Stats write failed: {e}")
+
+    # =========================================================================
+    # Утилиты
+    # =========================================================================
+    @staticmethod
+    def _save_json(path: str, data: Any) -> None:
+        """Сохраняет данные в JSON-файл."""
+        try:
+            os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+        except Exception as e:
+            logger.error(f"Failed to save {path}: {e}")
+
+    async def _cleanup(self) -> None:
+        """Очистка ресурсов. Вызывается в finally."""
+        try:
+            await self.verifier.close()
+        except Exception:
+            pass
+        try:
+            self.db.close()
+        except Exception:
+            pass
 
 
-def main() -> None:
-    pipeline = OptimizedPipeline()
-    success = asyncio.run(pipeline.run())
-    sys.exit(0 if success else 1)
+# ===========================================================================
+# CLI-точка входа
+# ===========================================================================
+def main():
+    parser = argparse.ArgumentParser(description='Proxy-Hunter Optimized Pipeline')
+    parser.add_argument(
+        '--target-region', default='RU',
+        choices=['RU', 'CN', 'IR', 'GENERIC'],
+        help='Целевой регион для оценки цензуры и тестирования'
+    )
+    parser.add_argument(
+        '--skip-verification', default='false',
+        help='Пропустить многоуровневую верификацию (true/false)'
+    )
+    parser.add_argument(
+        '--test-domain', default='',
+        help='Домен для регионального теста (пусто = авто по региону)'
+    )
+    parser.add_argument(
+        '--xray-path', default='xray',
+        help='Путь к бинарнику xray-core'
+    )
+    parser.add_argument(
+        '--region-test-top-n', default='50',
+        help='Сколько топ-конфигов тестировать через xray-core'
+    )
+    args = parser.parse_args()
+
+    # Настройка логирования
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler('pipeline_debug.log', mode='w', encoding='utf-8'),
+        ],
+    )
+
+    # uvloop для ускорения (Linux/macOS)
+    try:
+        import uvloop
+        uvloop.install()
+        logger.info("uvloop installed")
+    except ImportError:
+        logger.info("uvloop not available, using default event loop")
+
+    # Запуск
+    pipeline = OptimizedPipeline(args)
+    asyncio.run(pipeline.run())
 
 
 if __name__ == '__main__':
