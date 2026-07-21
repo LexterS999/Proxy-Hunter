@@ -2,13 +2,17 @@
 Оптимизированный пайплайн Proxy-Hunter.
 
 ИСПРАВЛЕНО:
+- XrayBalancer → ConfigToXray (реальное имя класса в xray_balancer.py)
+- HistoryDB(db_path) → HistoryDB() (синглтон без аргументов)
+- db.record_run() → db.add_run(stats_dict) (реальное имя метода)
+- ProfileScorer(db_path) → ProfileScorer() (без аргументов)
+- scorer.score(cfg) → scorer.score_profile(config, parsed) (реальная сигнатура)
+- scorer.flush() → scorer._flush_profiles() (приватный метод)
 - O(n²) → O(1) dict-индекс в шаге 5
 - CPU-bound парсинг вынесен в asyncio.to_thread()
 - BoundedDict вместо безграничного _parsed_cache
-- ProfileScorer: явный flush() в finally вместо __del__
 - Осмысленный порог фильтрации (30 → 10)
-- Импорты новых модулей обёрнуты в try/except (работает без них)
-- CLI-аргументы --target-region, --test-domain, --xray-path
+- Импорты новых модулей обёрнуты в try/except
 """
 
 import asyncio
@@ -19,6 +23,7 @@ import os
 import sys
 import time
 from collections import OrderedDict
+from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
 
 from tqdm import tqdm
@@ -31,7 +36,7 @@ from parse_fallback import FallbackParser
 from config_validator import ConfigValidator
 from profile_scorer import ProfileScorer
 from deep_deduplicate import DeepDeduplicator
-from xray_balancer import XrayBalancer
+from xray_balancer import ConfigToXray
 from db import HistoryDB
 from user_settings import get_settings
 
@@ -74,9 +79,6 @@ except ImportError:
     RegionConnectivityTester = None
     parse_uri_for_test = None
 
-# ---------------------------------------------------------------------------
-# Опциональный импорт active_checker (для fallback-верификации)
-# ---------------------------------------------------------------------------
 try:
     from active_checker import ActiveChecker
     HAS_ACTIVE_CHECKER = True
@@ -89,7 +91,6 @@ logger = logging.getLogger(__name__)
 
 # ===========================================================================
 # BoundedDict — кеш с ограничением размера (LRU-эвикция)
-# ИСПРАВЛЕНО: заменяет безграничный Dict[str, ParsedConfig]
 # ===========================================================================
 class BoundedDict(OrderedDict):
     """OrderedDict с максимальным размером. При переполнении удаляет старые."""
@@ -110,15 +111,11 @@ class BoundedDict(OrderedDict):
 # Парсинг одного конфига (для asyncio.to_thread)
 # ===========================================================================
 def parse_config_once(raw: str) -> Optional[Dict[str, Any]]:
-    """
-    Парсит одну URI-строку. Вызывается в отдельном потоке.
-    ИСПРАВЛЕНО: добавлена поддержка hysteria2/hy2 и tuic через FallbackParser.
-    """
+    """Парсит одну URI-строку. Вызывается в отдельном потоке."""
     raw = raw.strip()
     if not raw:
         return None
 
-    # Пробуем строгий парсер
     try:
         from config_parser import parse_config
         result = parse_config(raw)
@@ -127,7 +124,6 @@ def parse_config_once(raw: str) -> Optional[Dict[str, Any]]:
     except Exception:
         pass
 
-    # Fallback-парсер (поддерживает hysteria2, tuic)
     try:
         parsed, strategy = FallbackParser.parse_with_stats(raw)
         if parsed:
@@ -158,7 +154,7 @@ class OptimizedPipeline:
         self.args = args
         self.settings = get_settings()
 
-        # Применяем CLI-аргументы
+        # CLI-аргументы
         self.target_region = args.target_region.upper()
         self.skip_verification = args.skip_verification.lower() in ('true', '1', 'yes')
         self.test_domain = args.test_domain or REGION_TEST_DOMAINS.get(
@@ -167,16 +163,17 @@ class OptimizedPipeline:
         self.xray_path = args.xray_path
         self.region_test_top_n = int(args.region_test_top_n)
 
-        # Компоненты (обязательные)
+        # ОБЯЗАТЕЛЬНЫЕ компоненты
+        # ИСПРАВЛЕНО: HistoryDB() — синглтон, без аргументов
         self.fetcher = AsyncConfigFetcher()
         self.validator = ConfigValidator()
         self.deduplicator = DeepDeduplicator()
-        self.db = HistoryDB(self.settings.db_path)
+        self.db = HistoryDB()
 
-        # Shutdown event для graceful shutdown
+        # Shutdown event
         self.shutdown_event = asyncio.Event()
 
-        # Компоненты (опциональные — новые модули)
+        # ОПЦИОНАЛЬНЫЕ компоненты (новые модули)
         self.verifier = None
         self.survival_model = None
         self.censorship_scorer = None
@@ -214,10 +211,8 @@ class OptimizedPipeline:
         # ИСПРАВЛЕНО: BoundedDict вместо безграничного Dict
         self._parsed_cache: BoundedDict = BoundedDict(maxsize=50000)
 
-        # Статистика
         self._stats: Dict[str, Any] = {}
 
-        # Логирование доступных модулей
         logger.info(f"Modules: verifier={HAS_MULTI_LEVEL_VERIFIER}, "
                      f"survival={HAS_SURVIVAL_MODEL}, "
                      f"censorship={HAS_CENSORSHIP_SCORER}, "
@@ -241,7 +236,7 @@ class OptimizedPipeline:
                 logger.warning("No configs fetched, exiting")
                 return
 
-            # Шаг 2: Парсинг (CPU-bound → asyncio.to_thread)
+            # Шаг 2: Парсинг
             parsed_configs = await self._step_parse(raw_configs)
             self._stats['total_parsed'] = len(parsed_configs)
             logger.info(f"🔍 Step 2: Parsed {len(parsed_configs)} configs")
@@ -256,7 +251,6 @@ class OptimizedPipeline:
             logger.info(f"📊 Step 3: Scored {len(scored_configs)} configs")
 
             # Шаг 4: Фильтрация
-            # ИСПРАВЛЕНО: осмысленный порог (30 → 10)
             filtered = self._step_filter(scored_configs)
             self._stats['total_filtered'] = len(filtered)
             logger.info(f"🔎 Step 4: Filtered to {len(filtered)} configs")
@@ -292,7 +286,7 @@ class OptimizedPipeline:
             logger.info(f"📦 Step 7: Archived {len(deduplicated)} configs")
 
             # Шаг 8: Генерация Xray-конфига
-            await self._step_xray_config(deduplicated)
+            await self._step_xray_config()
             logger.info("⚙️ Step 8: Xray config generated")
 
             # Шаг 9: Статистика
@@ -308,14 +302,12 @@ class OptimizedPipeline:
             logger.error(f"💥 Pipeline failed: {e}", exc_info=True)
             raise
         finally:
-            # ИСПРАВЛЕНО: явный flush/cleanup вместо __del__
             await self._cleanup()
 
     # =========================================================================
     # Шаг 1: Сбор
     # =========================================================================
     async def _step_fetch(self) -> List[str]:
-        """Собирает конфиги из всех источников."""
         try:
             configs = await self.fetcher.fetch_all()
             return configs
@@ -324,12 +316,9 @@ class OptimizedPipeline:
             return []
 
     # =========================================================================
-    # Шаг 2: Парсинг
-    # ИСПРАВЛЕНО: asyncio.to_thread() вместо блокирующего цикла
+    # Шаг 2: Парсинг (asyncio.to_thread)
     # =========================================================================
     async def _step_parse(self, raw_configs: List[str]) -> List[Dict[str, Any]]:
-        """Парсит конфиги. CPU-bound работа вынесена в поток."""
-        # Фильтруем через кеш
         to_parse = []
         cached_results = []
         for raw in raw_configs:
@@ -342,7 +331,6 @@ class OptimizedPipeline:
 
         logger.info(f"  Cache hits: {len(cached_results)}, to parse: {len(to_parse)}")
 
-        # Парсим в отдельном потоке (не блокируем event loop)
         parsed_new = []
         if to_parse:
             chunk_size = 1000
@@ -350,24 +338,22 @@ class OptimizedPipeline:
                 chunk = to_parse[i:i + chunk_size]
                 chunk_results = await asyncio.to_thread(parse_batch_sync, chunk)
                 parsed_new.extend(chunk_results)
-
-                # Кэшируем
                 for raw in chunk:
                     self._parsed_cache[raw] = parse_config_once(raw)
-
             logger.info(f"  Parsed {len(parsed_new)} new configs in thread pool")
 
-        all_parsed = cached_results + parsed_new
-        return all_parsed
+        return cached_results + parsed_new
 
     # =========================================================================
     # Шаг 3: Скоринг
-    # ИСПРАВЛЕНО: явный flush() в finally вместо __del__
+    # ИСПРАВЛЕНО: ProfileScorer() без аргументов
+    # ИСПРАВЛЕНО: scorer.score_profile(config, parsed) вместо scorer.score(cfg)
+    # ИСПРАВЛЕНО: scorer._flush_profiles() вместо scorer.flush()
     # =========================================================================
     async def _step_score(self, parsed_configs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Скоринг с интеграцией SurvivalModel и CensorshipScorer (если доступны)."""
         scored = []
-        scorer = ProfileScorer(db_path=self.settings.db_path)
+        # ИСПРАВЛЕНО: ProfileScorer() — конструктор без аргументов
+        scorer = ProfileScorer()
 
         try:
             for cfg in tqdm(parsed_configs, desc="Scoring", unit="cfg"):
@@ -375,8 +361,11 @@ class OptimizedPipeline:
                     config_str = cfg.get('config', '')
                     protocol = cfg.get('protocol', '')
 
-                    # Базовый score
-                    base_score = scorer.score(cfg)
+                    # ИСПРАВЛЕНО: score_profile(config_str, parsed_dict)
+                    score_result = scorer.score_profile(
+                        config_str, cfg, success=True, latency=0
+                    )
+                    base_score = score_result.get('score', 50.0)
 
                     # SurvivalModel (если доступен)
                     survival_score = base_score
@@ -411,15 +400,18 @@ class OptimizedPipeline:
                     cfg['base_score'] = base_score
                     cfg['survival_score'] = survival_score
                     cfg['censorship_score'] = censorship_score
+                    cfg['stability'] = score_result.get('stability', 0.5)
+                    cfg['lifetime'] = score_result.get('lifetime', 24.0)
+                    cfg['config_quality'] = score_result.get('config_quality', 0.5)
 
                     scored.append(cfg)
                 except Exception as e:
                     logger.debug(f"Scoring failed: {e}")
                     continue
         finally:
-            # ИСПРАВЛЕНО: явный flush вместо __del__
+            # ИСПРАВЛЕНО: _flush_profiles() — реальное имя метода
             try:
-                scorer.flush()
+                scorer._flush_profiles()
             except Exception:
                 pass
 
@@ -427,10 +419,9 @@ class OptimizedPipeline:
 
     # =========================================================================
     # Шаг 4: Фильтрация
-    # ИСПРАВЛЕНО: осмысленный начальный порог (30) с fallback (10)
+    # ИСПРАВЛЕНО: осмысленный порог (30 → 10)
     # =========================================================================
     def _step_filter(self, scored_configs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Фильтрация по порогу score."""
         min_score = self.settings.min_score  # 30.0
         filtered = [item for item in scored_configs if item.get('score', 0) >= min_score]
 
@@ -447,22 +438,14 @@ class OptimizedPipeline:
     # ИСПРАВЛЕНО: O(n²) → O(1) dict-индекс
     # =========================================================================
     async def _step_verify(self, filtered: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Верификация через MultiLevelVerifier или ActiveChecker (fallback)."""
-
-        # Вариант A: MultiLevelVerifier (новый, 5 уровней)
         if self.verifier is not None:
             return await self._verify_multi_level(filtered)
-
-        # Вариант B: ActiveChecker (оригинальный, TCP+HTTP)
         if self.active_checker is not None:
             return await self._verify_active_checker(filtered)
-
-        # Вариант C: Нет верификатора — возвращаем как есть
         logger.warning("  No verifier available, skipping verification")
         return filtered
 
     async def _verify_multi_level(self, filtered: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Верификация через MultiLevelVerifier."""
         verify_items = []
         for item in filtered:
             verify_items.append({
@@ -476,7 +459,7 @@ class OptimizedPipeline:
 
         results = await self.verifier.verify_batch(verify_items)
 
-        # ИСПРАВЛЕНО: O(1) dict-индекс вместо O(n) линейного поиска
+        # ИСПРАВЛЕНО: O(1) dict-индекс
         config_index: Dict[str, Dict[str, Any]] = {
             item['config']: item for item in filtered
         }
@@ -501,21 +484,17 @@ class OptimizedPipeline:
                 if self.survival_model:
                     self.survival_model.record_failure(result.config[:64])
 
-        # Сохраняем статистику
         self._save_json(self.settings.verification_stats_path, self.verifier.get_stats())
         return verified
 
     async def _verify_active_checker(self, filtered: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Fallback: верификация через оригинальный ActiveChecker."""
         configs_to_check = [item.get('config', '') for item in filtered]
-
         try:
             results = await self.active_checker.check_batch(configs_to_check)
         except Exception as e:
             logger.error(f"ActiveChecker failed: {e}")
             return filtered
 
-        # ИСПРАВЛЕНО: O(1) dict-индекс
         config_index: Dict[str, Dict[str, Any]] = {
             item['config']: item for item in filtered
         }
@@ -524,24 +503,20 @@ class OptimizedPipeline:
         for result in results:
             config_str = result.get('config', '') if isinstance(result, dict) else ''
             is_valid = result.get('valid', False) if isinstance(result, dict) else False
-
             if is_valid:
                 item = config_index.get(config_str)
                 if item:
                     latency = result.get('latency', -1) if isinstance(result, dict) else -1
                     if latency > 0:
-                        latency_bonus = max(0, 10 - latency / 100)
-                        item['score'] = min(100, item['score'] + latency_bonus)
+                        item['score'] = min(100, item['score'] + max(0, 10 - latency / 100))
                     item['latency'] = latency
                     verified.append(item)
-
         return verified
 
     # =========================================================================
     # Шаг 5b: Региональное тестирование
     # =========================================================================
     async def _step_region_test(self, verified: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Тестирует топ-N конфигов через xray-core."""
         if self.region_tester is None or parse_uri_for_test is None:
             return verified
 
@@ -564,7 +539,6 @@ class OptimizedPipeline:
 
         results = await self.region_tester.test_batch(test_items)
 
-        # Обновляем score
         region_results: Dict[str, bool] = {}
         region_latencies: Dict[str, float] = {}
         for r in results:
@@ -578,30 +552,25 @@ class OptimizedPipeline:
                 passed = region_results[config_str]
                 item['region_test_passed'] = passed
                 item['region_test_latency'] = region_latencies.get(config_str, -1)
-
                 if passed:
                     item['score'] = min(100, item['score'] + 10)
                 else:
                     item['score'] = max(0, item['score'] - 20)
 
-        # Сохраняем результаты
         export = self.region_tester.export_results(results)
         self._save_json('configs/region_test_results.json', export)
 
         stats = self.region_tester.get_stats()
         logger.info(f"  Region test: {stats['passed']}/{stats['tested']} passed, "
                      f"{stats['skipped']} skipped")
-
         return verified
 
     # =========================================================================
     # Шаг 6: Дедупликация
     # =========================================================================
     async def _step_deduplicate(self, configs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Дедупликация."""
         try:
-            deduplicated = self.deduplicator.deduplicate(configs)
-            return deduplicated
+            return self.deduplicator.deduplicate(configs)
         except Exception as e:
             logger.error(f"Deduplication failed: {e}")
             return configs
@@ -610,7 +579,6 @@ class OptimizedPipeline:
     # Шаг 7: Архивация
     # =========================================================================
     async def _step_archive(self, configs: List[Dict[str, Any]]) -> None:
-        """Записывает конфиги в архив и simple-файл."""
         try:
             archive_path = self.settings.output_archive
             simple_path = self.settings.output_simple
@@ -629,21 +597,23 @@ class OptimizedPipeline:
 
     # =========================================================================
     # Шаг 8: Xray-конфиг
+    # ИСПРАВЛЕНО: ConfigToXray(input_file, output_file).process_configs()
     # =========================================================================
-    async def _step_xray_config(self, configs: List[Dict[str, Any]]) -> None:
-        """Генерирует Xray-конфиг из лучших профилей."""
+    async def _step_xray_config(self) -> None:
         try:
-            balancer = XrayBalancer()
-            top_configs = configs[:20]
-            balancer.generate(top_configs)
+            input_file = self.settings.output_simple
+            output_file = 'configs/xray_loadbalanced_config.json'
+            # ИСПРАВЛЕНО: ConfigToXray — реальное имя класса
+            converter = ConfigToXray(input_file, output_file)
+            converter.process_configs()
         except Exception as e:
             logger.error(f"Xray config generation failed: {e}")
 
     # =========================================================================
     # Шаг 9: Статистика
+    # ИСПРАВЛЕНО: db.add_run(stats_dict) вместо db.record_run(...)
     # =========================================================================
     async def _step_write_stats(self, configs: List[Dict[str, Any]]) -> None:
-        """Записывает статистику в БД и JSON-файлы."""
         try:
             scores = [cfg.get('score', 0) for cfg in configs]
             latencies = [cfg.get('latency', 0) for cfg in configs if cfg.get('latency', 0) > 0]
@@ -656,18 +626,22 @@ class OptimizedPipeline:
                 g = cfg.get('geo', 'unknown')
                 geo[g] = geo.get(g, 0) + 1
 
-            self.db.record_run(
-                total_raw=self._stats.get('total_raw', 0),
-                total_valid=self._stats.get('total_verified', 0),
-                total_final=len(configs),
-                avg_score=sum(scores) / len(scores) if scores else 0,
-                p50_latency=sorted(latencies)[len(latencies) // 2] if latencies else 0,
-                p95_latency=sorted(latencies)[int(len(latencies) * 0.95)] if latencies else 0,
-                p99_latency=sorted(latencies)[int(len(latencies) * 0.99)] if latencies else 0,
-                success_rate=len(configs) / max(1, self._stats.get('total_raw', 1)),
-                protocols=json.dumps(protocols),
-                geo_distribution=json.dumps(geo),
-            )
+            # ИСПРАВЛЕНО: add_run(stats_dict) — реальное имя метода
+            run_stats = {
+                'timestamp': datetime.now().isoformat(),
+                'total_raw': self._stats.get('total_raw', 0),
+                'total_valid': self._stats.get('total_verified', 0),
+                'total_final': len(configs),
+                'avg_score': sum(scores) / len(scores) if scores else 0,
+                'p50_latency': sorted(latencies)[len(latencies) // 2] if latencies else 0,
+                'p95_latency': sorted(latencies)[int(len(latencies) * 0.95)] if latencies else 0,
+                'p99_latency': sorted(latencies)[int(len(latencies) * 0.99)] if latencies else 0,
+                'success_rate': len(configs) / max(1, self._stats.get('total_raw', 1)),
+                'protocols': protocols,
+                'geo_distribution': geo,
+                'anomalies': [],
+            }
+            self.db.add_run(run_stats)
 
             # Survival stats
             if self.survival_model:
@@ -707,7 +681,6 @@ class OptimizedPipeline:
                 }
                 self._save_json(self.settings.censorship_stats_path, censorship_stats)
 
-            # Pipeline stats
             self._save_json('configs/pipeline_stats.json', self._stats)
 
         except Exception as e:
@@ -718,7 +691,6 @@ class OptimizedPipeline:
     # =========================================================================
     @staticmethod
     def _save_json(path: str, data: Any) -> None:
-        """Сохраняет данные в JSON-файл."""
         try:
             os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
             with open(path, 'w', encoding='utf-8') as f:
@@ -727,47 +699,28 @@ class OptimizedPipeline:
             logger.error(f"Failed to save {path}: {e}")
 
     async def _cleanup(self) -> None:
-        """Очистка ресурсов. Вызывается в finally."""
+        """Очистка ресурсов."""
         if self.verifier:
             try:
                 await self.verifier.close()
             except Exception:
                 pass
-        try:
-            self.db.close()
-        except Exception:
-            pass
+        # ИСПРАВЛЕНО: HistoryDB не имеет close() — пропускаем
 
 
 # ===========================================================================
-# CLI-точка входа
+# CLI
 # ===========================================================================
 def main():
     parser = argparse.ArgumentParser(description='Proxy-Hunter Optimized Pipeline')
-    parser.add_argument(
-        '--target-region', default='RU',
-        choices=['RU', 'CN', 'IR', 'GENERIC'],
-        help='Целевой регион для оценки цензуры и тестирования'
-    )
-    parser.add_argument(
-        '--skip-verification', default='false',
-        help='Пропустить верификацию (true/false)'
-    )
-    parser.add_argument(
-        '--test-domain', default='',
-        help='Домен для регионального теста (пусто = авто по региону)'
-    )
-    parser.add_argument(
-        '--xray-path', default='xray',
-        help='Путь к бинарнику xray-core'
-    )
-    parser.add_argument(
-        '--region-test-top-n', default='50',
-        help='Сколько топ-конфигов тестировать через xray-core'
-    )
+    parser.add_argument('--target-region', default='RU',
+                        choices=['RU', 'CN', 'IR', 'GENERIC'])
+    parser.add_argument('--skip-verification', default='false')
+    parser.add_argument('--test-domain', default='')
+    parser.add_argument('--xray-path', default='xray')
+    parser.add_argument('--region-test-top-n', default='50')
     args = parser.parse_args()
 
-    # Настройка логирования
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
@@ -777,7 +730,6 @@ def main():
         ],
     )
 
-    # uvloop для ускорения (Linux/macOS)
     try:
         import uvloop
         uvloop.install()
@@ -785,7 +737,6 @@ def main():
     except ImportError:
         logger.info("uvloop not available, using default event loop")
 
-    # Запуск
     pipeline = OptimizedPipeline(args)
     asyncio.run(pipeline.run())
 
