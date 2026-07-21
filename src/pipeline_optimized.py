@@ -5,11 +5,10 @@
 - O(n²) → O(1) dict-индекс в шаге 5
 - CPU-bound парсинг вынесен в asyncio.to_thread()
 - BoundedDict вместо безграничного _parsed_cache
-- ProfileScorer как контекстный менеджер (flush в finally)
+- ProfileScorer: явный flush() в finally вместо __del__
 - Осмысленный порог фильтрации (30 → 10)
-- Интеграция MultiLevelVerifier, SurvivalModel, CensorshipScorer
-- НОВОЕ: Интеграция RegionConnectivityTester
-- НОВОЕ: CLI-аргументы --target-region, --test-domain, --xray-path
+- Импорты новых модулей обёрнуты в try/except (работает без них)
+- CLI-аргументы --target-region, --test-domain, --xray-path
 """
 
 import asyncio
@@ -25,26 +24,72 @@ from typing import Dict, List, Optional, Any, Tuple
 from tqdm import tqdm
 
 # ---------------------------------------------------------------------------
-# Local imports
+# Обязательные импорты (оригинальные модули проекта)
 # ---------------------------------------------------------------------------
 from fetch_configs import AsyncConfigFetcher
 from parse_fallback import FallbackParser
 from config_validator import ConfigValidator
 from profile_scorer import ProfileScorer
 from deep_deduplicate import DeepDeduplicator
-from multi_level_verifier import MultiLevelVerifier, VerificationResult
-from survival_model import SurvivalModel
-from censorship_scorer import CensorshipScorer, CensorshipProfile, REGION_TEST_DOMAINS
-from region_tester import RegionConnectivityTester, parse_uri_for_test
 from xray_balancer import XrayBalancer
 from db import HistoryDB
 from user_settings import get_settings
+
+# ---------------------------------------------------------------------------
+# Опциональные импорты (новые модули — пайплайн работает и без них)
+# ---------------------------------------------------------------------------
+try:
+    from multi_level_verifier import MultiLevelVerifier, VerificationResult
+    HAS_MULTI_LEVEL_VERIFIER = True
+except ImportError:
+    HAS_MULTI_LEVEL_VERIFIER = False
+    MultiLevelVerifier = None
+    VerificationResult = None
+
+try:
+    from survival_model import SurvivalModel
+    HAS_SURVIVAL_MODEL = True
+except ImportError:
+    HAS_SURVIVAL_MODEL = False
+    SurvivalModel = None
+
+try:
+    from censorship_scorer import CensorshipScorer, CensorshipProfile, REGION_TEST_DOMAINS
+    HAS_CENSORSHIP_SCORER = True
+except ImportError:
+    HAS_CENSORSHIP_SCORER = False
+    CensorshipScorer = None
+    REGION_TEST_DOMAINS = {
+        'RU': {'primary': 'rutracker.org'},
+        'CN': {'primary': 'google.com'},
+        'IR': {'primary': 'twitter.com'},
+        'GENERIC': {'primary': 'google.com'},
+    }
+
+try:
+    from region_tester import RegionConnectivityTester, parse_uri_for_test
+    HAS_REGION_TESTER = True
+except ImportError:
+    HAS_REGION_TESTER = False
+    RegionConnectivityTester = None
+    parse_uri_for_test = None
+
+# ---------------------------------------------------------------------------
+# Опциональный импорт active_checker (для fallback-верификации)
+# ---------------------------------------------------------------------------
+try:
+    from active_checker import ActiveChecker
+    HAS_ACTIVE_CHECKER = True
+except ImportError:
+    HAS_ACTIVE_CHECKER = False
+    ActiveChecker = None
 
 logger = logging.getLogger(__name__)
 
 
 # ===========================================================================
 # BoundedDict — кеш с ограничением размера (LRU-эвикция)
+# ИСПРАВЛЕНО: заменяет безграничный Dict[str, ParsedConfig]
 # ===========================================================================
 class BoundedDict(OrderedDict):
     """OrderedDict с максимальным размером. При переполнении удаляет старые."""
@@ -67,14 +112,14 @@ class BoundedDict(OrderedDict):
 def parse_config_once(raw: str) -> Optional[Dict[str, Any]]:
     """
     Парсит одну URI-строку. Вызывается в отдельном потоке.
-    ИСПРАВЛЕНО: добавлена поддержка hysteria2/hy2 и tuic.
+    ИСПРАВЛЕНО: добавлена поддержка hysteria2/hy2 и tuic через FallbackParser.
     """
     raw = raw.strip()
     if not raw:
         return None
 
+    # Пробуем строгий парсер
     try:
-        # Пробуем строгий парсер
         from config_parser import parse_config
         result = parse_config(raw)
         if result:
@@ -82,7 +127,7 @@ def parse_config_once(raw: str) -> Optional[Dict[str, Any]]:
     except Exception:
         pass
 
-    # Fallback-парсер
+    # Fallback-парсер (поддерживает hysteria2, tuic)
     try:
         parsed, strategy = FallbackParser.parse_with_stats(raw)
         if parsed:
@@ -113,53 +158,71 @@ class OptimizedPipeline:
         self.args = args
         self.settings = get_settings()
 
-        # Применяем CLI-аргументы поверх настроек
+        # Применяем CLI-аргументы
         self.target_region = args.target_region.upper()
         self.skip_verification = args.skip_verification.lower() in ('true', '1', 'yes')
         self.test_domain = args.test_domain or REGION_TEST_DOMAINS.get(
-            self.target_region, REGION_TEST_DOMAINS['GENERIC']
-        )['primary']
+            self.target_region, REGION_TEST_DOMAINS.get('GENERIC', {})
+        ).get('primary', 'google.com')
         self.xray_path = args.xray_path
         self.region_test_top_n = int(args.region_test_top_n)
 
-        # Компоненты
+        # Компоненты (обязательные)
         self.fetcher = AsyncConfigFetcher()
         self.validator = ConfigValidator()
         self.deduplicator = DeepDeduplicator()
         self.db = HistoryDB(self.settings.db_path)
 
-        # НОВОЕ: Многоуровневый верификатор
+        # Shutdown event для graceful shutdown
         self.shutdown_event = asyncio.Event()
-        self.verifier = MultiLevelVerifier(
-            max_latency_ms=self.settings.max_latency_ms,
-            max_workers=self.settings.check_concurrency,
-            shutdown_event=self.shutdown_event,
-        )
 
-        # НОВОЕ: Модель выживания
-        self.survival_model = SurvivalModel(
-            death_threshold=self.settings.survival_death_threshold,
-        )
+        # Компоненты (опциональные — новые модули)
+        self.verifier = None
+        self.survival_model = None
+        self.censorship_scorer = None
+        self.region_tester = None
+        self.active_checker = None
 
-        # НОВОЕ: Оценщик цензуры
-        self.censorship_scorer = CensorshipScorer(target_region=self.target_region)
+        if HAS_MULTI_LEVEL_VERIFIER:
+            self.verifier = MultiLevelVerifier(
+                max_latency_ms=self.settings.max_latency_ms,
+                max_workers=self.settings.check_concurrency,
+                shutdown_event=self.shutdown_event,
+            )
 
-        # НОВОЕ: Региональный тестер
-        self.region_tester = RegionConnectivityTester(
-            region=self.target_region,
-            test_domain=self.test_domain,
-            xray_path=self.xray_path,
-            timeout=self.settings.region_test_timeout,
-            max_concurrent=self.settings.region_test_concurrency,
-            shutdown_event=self.shutdown_event,
-        )
+        if HAS_SURVIVAL_MODEL:
+            self.survival_model = SurvivalModel(
+                death_threshold=self.settings.survival_death_threshold,
+            )
 
-        # Кеш парсинга с ограничением размера
+        if HAS_CENSORSHIP_SCORER:
+            self.censorship_scorer = CensorshipScorer(target_region=self.target_region)
+
+        if HAS_REGION_TESTER:
+            self.region_tester = RegionConnectivityTester(
+                region=self.target_region,
+                test_domain=self.test_domain,
+                xray_path=self.xray_path,
+                timeout=self.settings.region_test_timeout,
+                max_concurrent=self.settings.region_test_concurrency,
+                shutdown_event=self.shutdown_event,
+            )
+
+        if HAS_ACTIVE_CHECKER and not HAS_MULTI_LEVEL_VERIFIER:
+            self.active_checker = ActiveChecker()
+
         # ИСПРАВЛЕНО: BoundedDict вместо безграничного Dict
         self._parsed_cache: BoundedDict = BoundedDict(maxsize=50000)
 
         # Статистика
         self._stats: Dict[str, Any] = {}
+
+        # Логирование доступных модулей
+        logger.info(f"Modules: verifier={HAS_MULTI_LEVEL_VERIFIER}, "
+                     f"survival={HAS_SURVIVAL_MODEL}, "
+                     f"censorship={HAS_CENSORSHIP_SCORER}, "
+                     f"region_tester={HAS_REGION_TESTER}, "
+                     f"active_checker={HAS_ACTIVE_CHECKER}")
 
     async def run(self) -> None:
         """Запускает полный пайплайн."""
@@ -179,7 +242,6 @@ class OptimizedPipeline:
                 return
 
             # Шаг 2: Парсинг (CPU-bound → asyncio.to_thread)
-            # ИСПРАВЛЕНО: парсинг не блокирует event loop
             parsed_configs = await self._step_parse(raw_configs)
             self._stats['total_parsed'] = len(parsed_configs)
             logger.info(f"🔍 Step 2: Parsed {len(parsed_configs)} configs")
@@ -188,7 +250,7 @@ class OptimizedPipeline:
                 logger.warning("No configs parsed, exiting")
                 return
 
-            # Шаг 3: Скоринг (с SurvivalModel + CensorshipScorer)
+            # Шаг 3: Скоринг
             scored_configs = await self._step_score(parsed_configs)
             self._stats['total_scored'] = len(scored_configs)
             logger.info(f"📊 Step 3: Scored {len(scored_configs)} configs")
@@ -197,9 +259,7 @@ class OptimizedPipeline:
             # ИСПРАВЛЕНО: осмысленный порог (30 → 10)
             filtered = self._step_filter(scored_configs)
             self._stats['total_filtered'] = len(filtered)
-            logger.info(f"🔎 Step 4: Filtered to {len(filtered)} configs "
-                         f"(threshold: {self.settings.min_score} → "
-                         f"{self.settings.min_score_fallback})")
+            logger.info(f"🔎 Step 4: Filtered to {len(filtered)} configs")
 
             if not filtered:
                 logger.warning("No configs passed filter, exiting")
@@ -215,8 +275,9 @@ class OptimizedPipeline:
                 self._stats['total_verified'] = len(verified)
                 logger.info("⏭️ Step 5: Verification skipped")
 
-            # Шаг 5b: Региональное тестирование (топ-N через xray-core)
-            if not self.skip_verification and self.region_test_top_n > 0:
+            # Шаг 5b: Региональное тестирование
+            if (not self.skip_verification and self.region_test_top_n > 0
+                    and self.region_tester is not None):
                 verified = await self._step_region_test(verified)
                 logger.info(f"🌐 Step 5b: Region test completed "
                              f"({self.test_domain} / {self.target_region})")
@@ -247,7 +308,7 @@ class OptimizedPipeline:
             logger.error(f"💥 Pipeline failed: {e}", exc_info=True)
             raise
         finally:
-            # ИСПРАВЛЕНО: явный flush вместо __del__
+            # ИСПРАВЛЕНО: явный flush/cleanup вместо __del__
             await self._cleanup()
 
     # =========================================================================
@@ -264,12 +325,10 @@ class OptimizedPipeline:
 
     # =========================================================================
     # Шаг 2: Парсинг
+    # ИСПРАВЛЕНО: asyncio.to_thread() вместо блокирующего цикла
     # =========================================================================
     async def _step_parse(self, raw_configs: List[str]) -> List[Dict[str, Any]]:
-        """
-        Парсит конфиги. CPU-bound работа вынесена в поток.
-        ИСПРАВЛЕНО: asyncio.to_thread() вместо блокирующего цикла.
-        """
+        """Парсит конфиги. CPU-bound работа вынесена в поток."""
         # Фильтруем через кеш
         to_parse = []
         cached_results = []
@@ -284,91 +343,94 @@ class OptimizedPipeline:
         logger.info(f"  Cache hits: {len(cached_results)}, to parse: {len(to_parse)}")
 
         # Парсим в отдельном потоке (не блокируем event loop)
+        parsed_new = []
         if to_parse:
-            loop = asyncio.get_running_loop()
-            # Разбиваем на чанки для tqdm
             chunk_size = 1000
-            parsed_new = []
             for i in range(0, len(to_parse), chunk_size):
                 chunk = to_parse[i:i + chunk_size]
                 chunk_results = await asyncio.to_thread(parse_batch_sync, chunk)
                 parsed_new.extend(chunk_results)
 
-                # Кэшируем результаты
-                for raw, parsed in zip(chunk, [parse_config_once(r) for r in chunk]):
-                    self._parsed_cache[raw] = parsed
+                # Кэшируем
+                for raw in chunk:
+                    self._parsed_cache[raw] = parse_config_once(raw)
 
             logger.info(f"  Parsed {len(parsed_new)} new configs in thread pool")
-        else:
-            parsed_new = []
 
         all_parsed = cached_results + parsed_new
         return all_parsed
 
     # =========================================================================
     # Шаг 3: Скоринг
+    # ИСПРАВЛЕНО: явный flush() в finally вместо __del__
     # =========================================================================
     async def _step_score(self, parsed_configs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Скоринг с интеграцией SurvivalModel и CensorshipScorer.
-        ИСПРАВЛЕНО: ProfileScorer как контекстный менеджер.
-        """
+        """Скоринг с интеграцией SurvivalModel и CensorshipScorer (если доступны)."""
         scored = []
+        scorer = ProfileScorer(db_path=self.settings.db_path)
 
-        # ИСПРАВЛЕНО: контекстный менеджер для гарантированного flush
-        with ProfileScorer(db_path=self.settings.db_path) as scorer:
+        try:
             for cfg in tqdm(parsed_configs, desc="Scoring", unit="cfg"):
                 try:
                     config_str = cfg.get('config', '')
                     protocol = cfg.get('protocol', '')
-                    server = cfg.get('server', cfg.get('address', ''))
 
-                    # Базовый score от ProfileScorer
+                    # Базовый score
                     base_score = scorer.score(cfg)
 
-                    # SurvivalModel: регистрируем и получаем динамический score
-                    config_hash = cfg.get('hash', config_str[:64])
-                    self.survival_model.register_profile(
-                        config_hash=config_hash,
-                        base_quality=base_score,
-                        protocol=protocol,
-                        server_geo=cfg.get('geo', 'OTHER'),
-                    )
-                    survival_score = self.survival_model.get_score(config_hash)
+                    # SurvivalModel (если доступен)
+                    survival_score = base_score
+                    if self.survival_model is not None:
+                        config_hash = cfg.get('hash', config_str[:64])
+                        self.survival_model.register_profile(
+                            config_hash=config_hash,
+                            base_quality=base_score,
+                            protocol=protocol,
+                            server_geo=cfg.get('geo', 'OTHER'),
+                        )
+                        survival_score = self.survival_model.get_score(config_hash)
 
-                    # CensorshipScorer: оценка устойчивости к цензуре
-                    censorship_result = self.censorship_scorer.score_parsed_config(cfg)
+                    # CensorshipScorer (если доступен)
+                    censorship_score = 50.0
+                    if self.censorship_scorer is not None:
+                        censorship_result = self.censorship_scorer.score_parsed_config(cfg)
+                        censorship_score = censorship_result.total_score
 
                     # Композитный score
-                    # ИСПРАВЛЕНО: формула по модели ProxyStats
-                    composite = (
-                        base_score * 0.35 +
-                        survival_score * 0.25 +
-                        censorship_result.total_score * 0.25 +
-                        min(100, base_score * 1.2) * 0.15  # бонус за качество
-                    )
+                    if self.survival_model and self.censorship_scorer:
+                        composite = (
+                            base_score * 0.35 +
+                            survival_score * 0.25 +
+                            censorship_score * 0.25 +
+                            min(100, base_score * 1.2) * 0.15
+                        )
+                    else:
+                        composite = base_score
 
                     cfg['score'] = round(min(100, max(0, composite)), 2)
                     cfg['base_score'] = base_score
                     cfg['survival_score'] = survival_score
-                    cfg['censorship_score'] = censorship_result.total_score
-                    cfg['censorship_warnings'] = censorship_result.warnings
+                    cfg['censorship_score'] = censorship_score
 
                     scored.append(cfg)
                 except Exception as e:
-                    logger.debug(f"Scoring failed for config: {e}")
+                    logger.debug(f"Scoring failed: {e}")
                     continue
+        finally:
+            # ИСПРАВЛЕНО: явный flush вместо __del__
+            try:
+                scorer.flush()
+            except Exception:
+                pass
 
         return scored
 
     # =========================================================================
     # Шаг 4: Фильтрация
+    # ИСПРАВЛЕНО: осмысленный начальный порог (30) с fallback (10)
     # =========================================================================
     def _step_filter(self, scored_configs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Фильтрация по порогу score.
-        ИСПРАВЛЕНО: осмысленный начальный порог (30) с fallback (10).
-        """
+        """Фильтрация по порогу score."""
         min_score = self.settings.min_score  # 30.0
         filtered = [item for item in scored_configs if item.get('score', 0) >= min_score]
 
@@ -377,20 +439,30 @@ class OptimizedPipeline:
             filtered = [item for item in scored_configs if item.get('score', 0) >= min_score]
             logger.info(f"  Lowered threshold to {min_score}, got {len(filtered)} configs")
 
-        # Сортировка по score (убывание)
         filtered.sort(key=lambda x: x.get('score', 0), reverse=True)
         return filtered
 
     # =========================================================================
-    # Шаг 5: Верификация (многоуровневая)
+    # Шаг 5: Верификация
+    # ИСПРАВЛЕНО: O(n²) → O(1) dict-индекс
     # =========================================================================
     async def _step_verify(self, filtered: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Многоуровневая верификация.
-        ИСПРАВЛЕНО: O(n²) → O(1) dict-индекс для обновления score.
-        ИСПРАВЛЕНО: передача ParsedConfig вместо повторного парсинга.
-        """
-        # Подготовка данных для верификатора
+        """Верификация через MultiLevelVerifier или ActiveChecker (fallback)."""
+
+        # Вариант A: MultiLevelVerifier (новый, 5 уровней)
+        if self.verifier is not None:
+            return await self._verify_multi_level(filtered)
+
+        # Вариант B: ActiveChecker (оригинальный, TCP+HTTP)
+        if self.active_checker is not None:
+            return await self._verify_active_checker(filtered)
+
+        # Вариант C: Нет верификатора — возвращаем как есть
+        logger.warning("  No verifier available, skipping verification")
+        return filtered
+
+    async def _verify_multi_level(self, filtered: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Верификация через MultiLevelVerifier."""
         verify_items = []
         for item in filtered:
             verify_items.append({
@@ -402,8 +474,7 @@ class OptimizedPipeline:
                 'sni': item.get('sni', item.get('servername', '')),
             })
 
-        # Запускаем верификацию
-        results: List[VerificationResult] = await self.verifier.verify_batch(verify_items)
+        results = await self.verifier.verify_batch(verify_items)
 
         # ИСПРАВЛЕНО: O(1) dict-индекс вместо O(n) линейного поиска
         config_index: Dict[str, Dict[str, Any]] = {
@@ -415,27 +486,54 @@ class OptimizedPipeline:
             if result.valid:
                 item = config_index.get(result.config)
                 if item:
-                    # Бонус за низкую задержку
                     if result.latency > 0:
                         latency_bonus = max(0, 10 - result.latency / 100)
                         item['score'] = min(100, item['score'] + latency_bonus)
-
                     item['latency'] = result.latency
                     item['composite_score'] = result.composite_score
-                    item['verification_levels_passed'] = result.levels_passed
 
-                    # Обновляем SurvivalModel
-                    config_hash = item.get('hash', result.config[:64])
-                    self.survival_model.record_success(config_hash, quality=item['score'])
+                    if self.survival_model:
+                        config_hash = item.get('hash', result.config[:64])
+                        self.survival_model.record_success(config_hash, quality=item['score'])
 
                     verified.append(item)
             else:
-                # Записываем неудачу в SurvivalModel
-                config_hash = result.config[:64]
-                self.survival_model.record_failure(config_hash)
+                if self.survival_model:
+                    self.survival_model.record_failure(result.config[:64])
 
-        # Сохраняем статистику верификации
+        # Сохраняем статистику
         self._save_json(self.settings.verification_stats_path, self.verifier.get_stats())
+        return verified
+
+    async def _verify_active_checker(self, filtered: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Fallback: верификация через оригинальный ActiveChecker."""
+        configs_to_check = [item.get('config', '') for item in filtered]
+
+        try:
+            results = await self.active_checker.check_batch(configs_to_check)
+        except Exception as e:
+            logger.error(f"ActiveChecker failed: {e}")
+            return filtered
+
+        # ИСПРАВЛЕНО: O(1) dict-индекс
+        config_index: Dict[str, Dict[str, Any]] = {
+            item['config']: item for item in filtered
+        }
+
+        verified = []
+        for result in results:
+            config_str = result.get('config', '') if isinstance(result, dict) else ''
+            is_valid = result.get('valid', False) if isinstance(result, dict) else False
+
+            if is_valid:
+                item = config_index.get(config_str)
+                if item:
+                    latency = result.get('latency', -1) if isinstance(result, dict) else -1
+                    if latency > 0:
+                        latency_bonus = max(0, 10 - latency / 100)
+                        item['score'] = min(100, item['score'] + latency_bonus)
+                    item['latency'] = latency
+                    verified.append(item)
 
         return verified
 
@@ -443,10 +541,10 @@ class OptimizedPipeline:
     # Шаг 5b: Региональное тестирование
     # =========================================================================
     async def _step_region_test(self, verified: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        НОВОЕ: Тестирует топ-N конфигов через xray-core на доступность
-        заблокированного в регионе домена.
-        """
+        """Тестирует топ-N конфигов через xray-core."""
+        if self.region_tester is None or parse_uri_for_test is None:
+            return verified
+
         top_n = min(self.region_test_top_n, len(verified))
         if top_n <= 0:
             return verified
@@ -455,7 +553,6 @@ class OptimizedPipeline:
         logger.info(f"  Region testing top {top_n} configs against "
                      f"{self.test_domain} ({self.target_region})")
 
-        # Парсим конфиги для тестера
         test_items = []
         for item in test_candidates:
             parsed = parse_uri_for_test(item.get('config', ''))
@@ -463,13 +560,11 @@ class OptimizedPipeline:
                 test_items.append(parsed)
 
         if not test_items:
-            logger.warning("  No parseable configs for region test")
             return verified
 
-        # Запускаем тестирование
         results = await self.region_tester.test_batch(test_items)
 
-        # Обновляем score на основе результатов
+        # Обновляем score
         region_results: Dict[str, bool] = {}
         region_latencies: Dict[str, float] = {}
         for r in results:
@@ -481,19 +576,13 @@ class OptimizedPipeline:
             config_str = item.get('config', '')
             if config_str in region_results:
                 passed = region_results[config_str]
-                latency = region_latencies.get(config_str, -1)
-
                 item['region_test_passed'] = passed
-                item['region_test_latency'] = latency
+                item['region_test_latency'] = region_latencies.get(config_str, -1)
 
                 if passed:
-                    # Бонус: профиль реально работает в регионе
                     item['score'] = min(100, item['score'] + 10)
-                    item['censorship_score'] = min(100, item.get('censorship_score', 0) + 15)
                 else:
-                    # Штраф: профиль не работает в регионе
                     item['score'] = max(0, item['score'] - 20)
-                    item['censorship_score'] = max(0, item.get('censorship_score', 0) - 30)
 
         # Сохраняем результаты
         export = self.region_tester.export_results(results)
@@ -509,7 +598,7 @@ class OptimizedPipeline:
     # Шаг 6: Дедупликация
     # =========================================================================
     async def _step_deduplicate(self, configs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Каскадная дедупликация (4 уровня)."""
+        """Дедупликация."""
         try:
             deduplicated = self.deduplicator.deduplicate(configs)
             return deduplicated
@@ -545,7 +634,7 @@ class OptimizedPipeline:
         """Генерирует Xray-конфиг из лучших профилей."""
         try:
             balancer = XrayBalancer()
-            top_configs = configs[:20]  # Топ-20 для балансировки
+            top_configs = configs[:20]
             balancer.generate(top_configs)
         except Exception as e:
             logger.error(f"Xray config generation failed: {e}")
@@ -556,7 +645,6 @@ class OptimizedPipeline:
     async def _step_write_stats(self, configs: List[Dict[str, Any]]) -> None:
         """Записывает статистику в БД и JSON-файлы."""
         try:
-            # Статистика в БД
             scores = [cfg.get('score', 0) for cfg in configs]
             latencies = [cfg.get('latency', 0) for cfg in configs if cfg.get('latency', 0) > 0]
 
@@ -582,42 +670,44 @@ class OptimizedPipeline:
             )
 
             # Survival stats
-            survival_stats = self.survival_model.get_stats()
-            self._save_json(self.settings.survival_states_path, {
-                'stats': survival_stats,
-                'states': self.survival_model.export_states(),
-            })
-            self._save_json('configs/survival_stats.json', survival_stats)
+            if self.survival_model:
+                survival_stats = self.survival_model.get_stats()
+                self._save_json(self.settings.survival_states_path, {
+                    'stats': survival_stats,
+                    'states': self.survival_model.export_states(),
+                })
+                self._save_json('configs/survival_stats.json', survival_stats)
 
             # Censorship stats
-            censorship_scores = [cfg.get('censorship_score', 0) for cfg in configs]
-            by_protocol: Dict[str, Dict[str, Any]] = {}
-            for cfg in configs:
-                p = cfg.get('protocol', 'unknown')
-                if p not in by_protocol:
-                    by_protocol[p] = {'scores': [], 'count': 0}
-                by_protocol[p]['scores'].append(cfg.get('censorship_score', 0))
-                by_protocol[p]['count'] += 1
+            if self.censorship_scorer:
+                censorship_scores = [cfg.get('censorship_score', 0) for cfg in configs]
+                by_protocol: Dict[str, Dict[str, Any]] = {}
+                for cfg in configs:
+                    p = cfg.get('protocol', 'unknown')
+                    if p not in by_protocol:
+                        by_protocol[p] = {'scores': [], 'count': 0}
+                    by_protocol[p]['scores'].append(cfg.get('censorship_score', 0))
+                    by_protocol[p]['count'] += 1
 
-            censorship_stats = {
-                'region': self.target_region,
-                'test_domain': self.test_domain,
-                'total_scored': len(configs),
-                'high_resistance': sum(1 for s in censorship_scores if s >= 70),
-                'medium_resistance': sum(1 for s in censorship_scores if 40 <= s < 70),
-                'low_resistance': sum(1 for s in censorship_scores if s < 40),
-                'avg_score': sum(censorship_scores) / len(censorship_scores) if censorship_scores else 0,
-                'by_protocol': {
-                    p: {
-                        'avg_score': sum(d['scores']) / len(d['scores']) if d['scores'] else 0,
-                        'count': d['count'],
-                    }
-                    for p, d in by_protocol.items()
-                },
-            }
-            self._save_json(self.settings.censorship_stats_path, censorship_stats)
+                censorship_stats = {
+                    'region': self.target_region,
+                    'test_domain': self.test_domain,
+                    'total_scored': len(configs),
+                    'high_resistance': sum(1 for s in censorship_scores if s >= 70),
+                    'medium_resistance': sum(1 for s in censorship_scores if 40 <= s < 70),
+                    'low_resistance': sum(1 for s in censorship_scores if s < 40),
+                    'avg_score': sum(censorship_scores) / len(censorship_scores) if censorship_scores else 0,
+                    'by_protocol': {
+                        p: {
+                            'avg_score': sum(d['scores']) / len(d['scores']) if d['scores'] else 0,
+                            'count': d['count'],
+                        }
+                        for p, d in by_protocol.items()
+                    },
+                }
+                self._save_json(self.settings.censorship_stats_path, censorship_stats)
 
-            # Общая статистика пайплайна
+            # Pipeline stats
             self._save_json('configs/pipeline_stats.json', self._stats)
 
         except Exception as e:
@@ -638,10 +728,11 @@ class OptimizedPipeline:
 
     async def _cleanup(self) -> None:
         """Очистка ресурсов. Вызывается в finally."""
-        try:
-            await self.verifier.close()
-        except Exception:
-            pass
+        if self.verifier:
+            try:
+                await self.verifier.close()
+            except Exception:
+                pass
         try:
             self.db.close()
         except Exception:
@@ -660,7 +751,7 @@ def main():
     )
     parser.add_argument(
         '--skip-verification', default='false',
-        help='Пропустить многоуровневую верификацию (true/false)'
+        help='Пропустить верификацию (true/false)'
     )
     parser.add_argument(
         '--test-domain', default='',
