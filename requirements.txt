@@ -47,6 +47,9 @@ lxml>=5.1.0
 # YAML-парсинг: Clash-конфиги, Xray outbounds (xray_balancer.py)
 PyYAML>=6.0.1
 
+# Парсинг дат из Telegram-сообщений (fetch_configs.py: from dateutil import parser)
+python-dateutil>=2.9.0
+
 # Синхронный HTTP-клиент (fallback, install.sh)
 requests>=2.31.0
 
@@ -90,7 +93,7 @@ python-json-logger>=2.0.7
 #   python -c "
 #   import aiohttp, aiofiles, xxhash, tqdm, yaml, requests
 #   import bs4, lxml, numpy, pandas, sklearn, catboost
-#   import aiodns, dotenv, msgpack, pybloom_live
+#   import aiodns, dotenv, msgpack, pybloom_live, dateutil
 #   print('All dependencies OK')
 #   "
 # =============================================================================
