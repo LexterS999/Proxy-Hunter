@@ -132,12 +132,16 @@ jobs:
         run: |
           bash install.sh --install-xray-only
 
-      # ===== Основной запуск =====
+      # ===== Основной запуск (с улучшенным логированием) =====
       - name: Run optimized pipeline
         id: pipeline
         continue-on-error: true
+        env:
+          PYTHONUNBUFFERED: 1
+          LOG_LEVEL: INFO   # можно сменить на DEBUG для ещё более детального вывода
         run: |
-          time python src/pipeline_optimized.py 2>&1 | tee pipeline_debug.log
+          set -x
+          python -u src/pipeline_optimized.py 2>&1 | tee pipeline_debug.log
 
       # ===== Вакуумирование SQLite (сжатие) =====
       - name: Vacuum SQLite database
@@ -313,6 +317,13 @@ jobs:
             echo "⚠️ Pipeline step did NOT succeed. See 'Run optimized pipeline' step output above"
             echo "   and the 'pipeline-debug-log' artifact for details."
           fi
+
+      # ===== Вывод последних строк лога =====
+      - name: Show last 50 lines of log
+        if: always()
+        run: |
+          echo "=== Последние 50 строк лога ==="
+          tail -50 pipeline_debug.log || true
 
       # ===== Загрузка артефактов =====
       - name: Upload all artifacts
