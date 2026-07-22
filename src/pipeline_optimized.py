@@ -465,6 +465,40 @@ class OptimizedPipeline:
             filtered.append(cfg)
         return filtered
 
+
+    def _build_probe_shortlist(self, configs: List[str], quality_scores: Dict[str, float]) -> List[str]:
+        if not configs:
+            return []
+        probe_budget = max(250, ACTIVE_CHECKER_WORKERS * 6)
+        if not USE_MAXIMUM_POWER:
+            probe_budget = min(probe_budget, max(100, SPECIFIC_CONFIG_COUNT // 5))
+        probe_budget = min(len(configs), probe_budget)
+
+        server_caps: Dict[str, int] = {}
+        shortlist: List[str] = []
+        for cfg in sorted(configs, key=lambda c: quality_scores.get(c, 0.0), reverse=True):
+            parsed = self._get_or_parse_config(cfg)
+            if not parsed:
+                continue
+            server = parsed.server or 'unknown'
+            used = server_caps.get(server, 0)
+            if used >= 2 and len(shortlist) < probe_budget // 2:
+                continue
+            server_caps[server] = used + 1
+            shortlist.append(cfg)
+            if len(shortlist) >= probe_budget:
+                break
+
+        if len(shortlist) < probe_budget:
+            seen = set(shortlist)
+            for cfg in sorted(configs, key=lambda c: quality_scores.get(c, 0.0), reverse=True):
+                if cfg not in seen:
+                    shortlist.append(cfg)
+                    seen.add(cfg)
+                    if len(shortlist) >= probe_budget:
+                        break
+        return shortlist
+
     async def save_state(self) -> None:
         logger.info("Saving state before shutdown...")
         if hasattr(self.deduplicator, '_bloom'):
@@ -562,10 +596,9 @@ class OptimizedPipeline:
                 logger.warning("No configs passed SNI filter, using all valid configs")
                 filtered_by_sni = valid_configs
 
-            # Шаг 3: Оценка
-            logger.info("⚡ Scoring profiles...")
+            # Шаг 3: Пассивная оценка
+            logger.info("⚡ Passive scoring profiles...")
             scored_configs = []
-            # ===== ИЗМЕНЕНИЕ: tqdm адаптирован =====
             with tqdm(total=len(filtered_by_sni), desc="Scoring configs",
                       file=sys.stderr, mininterval=0.5, ncols=80, leave=False) as pbar:
                 for idx, cfg in enumerate(filtered_by_sni):
@@ -574,25 +607,20 @@ class OptimizedPipeline:
                     try:
                         parsed = self._get_or_parse_config(cfg)
                         if parsed and parsed.parsed_data:
-                            score_info = self.scorer.score_profile(cfg, parsed.parsed_data, success=True)
+                            score_info = self.scorer.preview_score(cfg, parsed.parsed_data)
                             base_score = score_info['score']
-                            # Корректируем на основе датацентра
                             server = parsed.server
-                            if is_datacenter_ip(server):
-                                base_score *= 0.95   # штраф
-                            else:
-                                base_score *= 1.05   # бонус
+                            dc = is_datacenter_ip(server)
+                            base_score *= 0.95 if dc else 1.05
                             base_score = max(0, min(100, base_score))
-                            score_info['score'] = base_score
-
                             scored_configs.append({
                                 'config': cfg,
-                                'score': score_info['score'],
+                                'score': round(base_score, 2),
                                 'stability': score_info['stability'],
                                 'lifetime': score_info['lifetime'],
-                                'is_datacenter': is_datacenter_ip(server),
-                                'server_type': 'datacenter' if is_datacenter_ip(server) else 'vps',
-                                'parsed': parsed.parsed_data
+                                'is_datacenter': dc,
+                                'server_type': 'datacenter' if dc else 'vps',
+                                'parsed': parsed.parsed_data,
                             })
                     except Exception as e:
                         logger.error(f"Scoring error for config {idx}: {e}")
@@ -601,48 +629,104 @@ class OptimizedPipeline:
             if self._shutdown_requested:
                 await self.save_state()
                 return False
-            logger.info(f"✅ Scored {len(scored_configs)} configs")
+            logger.info(f"✅ Passively scored {len(scored_configs)} configs")
 
             if not scored_configs:
                 logger.error("No configs scored.")
                 return False
 
-            # Шаг 4: Фильтр по скору (используем SCORE_MIN_THRESHOLD)
             filtered = [item for item in scored_configs if item['score'] >= SCORE_MIN_THRESHOLD]
             logger.info(f"✅ After min_score filter: {len(filtered)}")
             if not filtered:
                 logger.warning("No configs passed min_score filter, lowering threshold...")
-                min_score = 0.0
-                filtered = [item for item in scored_configs if item['score'] >= min_score]
+                filtered = list(scored_configs)
                 logger.info(f"✅ After lowered filter: {len(filtered)}")
             if self._shutdown_requested or not filtered:
                 await self.save_state()
                 return False
 
-            # =================================================================
-            # Шаг 5: Используем скоринг
-            # =================================================================
-            logger.info("🔌 Skipping active checking (using only scoring history)...")
-            # Просто используем filtered по порогу (уже отфильтрованы)
-            good_configs = [item['config'] for item in filtered]  # все, что прошли порог
-            logger.info(f"✅ Selected {len(good_configs)} configs with score >= {SCORE_MIN_THRESHOLD}")
+            # Шаг 4: Дедупликация до активной проверки (сокращает сеть без потери качества)
+            logger.info("🧹 Deep deduplication before active probing...")
+            quality_scores = {item['config']: item['score'] for item in filtered}
+            deduped_candidates = await self.deduplicator.deduplicate_configs_async(
+                [item['config'] for item in filtered],
+                quality_scores,
+            )
+            logger.info(f"✅ After pre-probe dedup: {len(deduped_candidates)}")
 
-            if not good_configs:
-                logger.error("❌ No configs passed the minimum score threshold!")
-                # Можно понизить порог или использовать все scored
-                logger.warning("Using all scored configs as fallback.")
-                good_configs = [item['config'] for item in scored_configs]
-
-            # Шаг 6: Дедупликация
-            logger.info("🧹 Deep deduplication (new configs)...")
-            quality_scores = {item['config']: item['score'] for item in filtered if item['config'] in good_configs}
-            deduped = await self.deduplicator.deduplicate_configs_async(good_configs, quality_scores)
-            logger.info(f"✅ After dedup: {len(deduped)}")
-
-            if self._shutdown_requested or not deduped:
+            if self._shutdown_requested or not deduped_candidates:
                 if self._shutdown_requested:
                     await self.save_state()
                 return False
+
+            # Шаг 5: Гибридная активная проверка только лучших кандидатов
+            logger.info("🔌 Hybrid active checking on top passive candidates...")
+            if self.checker_cache is None:
+                self.checker_cache = ActiveChecker(timeout=TCP_TIMEOUT, max_workers=ACTIVE_CHECKER_WORKERS)
+            probe_shortlist = self._build_probe_shortlist(deduped_candidates, quality_scores)
+            logger.info(f"   Probe shortlist: {len(probe_shortlist)} / {len(deduped_candidates)}")
+            probe_results = await self.checker_cache.check_batch(probe_shortlist)
+            probe_map = {item['config']: item for item in probe_results}
+
+            probe_records = []
+            good_configs = []
+            strict_passive_floor = max(60.0, SCORE_MIN_THRESHOLD + 20.0)
+            for cfg in deduped_candidates:
+                parsed = self._get_or_parse_config(cfg)
+                if not parsed or not parsed.parsed_data:
+                    continue
+                base_score = quality_scores.get(cfg, 0.0)
+                probe = probe_map.get(cfg)
+                if probe is None:
+                    if base_score >= strict_passive_floor:
+                        good_configs.append(cfg)
+                    continue
+
+                success = bool(probe.get('success'))
+                latency = max(0.0, float(probe.get('latency', 0.0) or 0.0))
+                committed = self.scorer.score_profile(
+                    cfg,
+                    parsed.parsed_data,
+                    success=success,
+                    latency=latency,
+                    sni_used=probe.get('sni_override') or parsed.parsed_data.get('sni'),
+                    host_used=parsed.parsed_data.get('host'),
+                )
+                self.scorer.record_local_result(cfg, parsed.parsed_data, success, latency)
+
+                final_score = committed['score']
+                if success:
+                    latency_factor = max(0.90, min(1.12, 1200.0 / max(latency, 150.0))) if latency > 0 else 1.0
+                    final_score = max(final_score, min(100.0, final_score * latency_factor))
+                    good_configs.append(cfg)
+                else:
+                    final_score = min(final_score, base_score * 0.65)
+                quality_scores[cfg] = round(max(0.0, min(100.0, final_score)), 2)
+
+                profile_key = self.scorer.get_profile_key(cfg, parsed.parsed_data)
+                probe_records.append({
+                    'profile_key': profile_key,
+                    'timestamp': datetime.now().isoformat(),
+                    'success': success,
+                    'latency': latency,
+                    'protocol': parsed.protocol,
+                    'transport': parsed.parsed_data.get('type', parsed.parsed_data.get('net', 'tcp')),
+                    'sni_used': probe.get('sni_override') or parsed.parsed_data.get('sni'),
+                    'host_used': parsed.parsed_data.get('host'),
+                    'path_used': parsed.parsed_data.get('path'),
+                    'attempt_number': probe.get('attempt_number', 1),
+                    'total_attempts': probe.get('total_attempts', 1),
+                    'error': probe.get('error'),
+                })
+
+            if probe_records:
+                self.db.add_probe_results_batch(probe_records)
+
+            deduped = list(dict.fromkeys(good_configs))
+            logger.info(f"✅ Selected after hybrid validation: {len(deduped)}")
+            if not deduped:
+                logger.warning("No configs confirmed by active checks; using strongest passive fallbacks.")
+                deduped = sorted(deduped_candidates, key=lambda c: quality_scores.get(c, 0.0), reverse=True)[:100]
 
             # ========== ИЗМЕНЕНО: фильтрация по возрасту с учётом высокого скора ==========
             logger.info(f"⏳ Filtering configs by age (archive: {ARCHIVE_MAX_AGE_DAYS} days, simple: {SIMPLE_MAX_AGE_DAYS} days)")
