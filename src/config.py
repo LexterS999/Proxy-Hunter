@@ -22,7 +22,7 @@ from channel_quality_analyzer import ChannelQualityAnalyzer
 
 REGION = os.getenv('PROXY_HUNTER_REGION', 'RU')
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
