@@ -12,9 +12,12 @@ from pathlib import Path
 from math import inf
 import numpy as np
 
+# НОВОЕ: импорт для работы с БД
+from db import get_db
+
 from user_settings import (
     SOURCE_URLS, USE_MAXIMUM_POWER, SPECIFIC_CONFIG_COUNT, ENABLED_PROTOCOLS,
-    MAX_CONFIG_AGE_DAYS, CHANNEL_HEALTH_THRESHOLD   # <-- добавлено MAX_CONFIG_AGE_DAYS
+    MAX_CONFIG_AGE_DAYS, CHANNEL_HEALTH_THRESHOLD
 )
 from channel_quality_analyzer import ChannelQualityAnalyzer
 
@@ -224,8 +227,26 @@ class ProxyConfig:
             else:
                 ch.region_bonus = 0.0
 
+    # ===== НОВЫЙ МЕТОД: удаление мёртвых каналов =====
+    def _prune_dead_channels(self) -> None:
+        """Помечает каналы как disabled, если они не давали конфигов в последних 5 запусках."""
+        db = get_db()
+        for ch in self.SOURCE_URLS:
+            history = db.get_channel_history(ch.url, limit=5)
+            total = sum(h.get('total_configs', 0) for h in history)
+            if total == 0:
+                ch.enabled = False
+                logger.info(f"Channel {ch.url} disabled (no configs in last 5 runs).")
+            else:
+                # Если канал был отключён, но дал конфиги, включаем обратно
+                if not ch.enabled:
+                    ch.enabled = True
+                    logger.info(f"Channel {ch.url} re-enabled (found configs in history).")
+
     def get_enabled_channels(self) -> List[ChannelConfig]:
-        channels = [channel for channel in self.SOURCE_URLS if channel.enabled]
+        # Сначала удаляем мёртвые каналы
+        self._prune_dead_channels()
+        # Затем применяем фильтр здоровья
         self._apply_channel_health_filter()
         channels = [channel for channel in self.SOURCE_URLS if channel.enabled]
         if not channels:
