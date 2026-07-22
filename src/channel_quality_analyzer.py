@@ -1,5 +1,5 @@
 # ============================================================================
-# Файл: src/channel_quality_analyzer.py (ОПТИМИЗИРОВАННАЯ ВЕРСИЯ)
+# Файл: src/channel_quality_analyzer.py (ОПТИМИЗИРОВАННАЯ ВЕРСИЯ, ИСПРАВЛЕНА)
 # ============================================================================
 """
 Интеллектуальный анализатор качества каналов с пакетной обработкой данных.
@@ -27,7 +27,7 @@ from user_settings import (
     CHANNEL_MIN_VALID_RATIO,
     CHANNEL_MIN_PROTOCOLS,
     CHANNEL_HISTORY_DAYS,
-    CHANNEL_WHITELIST,
+    CHANNEL_WHITELIST,          # <-- ИСПРАВЛЕНО: правильное имя переменной
     CHANNEL_RECOVERING_TREND_THRESHOLD,
     CHANNEL_MIN_RECENT_DAYS_FOR_TREND,
     GRACE_PERIOD_RUNS,
@@ -54,7 +54,7 @@ class ChannelQualityAnalyzer:
 
     def __init__(self):
         self.db = get_db()
-        self._whitelist = set(CHANNEL_WHILTELIST)  # исправлено название
+        self._whitelist = set(CHANNEL_WHITELIST)   # <-- ИСПРАВЛЕНО: теперь имя правильное
         self._is_first_run = self._check_first_run()
         self._grace_period_runs = GRACE_PERIOD_RUNS
         self._adaptive_percentile = ADAPTIVE_THRESHOLD_PERCENTILE
