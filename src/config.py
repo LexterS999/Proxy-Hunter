@@ -3,7 +3,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 from urllib.parse import urlparse
 from dataclasses import dataclass, field
@@ -12,7 +12,6 @@ from pathlib import Path
 from math import inf
 import numpy as np
 
-# НОВОЕ: импорт для работы с БД
 from db import get_db
 
 from user_settings import (
@@ -21,7 +20,6 @@ from user_settings import (
 )
 from channel_quality_analyzer import ChannelQualityAnalyzer
 
-# === НОВАЯ ПЕРЕМЕННАЯ ===
 REGION = os.getenv('PROXY_HUNTER_REGION', 'RU')
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -89,7 +87,7 @@ class ProxyConfig:
         self.use_maximum_power: bool = USE_MAXIMUM_POWER
         self.specific_config_count: int = SPECIFIC_CONFIG_COUNT
         self.MAX_CONFIG_AGE_DAYS: int = MAX_CONFIG_AGE_DAYS
-        self.region: str = REGION  # НОВОЕ
+        self.region: str = REGION
 
         initial_urls: List[ChannelConfig] = [ChannelConfig(url=url) for url in SOURCE_URLS]
         self.SOURCE_URLS: List[ChannelConfig] = self._remove_duplicate_urls(initial_urls)
@@ -227,21 +225,38 @@ class ProxyConfig:
             else:
                 ch.region_bonus = 0.0
 
-    # ===== НОВЫЙ МЕТОД: удаление мёртвых каналов =====
+    # ===== НОВОЕ: усиленная проверка мёртвых каналов =====
     def _prune_dead_channels(self) -> None:
-        """Помечает каналы как disabled, если они не давали конфигов в последних 5 запусках."""
+        """Помечает каналы как disabled, если они не давали конфигов за последние 24 часа."""
         db = get_db()
+        cutoff = datetime.now() - timedelta(days=1)  # последние 24 часа
         for ch in self.SOURCE_URLS:
             history = db.get_channel_history(ch.url, limit=5)
+            # Проверяем, был ли успех в последних записях
+            recent_success = False
+            for h in history:
+                last_success = h.get('last_success')
+                if last_success:
+                    try:
+                        if datetime.fromisoformat(last_success) > cutoff:
+                            recent_success = True
+                            break
+                    except:
+                        pass
+            # Также проверяем total_configs за последние 5 запусков
             total = sum(h.get('total_configs', 0) for h in history)
-            if total == 0:
+            if not recent_success and total == 0:
                 ch.enabled = False
-                logger.info(f"Channel {ch.url} disabled (no configs in last 5 runs).")
+                logger.info(f"Channel {ch.url} disabled (no configs in last 24h and total=0).")
+            elif not recent_success and total > 0:
+                # Если были конфиги, но не в последние 24 часа, возможно стоит отключить
+                # Но пока оставим включённым, чтобы не потерять
+                logger.debug(f"Channel {ch.url} has old configs but no recent success, keeping enabled.")
             else:
-                # Если канал был отключён, но дал конфиги, включаем обратно
+                # Если канал был отключён, но есть успех, включаем
                 if not ch.enabled:
                     ch.enabled = True
-                    logger.info(f"Channel {ch.url} re-enabled (found configs in history).")
+                    logger.info(f"Channel {ch.url} re-enabled (found recent success).")
 
     def get_enabled_channels(self) -> List[ChannelConfig]:
         # Сначала удаляем мёртвые каналы
