@@ -18,6 +18,8 @@ from parse_fallback import FallbackParser
 from pathlib import Path
 from dateutil import parser as date_parser
 from collections import OrderedDict
+import hashlib
+import aiofiles
 
 from retry_utils import retry_with_backoff, is_retryable
 from session_pool import SessionPool
@@ -32,16 +34,15 @@ from user_settings import (
 
 logger = logging.getLogger(__name__)
 
+# ===== НОВОЕ: кеширование каналов =====
+CACHE_DIR = Path("configs/channel_cache")
+CACHE_MAX_AGE = 3 * 24 * 3600  # 3 дня
+CACHE_MAX_AGE = 3600  # 1 час для теста, но можно 3 дня
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-# =============================================================================
-# ИСПРАВЛЕНИЕ #8: BoundedSet с LRU-эвикцией вместо неограниченного set
-# =============================================================================
+
 class BoundedSet:
-    """
-    Множество с ограничением размера и LRU-эвикцией.
-    Предотвращает неограниченный рост памяти при USE_MAXIMUM_POWER=True.
-    """
-
+    """Множество с ограничением размера и LRU-эвикцией."""
     def __init__(self, maxsize: int = 50000):
         self._maxsize = maxsize
         self._data: OrderedDict[str, None] = OrderedDict()
@@ -51,7 +52,7 @@ class BoundedSet:
             self._data.move_to_end(item)
         else:
             if len(self._data) >= self._maxsize:
-                self._data.popitem(last=False)  # Удаляем самый старый
+                self._data.popitem(last=False)
             self._data[item] = None
 
     def __contains__(self, item: str) -> bool:
@@ -66,17 +67,15 @@ class BoundedSet:
 
 class AdaptiveRateLimiter:
     """Адаптивный Token Bucket с обратной связью по ошибкам."""
-
     def __init__(self, rate: float = 1.5, max_burst: int = 10):
         self.rate = rate
         self.max_tokens = max_burst
         self.tokens = max_burst
         self.last_refill = time.time()
-        self._lock: Optional[asyncio.Lock] = None  # ИСПРАВЛЕНО: ленивое создание
-        self.backoff_factor = 1.0  # множитель скорости
+        self._lock: Optional[asyncio.Lock] = None
+        self.backoff_factor = 1.0
 
     def _get_lock(self) -> asyncio.Lock:
-        """ИСПРАВЛЕНО: Ленивое создание Lock."""
         if self._lock is None:
             self._lock = asyncio.Lock()
         return self._lock
@@ -89,7 +88,6 @@ class AdaptiveRateLimiter:
             self.tokens = min(self.max_tokens,
                               self.tokens + elapsed * self.rate * self.backoff_factor)
             self.last_refill = now
-
             if self.tokens < 1:
                 wait = (1 - self.tokens) / (self.rate * self.backoff_factor)
                 await asyncio.sleep(wait)
@@ -98,40 +96,35 @@ class AdaptiveRateLimiter:
                 self.tokens -= 1
 
     def report_success(self) -> None:
-        """Увеличиваем скорость при успехе."""
         self.backoff_factor = min(2.0, self.backoff_factor * 1.02)
 
     def report_error(self, is_429: bool = False) -> None:
-        """Уменьшаем скорость при ошибке."""
         if is_429:
             self.backoff_factor = max(0.1, self.backoff_factor * 0.7)
         else:
             self.backoff_factor = max(0.3, self.backoff_factor * 0.9)
 
     def set_retry_after(self, seconds: int) -> None:
-        """Принудительно ждать."""
         self.last_refill = time.time() + seconds
 
 
 class AsyncConfigFetcher:
     """Полностью асинхронный сборщик конфигураций с адаптивным лимитером."""
 
-    def __init__(self, config: ProxyConfig, max_concurrent: int = 50):
+    def __init__(self, config: ProxyConfig, max_concurrent: int = 200):  # ИЗМЕНЕНО: было 50
         self.config = config
         self.validator = ConfigValidator()
         self.max_concurrent = max_concurrent
         self._session: Optional[aiohttp.ClientSession] = None
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self.protocol_counts: Dict[str, int] = {p: 0 for p in config.SUPPORTED_PROTOCOLS}
-        # ИСПРАВЛЕНИЕ #8: BoundedSet вместо неограниченного set
         self.seen_configs: BoundedSet = BoundedSet(maxsize=50000)
         self.channel_protocol_counts: Dict[str, Dict[str, int]] = {}
 
         num_channels = len(config.SOURCE_URLS) if config.SOURCE_URLS else 1
-        self._connector_limit = min(200, num_channels * 10)
-        self._connector_per_host = min(50, num_channels * 5)
+        self._connector_limit = min(500, num_channels * 10)      # ИЗМЕНЕНО
+        self._connector_per_host = min(100, num_channels * 5)    # ИЗМЕНЕНО
 
-        # Используем адаптивный лимитер
         self._rate_limiter = AdaptiveRateLimiter(rate=TELEGRAM_CALLS_PER_SECOND)
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
@@ -144,10 +137,59 @@ class AsyncConfigFetcher:
         )
         return self._session
 
+    # ===== НОВОЕ: кеширование с ETag =====
+    async def _fetch_with_cache(self, url: str) -> Optional[str]:
+        cache_key = hashlib.md5(url.encode()).hexdigest()
+        cache_path = CACHE_DIR / f"{cache_key}.txt"
+        etag_path = CACHE_DIR / f"{cache_key}.etag"
+
+        # Проверяем кеш
+        if cache_path.exists():
+            mtime = cache_path.stat().st_mtime
+            if time.time() - mtime < CACHE_MAX_AGE:
+                async with aiofiles.open(cache_path, 'r') as f:
+                    return await f.read()
+            else:
+                # Попробуем использовать ETag для проверки изменений
+                if etag_path.exists():
+                    async with aiofiles.open(etag_path, 'r') as f:
+                        etag = await f.read()
+                    # Делаем HEAD-запрос для проверки ETag
+                    try:
+                        session = await self._ensure_session()
+                        async with session.head(url) as resp:
+                            if resp.status == 200:
+                                new_etag = resp.headers.get('ETag')
+                                if new_etag and new_etag == etag:
+                                    # Контент не изменился, обновляем mtime
+                                    os.utime(cache_path, None)
+                                    async with aiofiles.open(cache_path, 'r') as f:
+                                        return await f.read()
+                    except Exception:
+                        pass  # Если HEAD не удался, игнорируем
+
+        # Если кеша нет или он устарел, делаем полный запрос
+        text = await self._fetch_with_retry(url)
+        if text:
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            async with aiofiles.open(cache_path, 'w') as f:
+                await f.write(text)
+            # Сохраняем ETag, если есть
+            try:
+                session = await self._ensure_session()
+                async with session.head(url) as resp:
+                    if resp.status == 200:
+                        etag = resp.headers.get('ETag')
+                        if etag:
+                            async with aiofiles.open(etag_path, 'w') as f:
+                                await f.write(etag)
+            except Exception:
+                pass
+        return text
+
     @retry_with_backoff(attempts=3, base_delay=0.2, max_delay=5.0, deadline=30.0)
     async def _fetch_with_retry(self, url: str) -> Optional[str]:
         await self._rate_limiter.acquire()
-
         session = await self._ensure_session()
         try:
             async with session.get(url) as response:
@@ -187,7 +229,7 @@ class AsyncConfigFetcher:
 
     async def fetch_ssconf_configs(self, url: str) -> List[str]:
         https_url = self.validator.convert_ssconf_to_https(url)
-        text = await self._fetch_with_retry(https_url)
+        text = await self._fetch_with_cache(https_url)  # ИЗМЕНЕНО: теперь с кешем
         if not text:
             return []
         text = text.strip()
@@ -224,7 +266,7 @@ class AsyncConfigFetcher:
                 self.config.update_channel_stats(channel, True, response_time)
             return configs
 
-        text = await self._fetch_with_retry(channel.url)
+        text = await self._fetch_with_cache(channel.url)  # ИЗМЕНЕНО: кеширование
         if text is None:
             self.config.update_channel_stats(channel, False)
             return configs
@@ -319,7 +361,6 @@ class AsyncConfigFetcher:
                 if self.validator.validate_protocol_config(clean, protocol):
                     channel.metrics.valid_configs += 1
                     channel.metrics.protocol_counts[protocol] = channel.metrics.protocol_counts.get(protocol, 0) + 1
-                    # ИСПРАВЛЕНИЕ #8: BoundedSet с LRU-эвикцией
                     if clean not in self.seen_configs:
                         channel.metrics.unique_configs += 1
                         self.seen_configs.add(clean)
@@ -378,21 +419,48 @@ class AsyncConfigFetcher:
                 balanced.extend(plist)
         return balanced
 
+    # ===== НОВОЕ: метод для обработки чанка каналов =====
+    async def fetch_chunk(self, channels: List[ChannelConfig]) -> List[str]:
+        """
+        Обрабатывает список каналов параллельно и возвращает собранные конфиги.
+        """
+        if not channels:
+            return []
+        tasks = [self.fetch_channel(ch) for ch in channels]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        all_configs: List[str] = []
+        for idx, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(f"Channel {channels[idx].url} failed after retries: {result}")
+            else:
+                all_configs.extend(result)
+        return all_configs
+
     async def fetch_all(self) -> List[str]:
         enabled = self.config.get_enabled_channels()
         if not enabled:
             logger.warning("No enabled channels found.")
             return []
 
-        tasks = [self.fetch_channel(ch) for ch in enabled]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Разбиваем на чанки для параллельной обработки несколькими фетчерами
+        chunk_size = 200  # ИЗМЕНЕНО: размер чанка
+        chunks = [enabled[i:i+chunk_size] for i in range(0, len(enabled), chunk_size)]
+        logger.info(f"Splitting {len(enabled)} channels into {len(chunks)} chunks of {chunk_size}")
+
+        # Создаём несколько фетчеров (каждый со своим семафором и лимитером)
+        # Используем один общий config, но отдельные экземпляры для независимости
+        fetchers = [AsyncConfigFetcher(self.config, max_concurrent=self.max_concurrent) for _ in chunks]
+        tasks = [fetcher.fetch_chunk(chunk) for fetcher, chunk in zip(fetchers, chunks)]
+
+        # Запускаем все чанки параллельно
+        chunk_results = await asyncio.gather(*tasks, return_exceptions=True)
 
         all_configs: List[str] = []
-        for idx, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(f"Channel {enabled[idx].url} failed after retries: {result}")
+        for idx, res in enumerate(chunk_results):
+            if isinstance(res, Exception):
+                logger.error(f"Chunk {idx} failed: {res}")
             else:
-                all_configs.extend(result)
+                all_configs.extend(res)
 
         if all_configs:
             all_configs = self.balance_protocols(sorted(set(all_configs)))
