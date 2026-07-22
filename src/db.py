@@ -1,17 +1,13 @@
+# ============================================================================
+# Файл: src/db.py (добавлены методы для карантина и адаптивного порога)
+# ============================================================================
 #!/usr/bin/env python3
 
 """
 Модуль для работы с SQLite-базой данных истории.
 Хранит статистику запусков, каналов и профилей с компрессией.
 Добавлены индексы, TTL-кеш для распаковки, WAL-режим, авто-вакуум.
-
-ИСПРАВЛЕНО:
-- lru_cache заменён на TTL-кеш с инвалидацией
-- Добавлена функция get_db() для обратной совместимости с channel_quality_analyzer.py
-- Добавлен метод update_profiles_batch() для ProfileScorer._flush_profiles()
-- Добавлен метод get_profile_last_seen() для фильтрации по возрасту
-- Добавлен auto_vacuum = FULL для автоматического сжатия базы
-- Добавлен метод vacuum() для ручного сжатия
+Добавлены таблицы и методы для карантина каналов.
 """
 
 import sqlite3
@@ -60,11 +56,9 @@ class TTLCache:
             if blob in self._cache:
                 timestamp, value = self._cache[blob]
                 if time.time() - timestamp < self._ttl:
-                    # Перемещаем в конец (LRU)
                     self._cache.move_to_end(blob)
                     return value
                 else:
-                    # Устарело — удаляем
                     del self._cache[blob]
             return None
 
@@ -78,7 +72,7 @@ class TTLCache:
                 self._cache[blob] = (time.time(), value)
             else:
                 if len(self._cache) >= self._maxsize:
-                    self._cache.popitem(last=False)  # Удаляем самый старый
+                    self._cache.popitem(last=False)
                 self._cache[blob] = (time.time(), value)
 
     def invalidate(self) -> None:
@@ -101,12 +95,10 @@ def _decompress_cached(blob: bytes) -> Any:
     if blob is None or not blob:
         return None
 
-    # Проверяем кеш
     cached = _decompress_cache.get(blob)
     if cached is not None:
         return cached
 
-    # Распаковываем
     try:
         result = json.loads(zlib.decompress(blob).decode('utf-8'))
         _decompress_cache.put(blob, result)
@@ -119,7 +111,6 @@ def _decompress(blob: bytes) -> Any:
     return _decompress_cached(blob)
 
 def invalidate_decompress_cache() -> None:
-    """Публичная функция для инвалидации кеша распаковки (вызывать после UPDATE в БД)."""
     _decompress_cache.invalidate()
 
 class HistoryDB:
@@ -139,7 +130,7 @@ class HistoryDB:
         with self._get_connection() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
-            conn.execute("PRAGMA auto_vacuum = FULL")  # <-- добавлено для сжатия
+            conn.execute("PRAGMA auto_vacuum = FULL")
             cursor = conn.cursor()
 
             # Таблица запусков (runs)
@@ -215,7 +206,18 @@ class HistoryDB:
                 )
             ''')
 
-            # Индексы (добавляем, если их нет)
+            # ===== НОВАЯ ТАБЛИЦА: карантин каналов =====
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS channel_grace (
+                    url TEXT PRIMARY KEY,
+                    grace_remaining INTEGER DEFAULT 0,
+                    last_bad_run INTEGER,
+                    last_updated TEXT,
+                    FOREIGN KEY(last_bad_run) REFERENCES runs(id)
+                )
+            ''')
+
+            # Индексы
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_history_url ON channel_history(url)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_history_timestamp ON channel_history(timestamp)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_history_run_id ON channel_history(run_id)")
@@ -229,7 +231,6 @@ class HistoryDB:
 
     @contextmanager
     def _get_connection(self):
-        """Контекстный менеджер для соединения с БД."""
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         try:
@@ -298,7 +299,6 @@ class HistoryDB:
                 datetime.now().isoformat()
             ))
             conn.commit()
-        # Инвалидируем кеш после записи
         invalidate_decompress_cache()
 
     def get_channel(self, url: str) -> Optional[Dict]:
@@ -350,19 +350,9 @@ class HistoryDB:
                 profile_data.get('overall_score', 0.0)
             ))
             conn.commit()
-        # Инвалидируем кеш после записи
         invalidate_decompress_cache()
 
     def update_profiles_batch(self, profiles: List[Dict]) -> None:
-        """
-        Пакетное обновление/вставка профилей.
-        Вызывается из ProfileScorer._flush_profiles() при завершении работы.
-
-        Каждый элемент profiles — dict с полями:
-            key, server, protocol, first_seen, last_seen,
-            success_count, fail_count, latencies, timestamps,
-            is_active, stability, lifetime, overall_score
-        """
         if not profiles:
             return
         try:
@@ -398,7 +388,6 @@ class HistoryDB:
                     ''', rows)
                     conn.commit()
                     logger.debug(f"Batch updated {len(rows)} profiles in SQLite")
-            # Инвалидируем кеш после записи
             invalidate_decompress_cache()
         except Exception as e:
             logger.error(f"Failed to batch update profiles: {e}")
@@ -430,9 +419,7 @@ class HistoryDB:
                 result.append(d)
             return result
 
-    # ========== НОВЫЙ МЕТОД ==========
     def get_profile_last_seen(self, key: str) -> Optional[str]:
-        """Возвращает last_seen для профиля или None."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT last_seen FROM profiles WHERE key = ?', (key,))
@@ -519,22 +506,68 @@ class HistoryDB:
             return None
         return sum(valid_scores) / len(valid_scores)
 
-    # ========== НОВЫЙ МЕТОД ДЛЯ СЖАТИЯ ==========
     def vacuum(self) -> None:
-        """Выполняет VACUUM для сжатия базы данных и освобождения места."""
         with self._get_connection() as conn:
             conn.execute("VACUUM")
             logger.info("SQLite database vacuumed (space reclaimed).")
 
-# =============================================================================
-# Инициализация и обратная совместимость
-# =============================================================================
+    # ===== НОВЫЕ МЕТОДЫ ДЛЯ КАРАНТИНА =====
+    def init_channel_grace_state(self, url: str, grace_period: int) -> None:
+        """Инициализирует запись карантина для канала."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO channel_grace (url, grace_remaining, last_updated)
+                VALUES (?, ?, ?)
+            ''', (url, grace_period, datetime.now().isoformat()))
+            conn.commit()
+
+    def get_channel_grace_state(self, url: str) -> Optional[Dict]:
+        """Возвращает состояние карантина для канала."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM channel_grace WHERE url = ?', (url,))
+            row = cursor.fetchone()
+            if row:
+                return dict(row)
+            return None
+
+    def decrement_channel_grace(self, url: str) -> None:
+        """Уменьшает grace_remaining на 1 (если > 0)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE channel_grace
+                SET grace_remaining = MAX(0, grace_remaining - 1),
+                    last_updated = ?
+                WHERE url = ?
+            ''', (datetime.now().isoformat(), url))
+            conn.commit()
+
+    def reset_channel_grace(self, url: str, grace_period: int) -> None:
+        """Сбрасывает grace_remaining до полного значения."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE channel_grace
+                SET grace_remaining = ?,
+                    last_updated = ?
+                WHERE url = ?
+            ''', (grace_period, datetime.now().isoformat(), url))
+            conn.commit()
+
+    def set_channel_grace(self, url: str, grace_remaining: int) -> None:
+        """Устанавливает конкретное значение grace_remaining."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO channel_grace (url, grace_remaining, last_updated)
+                VALUES (?, ?, ?)
+            ''', (url, grace_remaining, datetime.now().isoformat()))
+            conn.commit()
+
+
 _db = HistoryDB()
 
 def get_db() -> HistoryDB:
-    """
-    Возвращает глобальный экземпляр HistoryDB.
-    Необходима для обратной совместимости с channel_quality_analyzer.py
-    и другими модулями, которые импортируют get_db из db.
-    """
     return _db
