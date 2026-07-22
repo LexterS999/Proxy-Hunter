@@ -431,11 +431,11 @@ class OptimizedPipeline:
         except Exception as e:
             logger.warning(f"Failed to refresh channel health: {e}")
 
-    # ========== НОВЫЙ МЕТОД: фильтрация по возрасту ==========
-    def _filter_by_age(self, configs: List[str], max_age_days: int) -> List[str]:
+    # ========== НОВЫЙ МЕТОД: фильтрация по возрасту с учётом скора ==========
+    def _filter_by_age_with_score(self, configs: List[str], max_age_days: int, score_threshold: int = 80) -> List[str]:
         """
         Фильтрует список конфигов, оставляя только те, у которых last_seen
-        не старше max_age_days дней.
+        не старше max_age_days дней, ИЛИ профиль имеет высокий скор (> score_threshold).
         """
         if max_age_days <= 0:
             return []
@@ -450,10 +450,15 @@ class OptimizedPipeline:
                     last_dt = datetime.fromisoformat(last_seen)
                     if last_dt >= cutoff:
                         filtered.append(cfg)
-                    continue
+                        continue
+                    # Если старый, но скор высокий -> оставляем
+                    profile = db.get_profile(key)
+                    if profile and profile.get('overall_score', 0) > score_threshold:
+                        filtered.append(cfg)
+                        continue
                 except:
                     pass
-            # Если нет last_seen, считаем, что профиль новый (пропускаем)
+            # Если нет last_seen, считаем новым -> пропускаем
             filtered.append(cfg)
         return filtered
 
@@ -562,7 +567,6 @@ class OptimizedPipeline:
                     try:
                         parsed = self._get_or_parse_config(cfg)
                         if parsed and parsed.parsed_data:
-                            # ---- НОВОЕ: детекция датацентра и коррекция скора ----
                             score_info = self.scorer.score_profile(cfg, parsed.parsed_data, success=True)
                             base_score = score_info['score']
                             # Корректируем на основе датацентра
@@ -667,6 +671,58 @@ class OptimizedPipeline:
                             item['score'] = min(100, item['score'] + latency_bonus)
                             break
 
+            # ========== НОВОЕ: множественные замеры для пограничных конфигов ==========
+            logger.info("📊 Multi-probe for borderline configs (score 25-35)...")
+            borderline = [item for item in filtered if 25 <= item['score'] <= 35]
+            if borderline:
+                logger.info(f"   Found {len(borderline)} borderline configs, performing 3 probes with 2s interval...")
+                import statistics
+                for item in borderline:
+                    cfg = item['config']
+                    parsed = self._get_or_parse_config(cfg)
+                    if not parsed:
+                        continue
+                    host = parsed.server
+                    port = parsed.port
+                    use_tls = parsed.parsed_data.get('security') in ('tls', 'reality') or parsed.parsed_data.get('tls') in ('tls', 'reality')
+                    latencies = []
+                    for _ in range(3):
+                        latency = await checker._tcp_latency(host, port, use_tls)
+                        if latency > 0:
+                            latencies.append(latency)
+                        await asyncio.sleep(2.0)
+                    if len(latencies) >= 2:
+                        median_lat = statistics.median(latencies)
+                        if median_lat < MAX_LATENCY_MS:
+                            # Улучшаем скор
+                            item['score'] = min(100, item['score'] + 10)
+                            logger.debug(f"   Improved score for {cfg[:30]}... to {item['score']}")
+                        else:
+                            item['score'] = max(0, item['score'] - 5)
+                            logger.debug(f"   Lowered score for {cfg[:30]}... to {item['score']}")
+
+            # ========== НОВОЕ: финальная верификация через Xray для пограничных ==========
+            logger.info("🔬 Final Xray verification for borderline configs (score 25-35)...")
+            for item in borderline:
+                cfg = item['config']
+                parsed = self._get_or_parse_config(cfg)
+                if not parsed:
+                    continue
+                # Создаём шаблон конфига (упрощённо)
+                config_template = {}  # в реальности нужно построить outbound
+                # Проверяем через Xray
+                try:
+                    result = await self.reality_hunter.verify_with_xray(
+                        sni=parsed.parsed_data.get('sni', parsed.server),
+                        server_ip=parsed.server,
+                        config_template=config_template
+                    )
+                    if result.get('success'):
+                        item['score'] = min(100, item['score'] + 5)
+                        logger.debug(f"   Xray verification passed for {cfg[:30]}")
+                except Exception as e:
+                    logger.debug(f"   Xray verification failed for {cfg[:30]}: {e}")
+
             # Шаг 5.1: SNI-тестирование для топ-10 конфигов
             logger.info("🔬 SNI multi-test for top 10 configs...")
             top_configs = filtered[:10]
@@ -710,50 +766,61 @@ class OptimizedPipeline:
                     await self.save_state()
                 return False
 
-            # ========== НОВОЕ: Фильтрация по возрасту ==========
+            # ========== ИЗМЕНЕНО: фильтрация по возрасту с учётом высокого скора ==========
             logger.info(f"⏳ Filtering configs by age (archive: {ARCHIVE_MAX_AGE_DAYS} days, simple: {SIMPLE_MAX_AGE_DAYS} days)")
-            archive_configs = self._filter_by_age(deduped, ARCHIVE_MAX_AGE_DAYS)
-            simple_configs = self._filter_by_age(deduped, SIMPLE_MAX_AGE_DAYS)
+
+            archive_configs = self._filter_by_age_with_score(deduped, ARCHIVE_MAX_AGE_DAYS)
+            simple_configs = self._filter_by_age_with_score(deduped, SIMPLE_MAX_AGE_DAYS)
             logger.info(f"   Archive configs: {len(archive_configs)}")
             logger.info(f"   Simple configs: {len(simple_configs)}")
+
+            # ========== ИЗМЕНЕНО: загрузка старого архива с фильтрацией ==========
+            old_archive = await self._load_archive_async()
+            old_archive_filtered = self._filter_by_age_with_score(old_archive, ARCHIVE_MAX_AGE_DAYS)
+            logger.info(f"   Old archive filtered: {len(old_archive)} -> {len(old_archive_filtered)}")
+
+            # ========== ИЗМЕНЕНО: мягкий вывод ==========
+            # Для простого вывода — только топ-100 со скором > 50
+            sorted_by_score = sorted(simple_configs, key=lambda c: quality_scores.get(c, 0), reverse=True)
+            simple_top = [c for c in sorted_by_score if quality_scores.get(c, 0) > 50][:100]
+            logger.info(f"   Simple output (top-100, score>50): {len(simple_top)} configs")
+
+            # Для архива — все конфиги со скором > 0, отсортированные по score + last_seen
+            archive_sorted = sorted(archive_configs, key=lambda c: (quality_scores.get(c, 0), self._get_config_key(c)), reverse=True)
+            archive_all = [c for c in archive_sorted if quality_scores.get(c, 0) > 0]
+            logger.info(f"   Archive output (score>0): {len(archive_all)} configs")
 
             # Шаг 7: Архивация с именами
             logger.info("💾 Archiving logic (with name mapping)...")
             name_mapping = await self._load_name_mapping_async()
-            # Добавляем имена только для тех, кто попадает в архив
-            for cfg in archive_configs:
+            for cfg in archive_all:
                 key = self._get_config_key(cfg)
                 if key not in name_mapping:
                     name_mapping[key] = self._generate_name(cfg)
 
-            # Загружаем старый архив (если есть)
-            old_archive = await self._load_archive_async()
-            # Объединяем старый архив с новым (только те, что прошли фильтр)
+            # Объединяем с отфильтрованным старым архивом
             merged_archive = []
             seen_keys = set()
-            # Сначала добавляем старые, но только если они ещё не просрочены
-            # (пропускаем старые, которые не прошли фильтр)
-            for cfg in old_archive:
+            # Старые (уже отфильтрованы)
+            for cfg in old_archive_filtered:
                 key = self._get_config_key(cfg)
                 if key not in seen_keys:
-                    # Проверяем возраст для старого конфига
-                    if self._filter_by_age([cfg], ARCHIVE_MAX_AGE_DAYS):
-                        merged_archive.append(cfg)
-                        seen_keys.add(key)
-            # Добавляем новые
-            for cfg in archive_configs:
+                    merged_archive.append(cfg)
+                    seen_keys.add(key)
+            # Новые
+            for cfg in archive_all:
                 key = self._get_config_key(cfg)
                 if key not in seen_keys:
                     merged_archive.append(cfg)
                     seen_keys.add(key)
 
-            logger.info(f"🔄 Merged archive: {len(old_archive)} old + {len(archive_configs)} new → {len(merged_archive)} unique")
+            logger.info(f"🔄 Merged archive: {len(old_archive_filtered)} old + {len(archive_all)} new → {len(merged_archive)} unique")
 
             await self._save_archive_with_names_async(merged_archive, name_mapping)
-            await self._save_simple_async(simple_configs, name_mapping)
+            await self._save_simple_async(simple_top, name_mapping)  # сохраняем только топ-100
 
             logger.info(f"✅ Archive saved: {len(merged_archive)} configs in {self.output_file}")
-            logger.info(f"✅ Simple output saved: {len(simple_configs)} configs in {self.simple_file}")
+            logger.info(f"✅ Simple output saved: {len(simple_top)} configs in {self.simple_file}")
 
             # Шаг 8: Xray конфиг
             logger.info("📦 Generating Xray balanced config...")
@@ -830,7 +897,7 @@ class OptimizedPipeline:
                 'active_ok': len(good_configs),
                 'deduped': len(deduped),
                 'archive': len(merged_archive),
-                'simple': len(simple_configs),
+                'simple': len(simple_top),
                 'protocols': parse_stats,
                 'quality': {
                     'avg_score': sum(item['score'] for item in filtered) / len(filtered) if filtered else 0,
