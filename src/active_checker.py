@@ -1,7 +1,10 @@
+# ============================================================================
+# Файл: src/active_checker.py (обновлён)
+# ============================================================================
 """
 Модуль для активной проверки работоспособности прокси-конфигураций.
-Выполняет TCP SYN и HTTP-пробинг (GET с Range) с кешированием результатов.
-Добавлена динамическая адаптация порога по перцентилям и проверка ASN.
+Выполняет TCP SYN и HTTP-пробинг (HEAD-запрос) с кешированием результатов.
+Добавлена динамическая адаптация порога по перцентилям и проверка ASN (отключена).
 """
 
 import asyncio
@@ -33,23 +36,8 @@ from sni_probe import SNIProbe
 
 logger = logging.getLogger(__name__)
 
-# Простая карта ASN для известных сервисов (локальный кэш)
-KNOWN_ASN_MAP = {
-    'google.com': 'AS15169',
-    'www.google.com': 'AS15169',
-    'gstatic.com': 'AS15169',
-    'www.gstatic.com': 'AS15169',
-    'youtube.com': 'AS15169',
-    'www.youtube.com': 'AS15169',
-    'rutube.ru': 'AS?',  # Пример для РФ
-    'mail.ru': 'AS?',
-    'yandex.ru': 'AS?',
-    'vk.com': 'AS?',
-    'icloud.com': 'AS714',
-    'apple.com': 'AS714',
-    'cloudflare.com': 'AS13335',
-    'www.cloudflare.com': 'AS13335',
-}
+# Простая карта ASN для известных сервисов (локальный кэш) - НЕ ИСПОЛЬЗУЕТСЯ
+KNOWN_ASN_MAP = {}
 
 class CachedActiveChecker:
     """
@@ -168,49 +156,30 @@ class CachedActiveChecker:
         self._tcp_cache[key] = latency
         return latency
 
+    # ===== ИЗМЕНЕНО: HEAD-запрос без Range =====
     async def _http_probe(self, host: str, port: int, use_tls: bool) -> float:
-        """Использует GET с Range для проверки скорости."""
+        """Использует HEAD-запрос для проверки доступности."""
         try:
             session = await self._get_session()
             proto = 'https' if use_tls else 'http'
-            url = f"{proto}://{host}:{port}/generate_204"
+            url = f"{proto}://{host}:{port}/"
             headers = {
                 "Host": host,
-                "Range": "bytes=0-1048576",
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             }
             start = time.time()
-            async with session.get(url, headers=headers, timeout=HTTP_TIMEOUT) as resp:
-                if resp.status in (200, 206):
-                    # Читаем немного данных для проверки скорости
-                    chunk = await resp.content.read(1024 * 50)
-                    elapsed = time.time() - start
-                    if elapsed > 0 and len(chunk) > 0:
-                        speed = len(chunk) / 1024 / elapsed  # КБ/с
-                        if speed > 5.0:
-                            return (time.time() - start) * 1000
+            async with session.head(url, headers=headers, timeout=HTTP_TIMEOUT) as resp:
+                if resp.status < 400:
+                    return (time.time() - start) * 1000
                 return -1.0
         except Exception as e:
             logger.debug(f"HTTP probe error for {host}:{port}: {e}")
             return -1.0
 
+    # ===== ИЗМЕНЕНО: проверка ASN отключена =====
     async def _check_asn_match(self, host: str, sni: str) -> bool:
-        """
-        Проверяет, что SNI соответствует ожидаемому ASN для домена.
-        Возвращает False, если ASN не совпадает (подозрительно), иначе True.
-        """
-        if not sni or sni == host:
-            return True  # нет проверки
-        expected_asn = KNOWN_ASN_MAP.get(sni)
-        if not expected_asn:
-            return True  # неизвестный домен, пропускаем
-        try:
-            ips = await self._resolver.query(host, 'A')
-            if not ips:
-                return True
-            return True
-        except Exception:
-            return True
+        """Всегда возвращает True (ASN-проверка отключена)."""
+        return True
 
     async def check_config(self, config: str) -> Dict:
         now = time.time()
@@ -237,11 +206,12 @@ class CachedActiveChecker:
 
         host, port, use_tls = server_info
 
-        sni = self._extract_sni(config)
-        if sni and not await self._check_asn_match(host, sni):
-            result['error'] = 'asn_mismatch'
-            self._cache[config] = (now, result)
-            return result
+        # ASN-проверка отключена
+        # sni = self._extract_sni(config)
+        # if sni and not await self._check_asn_match(host, sni):
+        #     result['error'] = 'asn_mismatch'
+        #     self._cache[config] = (now, result)
+        #     return result
 
         tcp_latency = await self._limiter.run(host, self._tcp_latency(host, port, use_tls))
         if tcp_latency < 0:
@@ -276,6 +246,46 @@ class CachedActiveChecker:
         self._cache[config] = (now, result)
         return result
 
+    # ===== НОВОЕ: проверка с альтернативными SNI =====
+    async def check_with_alternative_sni(self, config: str, alt_sni_list: List[str] = None) -> Dict:
+        """
+        Проверяет конфигурацию с основным SNI, а при неудаче — с альтернативными.
+        Возвращает результат с пометкой sni_override, если альтернативный SNI сработал.
+        """
+        if alt_sni_list is None:
+            alt_sni_list = ['cloudflare.com', 'google.com', 'youtube.com', 'speedtest.net', 'dl.google.com']
+
+        # Сначала проверяем с основным SNI
+        result = await self.check_config(config)
+        if result.get('success', False):
+            return result
+
+        # Если не удалось, пробуем альтернативные SNI
+        parsed = self._extract_parsed(config)
+        if not parsed:
+            return result
+
+        host = parsed.get('address') or parsed.get('add')
+        port = parsed.get('port', 443)
+        use_tls = parsed.get('security') in ('tls', 'reality') or parsed.get('tls') in ('tls', 'reality')
+        if not use_tls:
+            return result
+
+        probe = SNIProbe(timeout=self.timeout)
+        for sni in alt_sni_list:
+            res = await probe.probe_check(host, sni)
+            if res.get('success'):
+                # Копируем результат и добавляем пометку
+                new_result = result.copy()
+                new_result['sni_override'] = sni
+                new_result['success'] = True
+                new_result['valid'] = True
+                new_result['latency'] = res.get('latency', 0)
+                new_result['error'] = None
+                return new_result
+
+        return result
+
     async def check_batch(self, configs: List[str]) -> List[Dict]:
         if not configs:
             return []
@@ -296,7 +306,7 @@ class CachedActiveChecker:
 
         async def check_one(cfg: str):
             async with sem:
-                return await self.check_config(cfg)
+                return await self.check_with_alternative_sni(cfg)
 
         tasks = [check_one(cfg) for cfg in configs]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -401,7 +411,7 @@ class CachedActiveChecker:
         self._cache.clear()
         logger.info("Cleared check cache")
 
-    # === НОВЫЙ МЕТОД ===
+    # ===== НОВЫЙ МЕТОД (оставлен для совместимости) =====
     async def test_with_multiple_sni(self, config: str, sni_list: List[str]) -> Dict:
         """
         Проверяет конфигурацию с несколькими SNI.
@@ -412,7 +422,6 @@ class CachedActiveChecker:
             return {'error': 'parse_failed'}
         host = parsed.get('add') or parsed.get('address')
         port = int(parsed.get('port', 443))
-        # Определяем, использовать ли TLS
         use_tls = parsed.get('security') in ('tls', 'reality') or parsed.get('tls') in ('tls', 'reality')
         if not use_tls:
             return {'error': 'no_tls'}
