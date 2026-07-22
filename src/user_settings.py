@@ -1,18 +1,23 @@
+#!/usr/bin/env python3
+
 """
-Настройки проекта с валидацией и единой точкой загрузки.
-Используется синглтон для предотвращения побочных эффектов при импорте.
+Файл пользовательских настроек для Proxy-Hunter.
+Все параметры сгруппированы по блокам и снабжены комментариями.
+Измените значения под свои нужды.
 """
 
 import os
-import re
 import logging
-from urllib.parse import urlparse
-from typing import List, Optional, Dict, Any
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SOURCE_URLS = [
+# ============================================================
+# БЛОК 1: ИСТОЧНИКИ КОНФИГУРАЦИЙ (каналы Telegram)
+# ============================================================
+
+# Список URL Telegram-каналов (или ssconf-ссылок), откуда собирать конфиги.
+# Можно указать как прямые ссылки на каналы (https://t.me/s/...).
+PROXY_SOURCE_URLS = [
     "https://t.me/s/SOSkeyNET",
     "https://t.me/s/GozargahAzad",
     "https://t.me/s/generalconfiig",
@@ -21,277 +26,292 @@ DEFAULT_SOURCE_URLS = [
     "https://t.me/s/WangCai2",
 ]
 
-CUSTOM_CHANNELS_FILE = 'custom_channels.txt'
+# Файл с пользовательскими каналами (построчный список URL).
+# Если файл существует, он переопределяет PROXY_SOURCE_URLS.
+PROXY_CUSTOM_CHANNELS_FILE = 'custom_channels.txt'
+
+# ============================================================
+# БЛОК 2: РЕЖИМ РАБОТЫ (количество собираемых конфигов)
+# ============================================================
+
+# Если True – собирать максимум возможного (до 20 000 конфигов).
+# Если False – собирать ограниченное число (задаётся ниже).
+PROXY_USE_MAXIMUM_POWER = True
+
+# Целевое количество конфигов при PROXY_USE_MAXIMUM_POWER = False.
+# Рекомендуемые значения: 50–500 (для теста) или 1000–5000 (для продакшена).
+PROXY_SPECIFIC_CONFIG_COUNT = 5000
+
+# ============================================================
+# БЛОК 3: ВРЕМЕННЫЕ ОКНА ДЛЯ СОХРАНЕНИЯ
+# ============================================================
+
+# Максимальный возраст профиля (в днях) для попадания в output_archive.txt.
+# Профили, у которых last_seen старше этого числа, не будут включены в архив.
+PROXY_ARCHIVE_MAX_AGE_DAYS = 14   # пример: 14
+
+# Максимальный возраст профиля (в днях) для попадания в output_simple.txt.
+# Профили, у которых last_seen старше этого числа, не будут включены в простой вывод.
+PROXY_SIMPLE_MAX_AGE_DAYS = 3     # пример: 3
+
+# ============================================================
+# БЛОК 4: СЕТЕВЫЕ ПАРАМЕТРЫ (таймауты, лимиты)
+# ============================================================
+
+# Таймаут TCP-соединения при активной проверке (секунды).
+# Для быстрых сетей оставьте 5, для медленных или перегруженных – увеличьте до 10–15.
+PROXY_CHECK_TCP_TIMEOUT = 5.0
+
+# Таймаут HTTP-запроса при проверке (секунды).
+# Используется для замеров скорости и получения ответа от прокси.
+PROXY_CHECK_HTTP_TIMEOUT = 5.0
+
+# Максимально допустимая задержка (мс). Профили с большей задержкой считаются непригодными.
+# Рекомендуемый диапазон: 2000–10000 мс.
+PROXY_MAX_LATENCY_MS = 6000.0
+
+# Количество одновременных проверок (воркеров) в активном чекере.
+# Не рекомендуется ставить > 200, чтобы не перегружать сеть.
+PROXY_ACTIVE_CHECKER_WORKERS = 100
+
+# Максимальное число одновременных проверок на один хост (IP/домен).
+# Помогает избежать блокировок со стороны сервера.
+PROXY_PER_HOST_LIMIT = 10
+
+# ============================================================
+# БЛОК 5: ОГРАНИЧЕНИЯ ЗАПРОСОВ К TELEGRAM
+# ============================================================
+
+# Количество запросов к Telegram в секунду (адаптивный лимитер).
+# Стандартное ограничение Telegram – 1 запрос в секунду на метод.
+# Можно увеличить до 2–3, если каналы отвечают быстро.
+PROXY_TELEGRAM_CALLS_PER_SECOND = 1.5
+
+# Максимальный размер ответа от Telegram (байт). Если ответ больше – обрезается.
+PROXY_MAX_RESPONSE_SIZE_BYTES = 1_048_576  # 1 МБ
+
+# ============================================================
+# БЛОК 6: ПОВТОРНЫЕ ПОПЫТКИ (retry)
+# ============================================================
+
+# Количество попыток загрузки канала при ошибке.
+PROXY_CHANNEL_RETRY_ATTEMPTS = 3
+
+# Начальная задержка между попытками (секунды).
+PROXY_CHANNEL_RETRY_BASE_DELAY = 0.5
+
+# Максимальная задержка между попытками (секунды).
+PROXY_CHANNEL_RETRY_MAX_DELAY = 10.0
+
+# Общее время, отведённое на все попытки (секунды).
+PROXY_CHANNEL_RETRY_DEADLINE = 60.0
+
+# ============================================================
+# БЛОК 7: ОЦЕНКА КАЧЕСТВА (скоринг)
+# ============================================================
+
+# Минимальный балл качества, при котором профиль попадает в финальный вывод.
+# Баллы от 0 до 100. Рекомендуемые значения: 30–50.
+PROXY_SCORE_MIN_THRESHOLD = 30.0
+
+# Веса для расчёта итогового балла (сумма должна быть равна 1.0).
+PROXY_SCORE_WEIGHTS = {
+    'stability': 0.30,        # стабильность задержки (CV)
+    'success_rate': 0.25,     # доля успешных проверок
+    'reputation': 0.20,       # репутация сервера (датацентр/частный VPS)
+    'lifetime': 0.15,         # ожидаемое время жизни (часы)
+    'config_quality': 0.10,   # качество конфигурации (наличие SNI, flow и т.д.)
+}
+
+# Период полураспада для учёта старых данных (часы).
+# Чем больше, тем дольше учитывается история.
+PROXY_DECAY_PERIOD_HOURS = 24.0
+
+# ============================================================
+# БЛОК 8: ДЕТЕКЦИЯ ДАТАЦЕНТРОВ
+# ============================================================
+
+# Путь к файлу с базой данных MaxMind GeoLite2 ASN (mmdb).
+# Если файл не найден, используется встроенный список популярных датацентров.
+PROXY_GEOLITE2_ASN_PATH = 'configs/GeoLite2-ASN.mmdb'
+
+# Встроенный список IP-диапазонов / ASN известных датацентров.
+# Используется как резервный, если база MaxMind недоступна.
+PROXY_BUILTIN_DATACENTER_ASNS = {
+    'AS16509': 'AWS',      # Amazon
+    'AS14618': 'AWS',
+    'AS15169': 'Google',
+    'AS396982': 'Google',
+    'AS8075': 'Microsoft',
+    'AS8068': 'Microsoft',
+    'AS13335': 'Cloudflare',
+    'AS14061': 'DigitalOcean',
+    'AS24940': 'Hetzner',
+    'AS16276': 'OVH',
+    'AS45102': 'Alibaba',
+    'AS31898': 'Oracle',
+    'AS54113': 'Fastly',
+    'AS20940': 'Akamai',
+    'AS63949': 'Linode',
+    'AS133752': 'Leaseweb',
+    'AS20473': 'Vultr',
+}
+# Примечание: этот список можно расширять вручную.
+
+# ============================================================
+# БЛОК 9: ПРОТОКОЛЫ (включить/выключить)
+# ============================================================
+
+# Словарь с флагами включения для каждого протокола.
+# True – собирать и обрабатывать, False – игнорировать.
+PROXY_ENABLED_PROTOCOLS = {
+    "wireguard://": False,
+    "hysteria2://": True,
+    "vless://": True,
+    "vmess://": True,
+    "ss://": True,
+    "trojan://": True,
+    "tuic://": False,
+}
+
+# ============================================================
+# БЛОК 10: ПАРАМЕТРЫ ЗДОРОВЬЯ КАНАЛОВ
+# ============================================================
+
+# Порог общего скора канала, ниже которого он считается нездоровым.
+PROXY_CHANNEL_HEALTH_THRESHOLD = 30.0
+
+# Минимальное число конфигов, которое должен дать канал, чтобы считаться рабочим.
+PROXY_CHANNEL_MIN_CONFIGS = 3
+
+# Минимальная доля валидных конфигов от общего числа.
+PROXY_CHANNEL_MIN_VALID_RATIO = 0.05
+
+# Минимальное число различных протоколов в канале.
+PROXY_CHANNEL_MIN_PROTOCOLS = 1
+
+# Сколько дней истории учитывать при оценке канала.
+PROXY_CHANNEL_HISTORY_DAYS = 7
+
+# Порог положительного тренда для восстановления канала.
+PROXY_CHANNEL_RECOVERING_TREND_THRESHOLD = 0.1
+
+# Минимальное число дней для расчёта тренда.
+PROXY_CHANNEL_MIN_RECENT_DAYS_FOR_TREND = 2
+
+# Список каналов, которые всегда считаются здоровыми (белый список).
+PROXY_CHANNEL_WHITELIST = []   # пример: ["https://t.me/s/MyReliableChannel"]
+
+# ============================================================
+# БЛОК 11: СТАТИСТИКА И АНАЛИЗ
+# ============================================================
+
+# Минимальное число запусков для адаптивных порогов (аномалии).
+PROXY_MIN_RUNS_FOR_ADAPTIVE_THRESHOLDS = 9
+
+# Порог Z-скора для детекции аномалий.
+PROXY_ANOMALY_Z_SCORE_THRESHOLD = 2.5
+
+# Множитель межквартильного размаха (IQR) для детекции аномалий.
+PROXY_ANOMALY_IQR_MULTIPLIER = 1.5
+
+# Порог падения скора для детекции аномалий (относительно среднего).
+PROXY_ANOMALY_DROP_THRESHOLD = 0.5
+
+# Максимальное число записей в истории (runs).
+PROXY_MAX_HISTORY_RUNS = 100
+
+# Интервал автосохранения истории (секунды).
+PROXY_SAVE_INTERVAL_SECONDS = 30
+
+# Шифровать IP-адреса в истории (хешировать).
+PROXY_ENCRYPT_IPS = True
+
+# Соль для хеширования IP.
+PROXY_ENCRYPTION_SALT = 'proxy_hunter_salt_2026'
 
 
-class Settings:
-    """Единый класс настроек с валидацией и перезагрузкой."""
-    _instance = None
-    _initialized = False
+# ============================================================
+# ЗАГРУЗКА ПЕРЕМЕННЫХ ИЗ ОКРУЖЕНИЯ (переопределение через ENV)
+# ============================================================
 
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
+def _get_bool(key, default):
+    val = os.getenv(key, str(default))
+    return val.lower() in ('true', '1', 'yes', 'on')
 
-    def __init__(self):
-        if not self._initialized:
-            self._load()
-            self._initialized = True
-
-    def _load(self):
-        """Загружает настройки из окружения и файлов с валидацией."""
-        # Каналы
-        self._source_urls = self._load_channels()
-        self._source_urls = self._validate_urls(self._source_urls)
-
-        # Основные флаги
-        self.use_maximum_power = self._get_bool('PROXY_HUNTER_USE_MAXIMUM_POWER', True)
-        self.specific_config_count = self._get_int('PROXY_HUNTER_SPECIFIC_CONFIG_COUNT', 5000, min_val=1, max_val=50000)
-        self.max_config_age_days = self._get_int('PROXY_HUNTER_MAX_CONFIG_AGE_DAYS', 14, min_val=1, max_val=90)
-
-        # Протоколы
-        self.enabled_protocols = {
-            "wireguard://": self._get_bool('PROXY_HUNTER_ENABLE_WIREGUARD', False),
-            "hysteria2://": self._get_bool('PROXY_HUNTER_ENABLE_HYSTERIA2', True),
-            "vless://": self._get_bool('PROXY_HUNTER_ENABLE_VLESS', True),
-            "vmess://": self._get_bool('PROXY_HUNTER_ENABLE_VMESS', True),
-            "ss://": self._get_bool('PROXY_HUNTER_ENABLE_SS', True),
-            "trojan://": self._get_bool('PROXY_HUNTER_ENABLE_TROJAN', True),
-            "tuic://": self._get_bool('PROXY_HUNTER_ENABLE_TUIC', False),
-        }
-
-        # Таймауты и лимиты
-        self.tcp_timeout = self._get_float('PROXY_HUNTER_TCP_TIMEOUT', 5.0, min_val=0.5, max_val=30.0)
-        self.http_timeout = self._get_float('PROXY_HUNTER_HTTP_TIMEOUT', 5.0, min_val=0.5, max_val=30.0)
-        self.max_latency_ms = self._get_float('PROXY_HUNTER_MAX_LATENCY', 6000.0, min_val=100.0, max_val=60000.0)
-        self.active_checker_workers = self._get_int('PROXY_HUNTER_ACTIVE_WORKERS', 100, min_val=1, max_val=500)
-        self.per_host_limit = self._get_int('PROXY_HUNTER_PER_HOST_LIMIT', 10, min_val=1, max_val=50)
-
-        # Rate limiting
-        self.telegram_calls_per_second = self._get_float('PROXY_HUNTER_TELEGRAM_RATE', 1.5, min_val=0.1, max_val=10.0)
-        self.max_response_size_bytes = self._get_int('PROXY_HUNTER_MAX_RESPONSE_SIZE', 1048576, min_val=65536, max_val=10485760)
-
-        # Повторные попытки
-        self.channel_retry_attempts = self._get_int('PROXY_HUNTER_CHANNEL_RETRIES', 3, min_val=1, max_val=10)
-        self.channel_retry_base_delay = self._get_float('PROXY_HUNTER_CHANNEL_RETRY_DELAY', 0.5, min_val=0.1, max_val=10.0)
-        self.channel_retry_max_delay = self._get_float('PROXY_HUNTER_CHANNEL_RETRY_MAX_DELAY', 10.0, min_val=1.0, max_val=60.0)
-        self.channel_retry_deadline = self._get_float('PROXY_HUNTER_CHANNEL_RETRY_DEADLINE', 60.0, min_val=10.0, max_val=300.0)
-
-        # Оценка каналов
-        self.channel_health_threshold = self._get_float('PROXY_HUNTER_CHANNEL_HEALTH_THRESHOLD', 30.0, min_val=0.0, max_val=100.0)
-        self.channel_min_configs = self._get_int('PROXY_HUNTER_CHANNEL_MIN_CONFIGS', 3, min_val=1, max_val=100)
-        self.channel_min_valid_ratio = self._get_float('PROXY_HUNTER_CHANNEL_MIN_VALID_RATIO', 0.05, min_val=0.0, max_val=1.0)
-        self.channel_min_protocols = self._get_int('PROXY_HUNTER_CHANNEL_MIN_PROTOCOLS', 1, min_val=1, max_val=10)
-        self.channel_history_days = self._get_int('PROXY_HUNTER_CHANNEL_HISTORY_DAYS', 7, min_val=3, max_val=30)
-        self.channel_recovering_trend_threshold = self._get_float('PROXY_HUNTER_RECOVERING_TREND_THRESHOLD', 0.1, min_val=0.01, max_val=0.5)
-        self.channel_min_recent_days_for_trend = self._get_int('PROXY_HUNTER_MIN_RECENT_DAYS_FOR_TREND', 2, min_val=1, max_val=7)
-
-        whitelist_raw = os.getenv('PROXY_HUNTER_CHANNEL_WHITELIST', '')
-        self.channel_whitelist = [url.strip() for url in whitelist_raw.split(',') if url.strip()]
-
-        # Веса для оценки
-        self.score_weights = {
-            'stability': self._get_float('PROXY_HUNTER_WEIGHT_STABILITY', 0.3, min_val=0, max_val=1),
-            'success_rate': self._get_float('PROXY_HUNTER_WEIGHT_SUCCESS_RATE', 0.25, min_val=0, max_val=1),
-            'reputation': self._get_float('PROXY_HUNTER_WEIGHT_REPUTATION', 0.2, min_val=0, max_val=1),
-            'lifetime': self._get_float('PROXY_HUNTER_WEIGHT_LIFETIME', 0.15, min_val=0, max_val=1),
-            'config_quality': self._get_float('PROXY_HUNTER_WEIGHT_CONFIG_QUALITY', 0.1, min_val=0, max_val=1),
-        }
-        # Нормализуем веса
-        total = sum(self.score_weights.values())
-        if total > 0:
-            for k in self.score_weights:
-                self.score_weights[k] /= total
-
-        # Прочие
-        self.decay_period_hours = self._get_float('PROXY_HUNTER_DECAY_PERIOD', 24.0, min_val=1, max_val=720)
-        self.min_runs_for_adaptive_thresholds = self._get_int('PROXY_HUNTER_MIN_RUNS_ADAPTIVE', 9, min_val=3, max_val=50)
-        self.anomaly_z_score_threshold = self._get_float('PROXY_HUNTER_ANOMALY_Z_SCORE', 2.5, min_val=1.0, max_val=5.0)
-        self.anomaly_iqr_multiplier = self._get_float('PROXY_HUNTER_ANOMALY_IQR', 1.5, min_val=0.5, max_val=3.0)
-        self.anomaly_drop_threshold = self._get_float('PROXY_HUNTER_ANOMALY_DROP', 0.5, min_val=0.1, max_val=0.9)
-        self.max_history_runs = self._get_int('PROXY_HUNTER_MAX_HISTORY_RUNS', 100, min_val=10, max_val=1000)
-        self.save_interval_seconds = self._get_int('PROXY_HUNTER_SAVE_INTERVAL', 30, min_val=5, max_val=300)
-        self.encrypt_ips = self._get_bool('PROXY_HUNTER_ENCRYPT_IPS', True)
-        self.encryption_salt = os.getenv('PROXY_HUNTER_ENCRYPTION_SALT', 'proxy_hunter_salt_2026')
-
-        logger.info("Settings loaded and validated.")
-
-    def _get_bool(self, key: str, default: bool) -> bool:
-        val = os.getenv(key, str(default))
-        return val.lower() in ('true', '1', 'yes', 'on')
-
-    def _get_int(self, key: str, default: int, min_val: Optional[int] = None, max_val: Optional[int] = None) -> int:
-        try:
-            val = int(os.getenv(key, str(default)))
-            if min_val is not None and val < min_val:
-                logger.warning(f"{key}={val} below minimum {min_val}, using {default}")
-                return default
-            if max_val is not None and val > max_val:
-                logger.warning(f"{key}={val} above maximum {max_val}, using {default}")
-                return default
-            return val
-        except (ValueError, TypeError):
-            logger.warning(f"Invalid int for {key}, using {default}")
+def _get_int(key, default, min_val=None, max_val=None):
+    try:
+        val = int(os.getenv(key, str(default)))
+        if min_val is not None and val < min_val:
             return default
-
-    def _get_float(self, key: str, default: float, min_val: Optional[float] = None, max_val: Optional[float] = None) -> float:
-        try:
-            val = float(os.getenv(key, str(default)))
-            if min_val is not None and val < min_val:
-                logger.warning(f"{key}={val} below minimum {min_val}, using {default}")
-                return default
-            if max_val is not None and val > max_val:
-                logger.warning(f"{key}={val} above maximum {max_val}, using {default}")
-                return default
-            return val
-        except (ValueError, TypeError):
-            logger.warning(f"Invalid float for {key}, using {default}")
+        if max_val is not None and val > max_val:
             return default
+        return val
+    except:
+        return default
 
-    def _load_channels(self) -> List[str]:
-        """Загружает каналы из файла или возвращает список по умолчанию."""
-        channels = []
-        if Path(CUSTOM_CHANNELS_FILE).exists():
-            try:
-                with open(CUSTOM_CHANNELS_FILE, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        line = line.strip()
-                        if line and not line.startswith('#'):
-                            norm = self._normalize_url(line)
-                            if norm and norm not in channels:
-                                channels.append(norm)
-            except Exception as e:
-                logger.warning(f"Failed to load channels from {CUSTOM_CHANNELS_FILE}: {e}")
-        if not channels:
-            logger.info("No custom channels found, using defaults.")
-            channels = DEFAULT_SOURCE_URLS[:]
-        return channels
+def _get_float(key, default, min_val=None, max_val=None):
+    try:
+        val = float(os.getenv(key, str(default)))
+        if min_val is not None and val < min_val:
+            return default
+        if max_val is not None and val > max_val:
+            return default
+        return val
+    except:
+        return default
 
-    def _normalize_url(self, url: str) -> str:
-        url = url.strip().lower()
-        if not url:
-            return ''
-        if url.startswith('ssconf://'):
-            url = url.replace('ssconf://', 'https://', 1)
-        parsed = urlparse(url)
-        if parsed.scheme and parsed.netloc:
-            netloc = parsed.netloc.replace('www.', '')
-            path = parsed.path.rstrip('/')
-            return f"{parsed.scheme}://{netloc}{path}"
-        return url
+# Загружаем каналы из файла, если он существует
+def _load_channels():
+    channels = []
+    if os.path.exists(PROXY_CUSTOM_CHANNELS_FILE):
+        try:
+            with open(PROXY_CUSTOM_CHANNELS_FILE, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        channels.append(line)
+        except Exception as e:
+            logger.warning(f"Не удалось загрузить каналы из {PROXY_CUSTOM_CHANNELS_FILE}: {e}")
+    if not channels:
+        channels = PROXY_SOURCE_URLS[:]
+    return channels
 
-    def _validate_urls(self, urls: List[str]) -> List[str]:
-        valid = []
-        for u in urls:
-            if u.startswith(('http://', 'https://', 'ssconf://')):
-                valid.append(u)
-            else:
-                logger.warning(f"Invalid URL format: {u}, skipping")
-        return valid
-
-    def reload(self):
-        """Перезагружает настройки (каналы и переменные окружения)."""
-        self._load()
-        logger.info("Settings reloaded.")
-
-    @property
-    def source_urls(self) -> List[str]:
-        return self._source_urls
-
-    @property
-    def enabled_protocols(self) -> Dict[str, bool]:
-        return self._enabled_protocols
-
-    @enabled_protocols.setter
-    def enabled_protocols(self, value):
-        self._enabled_protocols = value
-
-
-# Глобальный экземпляр для обратной совместимости
-_settings = Settings()
-
-# Экспортируем атрибуты для доступа как к глобальным переменным
-SOURCE_URLS = _settings.source_urls
-USE_MAXIMUM_POWER = _settings.use_maximum_power
-SPECIFIC_CONFIG_COUNT = _settings.specific_config_count
-MAX_CONFIG_AGE_DAYS = _settings.max_config_age_days
-ENABLED_PROTOCOLS = _settings.enabled_protocols
-TCP_TIMEOUT = _settings.tcp_timeout
-HTTP_TIMEOUT = _settings.http_timeout
-MAX_LATENCY_MS = _settings.max_latency_ms
-ACTIVE_CHECKER_WORKERS = _settings.active_checker_workers
-PER_HOST_LIMIT = _settings.per_host_limit
-TELEGRAM_CALLS_PER_SECOND = _settings.telegram_calls_per_second
-MAX_RESPONSE_SIZE_BYTES = _settings.max_response_size_bytes
-CHANNEL_RETRY_ATTEMPTS = _settings.channel_retry_attempts
-CHANNEL_RETRY_BASE_DELAY = _settings.channel_retry_base_delay
-CHANNEL_RETRY_MAX_DELAY = _settings.channel_retry_max_delay
-CHANNEL_RETRY_DEADLINE = _settings.channel_retry_deadline
-CHANNEL_HEALTH_THRESHOLD = _settings.channel_health_threshold
-CHANNEL_MIN_CONFIGS = _settings.channel_min_configs
-CHANNEL_MIN_VALID_RATIO = _settings.channel_min_valid_ratio
-CHANNEL_MIN_PROTOCOLS = _settings.channel_min_protocols
-CHANNEL_HISTORY_DAYS = _settings.channel_history_days
-CHANNEL_RECOVERING_TREND_THRESHOLD = _settings.channel_recovering_trend_threshold
-CHANNEL_MIN_RECENT_DAYS_FOR_TREND = _settings.channel_min_recent_days_for_trend
-CHANNEL_WHITELIST = _settings.channel_whitelist
-SCORE_WEIGHTS = _settings.score_weights
-DECAY_PERIOD_HOURS = _settings.decay_period_hours
-MIN_RUNS_FOR_ADAPTIVE_THRESHOLDS = _settings.min_runs_for_adaptive_thresholds
-ANOMALY_Z_SCORE_THRESHOLD = _settings.anomaly_z_score_threshold
-ANOMALY_IQR_MULTIPLIER = _settings.anomaly_iqr_multiplier
-ANOMALY_DROP_THRESHOLD = _settings.anomaly_drop_threshold
-MAX_HISTORY_RUNS = _settings.max_history_runs
-SAVE_INTERVAL_SECONDS = _settings.save_interval_seconds
-ENCRYPT_IPS = _settings.encrypt_ips
-ENCRYPTION_SALT = _settings.encryption_salt
-
-# Функция для перезагрузки (может быть вызвана извне)
-def reload_settings():
-    _settings.reload()
-    # Обновляем глобальные переменные
-    global SOURCE_URLS, USE_MAXIMUM_POWER, SPECIFIC_CONFIG_COUNT, MAX_CONFIG_AGE_DAYS
-    global ENABLED_PROTOCOLS, TCP_TIMEOUT, HTTP_TIMEOUT, MAX_LATENCY_MS, ACTIVE_CHECKER_WORKERS
-    global PER_HOST_LIMIT, TELEGRAM_CALLS_PER_SECOND, MAX_RESPONSE_SIZE_BYTES
-    global CHANNEL_RETRY_ATTEMPTS, CHANNEL_RETRY_BASE_DELAY, CHANNEL_RETRY_MAX_DELAY, CHANNEL_RETRY_DEADLINE
-    global CHANNEL_HEALTH_THRESHOLD, CHANNEL_MIN_CONFIGS, CHANNEL_MIN_VALID_RATIO, CHANNEL_MIN_PROTOCOLS
-    global CHANNEL_HISTORY_DAYS, CHANNEL_RECOVERING_TREND_THRESHOLD, CHANNEL_MIN_RECENT_DAYS_FOR_TREND
-    global CHANNEL_WHITELIST, SCORE_WEIGHTS, DECAY_PERIOD_HOURS, MIN_RUNS_FOR_ADAPTIVE_THRESHOLDS
-    global ANOMALY_Z_SCORE_THRESHOLD, ANOMALY_IQR_MULTIPLIER, ANOMALY_DROP_THRESHOLD, MAX_HISTORY_RUNS
-    global SAVE_INTERVAL_SECONDS, ENCRYPT_IPS, ENCRYPTION_SALT
-
-    SOURCE_URLS = _settings.source_urls
-    USE_MAXIMUM_POWER = _settings.use_maximum_power
-    SPECIFIC_CONFIG_COUNT = _settings.specific_config_count
-    MAX_CONFIG_AGE_DAYS = _settings.max_config_age_days
-    ENABLED_PROTOCOLS = _settings.enabled_protocols
-    TCP_TIMEOUT = _settings.tcp_timeout
-    HTTP_TIMEOUT = _settings.http_timeout
-    MAX_LATENCY_MS = _settings.max_latency_ms
-    ACTIVE_CHECKER_WORKERS = _settings.active_checker_workers
-    PER_HOST_LIMIT = _settings.per_host_limit
-    TELEGRAM_CALLS_PER_SECOND = _settings.telegram_calls_per_second
-    MAX_RESPONSE_SIZE_BYTES = _settings.max_response_size_bytes
-    CHANNEL_RETRY_ATTEMPTS = _settings.channel_retry_attempts
-    CHANNEL_RETRY_BASE_DELAY = _settings.channel_retry_base_delay
-    CHANNEL_RETRY_MAX_DELAY = _settings.channel_retry_max_delay
-    CHANNEL_RETRY_DEADLINE = _settings.channel_retry_deadline
-    CHANNEL_HEALTH_THRESHOLD = _settings.channel_health_threshold
-    CHANNEL_MIN_CONFIGS = _settings.channel_min_configs
-    CHANNEL_MIN_VALID_RATIO = _settings.channel_min_valid_ratio
-    CHANNEL_MIN_PROTOCOLS = _settings.channel_min_protocols
-    CHANNEL_HISTORY_DAYS = _settings.channel_history_days
-    CHANNEL_RECOVERING_TREND_THRESHOLD = _settings.channel_recovering_trend_threshold
-    CHANNEL_MIN_RECENT_DAYS_FOR_TREND = _settings.channel_min_recent_days_for_trend
-    CHANNEL_WHITELIST = _settings.channel_whitelist
-    SCORE_WEIGHTS = _settings.score_weights
-    DECAY_PERIOD_HOURS = _settings.decay_period_hours
-    MIN_RUNS_FOR_ADAPTIVE_THRESHOLDS = _settings.min_runs_for_adaptive_thresholds
-    ANOMALY_Z_SCORE_THRESHOLD = _settings.anomaly_z_score_threshold
-    ANOMALY_IQR_MULTIPLIER = _settings.anomaly_iqr_multiplier
-    ANOMALY_DROP_THRESHOLD = _settings.anomaly_drop_threshold
-    MAX_HISTORY_RUNS = _settings.max_history_runs
-    SAVE_INTERVAL_SECONDS = _settings.save_interval_seconds
-    ENCRYPT_IPS = _settings.encrypt_ips
-    ENCRYPTION_SALT = _settings.encryption_salt
+SOURCE_URLS = _load_channels()
+USE_MAXIMUM_POWER = _get_bool('PROXY_USE_MAXIMUM_POWER', PROXY_USE_MAXIMUM_POWER)
+SPECIFIC_CONFIG_COUNT = _get_int('PROXY_SPECIFIC_CONFIG_COUNT', PROXY_SPECIFIC_CONFIG_COUNT, 1, 50000)
+ARCHIVE_MAX_AGE_DAYS = _get_int('PROXY_ARCHIVE_MAX_AGE_DAYS', PROXY_ARCHIVE_MAX_AGE_DAYS, 1, 90)
+SIMPLE_MAX_AGE_DAYS = _get_int('PROXY_SIMPLE_MAX_AGE_DAYS', PROXY_SIMPLE_MAX_AGE_DAYS, 1, 30)
+TCP_TIMEOUT = _get_float('PROXY_CHECK_TCP_TIMEOUT', PROXY_CHECK_TCP_TIMEOUT, 0.5, 30.0)
+HTTP_TIMEOUT = _get_float('PROXY_CHECK_HTTP_TIMEOUT', PROXY_CHECK_HTTP_TIMEOUT, 0.5, 30.0)
+MAX_LATENCY_MS = _get_float('PROXY_MAX_LATENCY_MS', PROXY_MAX_LATENCY_MS, 100.0, 60000.0)
+ACTIVE_CHECKER_WORKERS = _get_int('PROXY_ACTIVE_CHECKER_WORKERS', PROXY_ACTIVE_CHECKER_WORKERS, 1, 500)
+PER_HOST_LIMIT = _get_int('PROXY_PER_HOST_LIMIT', PROXY_PER_HOST_LIMIT, 1, 50)
+TELEGRAM_CALLS_PER_SECOND = _get_float('PROXY_TELEGRAM_CALLS_PER_SECOND', PROXY_TELEGRAM_CALLS_PER_SECOND, 0.1, 10.0)
+MAX_RESPONSE_SIZE_BYTES = _get_int('PROXY_MAX_RESPONSE_SIZE_BYTES', PROXY_MAX_RESPONSE_SIZE_BYTES, 65536, 10485760)
+CHANNEL_RETRY_ATTEMPTS = _get_int('PROXY_CHANNEL_RETRY_ATTEMPTS', PROXY_CHANNEL_RETRY_ATTEMPTS, 1, 10)
+CHANNEL_RETRY_BASE_DELAY = _get_float('PROXY_CHANNEL_RETRY_BASE_DELAY', PROXY_CHANNEL_RETRY_BASE_DELAY, 0.1, 10.0)
+CHANNEL_RETRY_MAX_DELAY = _get_float('PROXY_CHANNEL_RETRY_MAX_DELAY', PROXY_CHANNEL_RETRY_MAX_DELAY, 1.0, 60.0)
+CHANNEL_RETRY_DEADLINE = _get_float('PROXY_CHANNEL_RETRY_DEADLINE', PROXY_CHANNEL_RETRY_DEADLINE, 10.0, 300.0)
+SCORE_MIN_THRESHOLD = _get_float('PROXY_SCORE_MIN_THRESHOLD', PROXY_SCORE_MIN_THRESHOLD, 0.0, 100.0)
+SCORE_WEIGHTS = PROXY_SCORE_WEIGHTS
+DECAY_PERIOD_HOURS = _get_float('PROXY_DECAY_PERIOD_HOURS', PROXY_DECAY_PERIOD_HOURS, 1.0, 720.0)
+ENABLED_PROTOCOLS = PROXY_ENABLED_PROTOCOLS
+CHANNEL_HEALTH_THRESHOLD = _get_float('PROXY_CHANNEL_HEALTH_THRESHOLD', PROXY_CHANNEL_HEALTH_THRESHOLD, 0.0, 100.0)
+CHANNEL_MIN_CONFIGS = _get_int('PROXY_CHANNEL_MIN_CONFIGS', PROXY_CHANNEL_MIN_CONFIGS, 1, 100)
+CHANNEL_MIN_VALID_RATIO = _get_float('PROXY_CHANNEL_MIN_VALID_RATIO', PROXY_CHANNEL_MIN_VALID_RATIO, 0.0, 1.0)
+CHANNEL_MIN_PROTOCOLS = _get_int('PROXY_CHANNEL_MIN_PROTOCOLS', PROXY_CHANNEL_MIN_PROTOCOLS, 1, 10)
+CHANNEL_HISTORY_DAYS = _get_int('PROXY_CHANNEL_HISTORY_DAYS', PROXY_CHANNEL_HISTORY_DAYS, 3, 30)
+CHANNEL_RECOVERING_TREND_THRESHOLD = _get_float('PROXY_CHANNEL_RECOVERING_TREND_THRESHOLD', PROXY_CHANNEL_RECOVERING_TREND_THRESHOLD, 0.01, 0.5)
+CHANNEL_MIN_RECENT_DAYS_FOR_TREND = _get_int('PROXY_CHANNEL_MIN_RECENT_DAYS_FOR_TREND', PROXY_CHANNEL_MIN_RECENT_DAYS_FOR_TREND, 1, 7)
+CHANNEL_WHITELIST = PROXY_CHANNEL_WHITELIST  # можно переопределить через ENV, но оставим как есть
+MIN_RUNS_FOR_ADAPTIVE_THRESHOLDS = _get_int('PROXY_MIN_RUNS_FOR_ADAPTIVE_THRESHOLDS', PROXY_MIN_RUNS_FOR_ADAPTIVE_THRESHOLDS, 3, 50)
+ANOMALY_Z_SCORE_THRESHOLD = _get_float('PROXY_ANOMALY_Z_SCORE_THRESHOLD', PROXY_ANOMALY_Z_SCORE_THRESHOLD, 1.0, 5.0)
+ANOMALY_IQR_MULTIPLIER = _get_float('PROXY_ANOMALY_IQR_MULTIPLIER', PROXY_ANOMALY_IQR_MULTIPLIER, 0.5, 3.0)
+ANOMALY_DROP_THRESHOLD = _get_float('PROXY_ANOMALY_DROP_THRESHOLD', PROXY_ANOMALY_DROP_THRESHOLD, 0.1, 0.9)
+MAX_HISTORY_RUNS = _get_int('PROXY_MAX_HISTORY_RUNS', PROXY_MAX_HISTORY_RUNS, 10, 1000)
+SAVE_INTERVAL_SECONDS = _get_int('PROXY_SAVE_INTERVAL_SECONDS', PROXY_SAVE_INTERVAL_SECONDS, 5, 300)
+ENCRYPT_IPS = _get_bool('PROXY_ENCRYPT_IPS', PROXY_ENCRYPT_IPS)
+ENCRYPTION_SALT = os.getenv('PROXY_ENCRYPTION_SALT', PROXY_ENCRYPTION_SALT)
+GEOLITE2_ASN_PATH = os.getenv('PROXY_GEOLITE2_ASN_PATH', PROXY_GEOLITE2_ASN_PATH)
+BUILTIN_DATACENTER_ASNS = PROXY_BUILTIN_DATACENTER_ASNS
