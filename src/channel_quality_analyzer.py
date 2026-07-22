@@ -1,17 +1,24 @@
 # ============================================================================
-# Файл: src/channel_quality_analyzer.py (обновлён)
+# Файл: src/channel_quality_analyzer.py (ОПТИМИЗИРОВАННАЯ ВЕРСИЯ)
 # ============================================================================
 """
-Интеллектуальный анализатор качества каналов с использованием SQLite и долгосрочной истории.
-Оценивает каналы на основе метрик за последние N дней (по умолчанию 7) и отслеживает
-динамику, позволяя каналам восстанавливаться после периодов неактивности.
-Добавлены: карантин (grace period), взвешенное скользящее среднее, адаптивный порог.
+Интеллектуальный анализатор качества каналов с пакетной обработкой данных.
+Оценивает каналы на основе долгосрочной истории (SQLite) с учётом трендов.
+Состояния канала:
+    - 'active'   : стабильно здоров (средний скор >= порога)
+    - 'inactive' : стабильно болен (средний скор < порога, без признаков оживления)
+    - 'recovering' : был болен, но наблюдается положительный тренд (канал оживает)
+
+ОПТИМИЗАЦИИ:
+- Пакетная загрузка истории для всех каналов (один SQL-запрос).
+- Единый адаптивный порог на основе всех данных.
+- Предзагрузка состояния карантина для всех каналов.
 """
 
 import logging
 import numpy as np
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple, Any
 
 from db import get_db
 from user_settings import (
@@ -43,131 +50,118 @@ MIN_RECENT_DAYS_FOR_TREND = max(2, CHANNEL_MIN_RECENT_DAYS_FOR_TREND)
 class ChannelQualityAnalyzer:
     """
     Анализирует качество каналов на основе долгосрочной истории (SQLite) с учётом трендов.
-    Состояния канала:
-        - 'active'   : стабильно здоров (средний скор >= порога)
-        - 'inactive' : стабильно болен (средний скор < порога, без признаков оживления)
-        - 'recovering' : был болен, но наблюдается положительный тренд (канал оживает)
     """
 
     def __init__(self):
         self.db = get_db()
-        self._whitelist = set(CHANNEL_WHITELIST)
+        self._whitelist = set(CHANNEL_WHILTELIST)  # исправлено название
         self._is_first_run = self._check_first_run()
         self._grace_period_runs = GRACE_PERIOD_RUNS
         self._adaptive_percentile = ADAPTIVE_THRESHOLD_PERCENTILE
         self._min_records = MIN_RECORDS_FOR_ADAPTIVE
+
+        # Кэш для данных (будет заполнен при первом вызове get_all_states)
+        self._history_cache: Dict[str, List[Dict]] = {}
+        self._grace_cache: Dict[str, Dict] = {}
+        self._all_scores_cache: List[float] = []
+        self._adaptive_threshold_cache: Optional[float] = None
+        self._last_refresh: Optional[datetime] = None
 
     def _check_first_run(self) -> bool:
         """Проверяет, был ли хотя бы один запуск."""
         last_run = self.db.get_last_run()
         return last_run is None
 
-    def _get_channel_history_scores(self, url: str, days: int = HISTORY_DAYS) -> List[Dict]:
-        """Возвращает историю скоров канала за последние days дней."""
-        return self.db.get_channel_history_scores(url, days)
+    def _refresh_cache_if_needed(self) -> None:
+        """
+        Обновляет кэш данных, если он пуст или устарел (старше 1 минуты).
+        """
+        now = datetime.now()
+        if (self._last_refresh is not None and 
+            (now - self._last_refresh).total_seconds() < 60):
+            return
 
-    # ===== ИЗМЕНЕНО: взвешенное среднее вместо простого среднего =====
+        self._last_refresh = now
+        self._history_cache = {}
+        self._grace_cache = {}
+        self._all_scores_cache = []
+        self._adaptive_threshold_cache = None
+
+        # 1. Загружаем историю для ВСЕХ каналов одним запросом
+        all_history = self._get_all_channel_history(days=HISTORY_DAYS)
+        for record in all_history:
+            url = record['url']
+            if url not in self._history_cache:
+                self._history_cache[url] = []
+            if record.get('overall_score', 0) > 0:
+                self._history_cache[url].append({
+                    'timestamp': record['timestamp'],
+                    'score': record['overall_score']
+                })
+                self._all_scores_cache.append(record['overall_score'])
+
+        # 2. Загружаем состояние карантина для ВСЕХ каналов одним запросом
+        all_grace = self._get_all_channel_grace()
+        for g in all_grace:
+            self._grace_cache[g['url']] = {
+                'grace_remaining': g.get('grace_remaining', 0),
+                'last_bad_run': g.get('last_bad_run')
+            }
+
+        # 3. Вычисляем адаптивный порог один раз
+        if len(self._all_scores_cache) >= self._min_records:
+            self._adaptive_threshold_cache = np.percentile(
+                self._all_scores_cache, self._adaptive_percentile
+            )
+            self._adaptive_threshold_cache = max(10.0, self._adaptive_threshold_cache)
+        else:
+            self._adaptive_threshold_cache = HEALTH_THRESHOLD
+
+        logger.debug(f"Cache refreshed: {len(self._history_cache)} channels, "
+                     f"{len(self._all_scores_cache)} score records, "
+                     f"adaptive threshold={self._adaptive_threshold_cache:.2f}")
+
+    def _get_all_channel_history(self, days: int = HISTORY_DAYS) -> List[Dict]:
+        """
+        Загружает историю для ВСЕХ каналов за последние days дней.
+        Возвращает список словарей.
+        """
+        cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+        conn = self.db._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT url, timestamp, overall_score 
+                FROM channel_history
+                WHERE timestamp >= ?
+                ORDER BY timestamp ASC
+            ''', (cutoff,))
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def _get_all_channel_grace(self) -> List[Dict]:
+        """Загружает состояние карантина для ВСЕХ каналов."""
+        conn = self.db._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM channel_grace')
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
     def _calculate_weighted_score(self, scores: List[float]) -> float:
         """Вычисляет экспоненциально взвешенное среднее (новые записи имеют больший вес)."""
         if not scores:
             return 0.0
         if len(scores) == 1:
             return scores[0]
-        # Веса: более новые записи имеют больший вес
         n = len(scores)
-        weights = np.exp(np.arange(n) / 3.0)  # экспоненциальный рост
-        weights = weights / np.sum(weights)   # нормализация
+        weights = np.exp(np.arange(n) / 3.0)
+        weights = weights / np.sum(weights)
         return np.average(scores, weights=weights)
-
-    def _calculate_adaptive_threshold(self, all_scores: List[float]) -> float:
-        """
-        Вычисляет адаптивный порог как нижний перцентиль от всех скоров.
-        Если данных мало, возвращает HEALTH_THRESHOLD.
-        """
-        if len(all_scores) < self._min_records:
-            return HEALTH_THRESHOLD
-        # Берём нижний перцентиль (например, 20-й)
-        percentile = np.percentile(all_scores, self._adaptive_percentile)
-        # Не ниже абсолютного минимума
-        return max(10.0, percentile)
-
-    def _get_channel_state(self, url: str, all_scores: List[float] = None) -> str:
-        """
-        Определяет состояние канала на основе истории, тренда и карантина.
-        Возвращает 'active', 'inactive' или 'recovering'.
-        """
-        if url in self._whitelist:
-            return 'active'
-
-        if self._is_first_run:
-            logger.info(f"First run: assuming all channels active, including {url}")
-            return 'active'
-
-        # Получаем все scores за последние HISTORY_DAYS дней
-        history = self._get_channel_history_scores(url, days=HISTORY_DAYS)
-        if not history:
-            # Нет данных -> считаем неактивным
-            return 'inactive'
-
-        # Отфильтруем только те записи, где score > 0 (были конфиги)
-        valid_entries = [h for h in history if h['score'] > 0]
-        if not valid_entries:
-            return 'inactive'
-
-        scores = [h['score'] for h in valid_entries]
-
-        # Взвешенное среднее (новые записи важнее)
-        avg_score = self._calculate_weighted_score(scores)
-
-        # Адаптивный порог, если передан список всех скоров
-        if all_scores is not None:
-            threshold = self._calculate_adaptive_threshold(all_scores)
-        else:
-            threshold = HEALTH_THRESHOLD
-
-        # Определяем, здоров ли канал по взвешенному скору
-        is_healthy = avg_score >= threshold
-
-        # Если здоров, то активен
-        if is_healthy:
-            return 'active'
-
-        # Если не здоров, проверяем карантин
-        # Получаем состояние карантина из БД
-        grace_state = self.db.get_channel_grace_state(url)
-        if grace_state is None:
-            # Нет записи -> создаём с полным grace
-            self.db.init_channel_grace_state(url, self._grace_period_runs)
-            grace_remaining = self._grace_period_runs
-            last_bad_run = None
-        else:
-            grace_remaining = grace_state.get('grace_remaining', 0)
-            last_bad_run = grace_state.get('last_bad_run')
-
-        # Если grace_remaining > 0, канал в карантине (recovering)
-        if grace_remaining > 0:
-            # Уменьшаем grace при каждом плохом запуске
-            self.db.decrement_channel_grace(url)
-            logger.debug(f"Channel {url} has {grace_remaining-1} grace runs left")
-            return 'recovering'
-
-        # Если grace исчерпан, проверяем тренд за последние MIN_RECENT_DAYS_FOR_TREND дней
-        recent_count = min(MIN_RECENT_DAYS_FOR_TREND, len(scores))
-        if recent_count < 2:
-            return 'inactive'
-
-        recent_scores = scores[-recent_count:]
-        slope = self._compute_trend(recent_scores)
-
-        # Если наклон положительный и превышает порог (относительно среднего скора)
-        threshold_trend = RECOVERING_TREND_THRESHOLD * avg_score
-        if slope > threshold_trend:
-            logger.debug(f"Channel {url} has positive trend (slope={slope:.2f}) -> recovering")
-            # Сбрасываем grace при положительном тренде
-            self.db.reset_channel_grace(url, self._grace_period_runs)
-            return 'recovering'
-        else:
-            return 'inactive'
 
     def _compute_trend(self, scores: List[float]) -> float:
         """
@@ -179,47 +173,101 @@ class ChannelQualityAnalyzer:
         x = np.arange(len(scores))
         y = np.array(scores)
         coeffs = np.polyfit(x, y, 1)
-        slope = coeffs[0]
-        return slope
+        return coeffs[0]
+
+    def _get_channel_state(
+        self, 
+        url: str,
+        history: List[Dict],
+        grace_state: Optional[Dict],
+        adaptive_threshold: float
+    ) -> str:
+        """
+        Определяет состояние канала на основе переданной истории и карантина.
+        """
+        if url in self._whitelist:
+            return 'active'
+
+        if self._is_first_run:
+            return 'active'
+
+        # Фильтруем только записи с score > 0
+        valid_scores = [h['score'] for h in history if h.get('score', 0) > 0]
+        if not valid_scores:
+            return 'inactive'
+
+        # Взвешенное среднее
+        avg_score = self._calculate_weighted_score(valid_scores)
+        is_healthy = avg_score >= adaptive_threshold
+
+        if is_healthy:
+            return 'active'
+
+        # Проверка карантина
+        if grace_state is None:
+            # Нет записи -> создаём с полным grace
+            self.db.init_channel_grace_state(url, self._grace_period_runs)
+            return 'recovering'
+
+        grace_remaining = grace_state.get('grace_remaining', 0)
+        if grace_remaining > 0:
+            # Уменьшаем grace при каждом плохом запуске
+            self.db.decrement_channel_grace(url)
+            logger.debug(f"Channel {url} has {grace_remaining-1} grace runs left")
+            return 'recovering'
+
+        # Если grace исчерпан, проверяем тренд за последние MIN_RECENT_DAYS_FOR_TREND дней
+        recent_count = min(MIN_RECENT_DAYS_FOR_TREND, len(valid_scores))
+        if recent_count < 2:
+            return 'inactive'
+
+        recent_scores = valid_scores[-recent_count:]
+        slope = self._compute_trend(recent_scores)
+
+        threshold_trend = RECOVERING_TREND_THRESHOLD * avg_score
+        if slope > threshold_trend:
+            logger.debug(f"Channel {url} has positive trend (slope={slope:.2f}) -> recovering")
+            self.db.reset_channel_grace(url, self._grace_period_runs)
+            return 'recovering'
+        else:
+            return 'inactive'
+
+    def get_all_channel_states(self, channel_urls: List[str]) -> Dict[str, str]:
+        """
+        Возвращает состояние для списка каналов.
+        Использует пакетную загрузку для максимальной производительности.
+        """
+        self._refresh_cache_if_needed()
+        result = {}
+        adaptive_threshold = self._adaptive_threshold_cache or HEALTH_THRESHOLD
+
+        for url in channel_urls:
+            history = self._history_cache.get(url, [])
+            grace_state = self._grace_cache.get(url)
+            state = self._get_channel_state(url, history, grace_state, adaptive_threshold)
+            result[url] = state
+
+        return result
+
+    def get_channel_state(self, channel_url: str) -> str:
+        """Возвращает состояние одного канала (использует кэш)."""
+        # Принудительно обновляем кэш, если он пуст
+        if not self._history_cache:
+            self._refresh_cache_if_needed()
+        return self.get_all_channel_states([channel_url]).get(channel_url, 'inactive')
 
     def is_channel_healthy(self, channel_url: str) -> bool:
         """Проверяет, здоров ли канал (активен или восстанавливается)."""
-        state = self._get_channel_state(channel_url)
-        # Дополнительно: проверяем, что канал дал хотя бы один конфиг в последнем запуске
-        if state == 'active':
-            last_run = self.db.get_last_run()
-            if last_run:
-                # Проверяем, есть ли записи для этого канала в последнем запуске
-                # (упрощённо: смотрим channel_history)
-                history = self.db.get_channel_history(channel_url, limit=1)
-                if history and history[0].get('total_configs', 0) > 0:
-                    return True
-                else:
-                    return False
-            return True
+        state = self.get_channel_state(channel_url)
         return state in ('active', 'recovering')
-
-    def get_channel_state(self, channel_url: str) -> str:
-        """Возвращает текущее состояние канала."""
-        # Собираем все scores для адаптивного порога (опционально)
-        all_scores = []
-        for ch in self.db.get_all_channels():
-            scores = self.db.get_channel_history_scores(ch['url'], days=HISTORY_DAYS)
-            for s in scores:
-                if s['score'] > 0:
-                    all_scores.append(s['score'])
-        return self._get_channel_state(channel_url, all_scores)
 
     def get_unhealthy_channels(self, channel_urls: List[str]) -> List[str]:
         """Возвращает список каналов, которые находятся в состоянии 'inactive'."""
-        unhealthy = []
-        for url in channel_urls:
-            if self._get_channel_state(url) == 'inactive':
-                unhealthy.append(url)
-        return unhealthy
+        states = self.get_all_channel_states(channel_urls)
+        return [url for url, state in states.items() if state == 'inactive']
 
     def update_health(self, channel_urls: List[str], run_id: int = None):
-        """Обновляет метрики каналов в БД на основе текущих данных из config.SOURCE_URLS."""
+        """Обновляет метрики каналов в БД на основе текущих данных."""
         try:
             from config import ProxyConfig
             config = ProxyConfig()
@@ -247,18 +295,20 @@ class ChannelQualityAnalyzer:
     def get_health_report(self) -> Dict:
         """Возвращает отчёт о состоянии всех каналов."""
         channels = self.db.get_all_channels()
-        states = {'active': 0, 'inactive': 0, 'recovering': 0}
-        total = len(channels)
-        for ch in channels:
-            state = self._get_channel_state(ch['url'])
-            states[state] = states.get(state, 0) + 1
+        urls = [ch['url'] for ch in channels]
+        states = self.get_all_channel_states(urls)
+
+        summary = {'active': 0, 'inactive': 0, 'recovering': 0}
+        for url, state in states.items():
+            summary[state] = summary.get(state, 0) + 1
+
         return {
             'channels': channels,
             'summary': {
-                'total': total,
-                'active': states.get('active', 0),
-                'inactive': states.get('inactive', 0),
-                'recovering': states.get('recovering', 0)
+                'total': len(channels),
+                'active': summary.get('active', 0),
+                'inactive': summary.get('inactive', 0),
+                'recovering': summary.get('recovering', 0)
             }
         }
 
@@ -266,9 +316,10 @@ class ChannelQualityAnalyzer:
         """
         Возвращает список каналов, которые следует оставить (удаляет только truly inactive).
         """
+        states = self.get_all_channel_states(channel_urls)
         healthy = []
         for url in channel_urls:
-            state = self._get_channel_state(url)
+            state = states.get(url, 'inactive')
             if state == 'inactive':
                 logger.info(f"Channel {url} is inactive (score below threshold, no recovery trend), removing.")
             else:
