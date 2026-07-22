@@ -2,8 +2,8 @@ name: Proxy-Hunter
 
 on:
   schedule:
-    - cron: '0 */5 * * *'          # каждые 5 часов
-  workflow_dispatch:                # ручной запуск
+    - cron: '0 */5 * * *'
+  workflow_dispatch:
 
 jobs:
   run-pipeline:
@@ -42,13 +42,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip setuptools wheel
           pip install -r requirements.txt
-          python -c "import aiofiles, xxhash, aiodns"
+          python -c "import aiofiles, xxhash, aiodns, maxminddb"
 
       - name: Create necessary directories
         run: |
           mkdir -p configs logs assets bloom_shards
 
-      # ===== Кэширование =====
+      # ===== Кэширование SQLite и Bloom =====
       - name: Cache SQLite database
         uses: actions/cache@v4
         with:
@@ -64,6 +64,24 @@ jobs:
           key: ${{ runner.os }}-bloom-shards-${{ hashFiles('bloom_shards/**') }}
           restore-keys: |
             ${{ runner.os }}-bloom-shards-
+
+      # ===== Кэширование GeoLite2 базы (опционально) =====
+      - name: Cache GeoLite2 ASN database
+        uses: actions/cache@v4
+        with:
+          path: configs/GeoLite2-ASN.mmdb
+          key: ${{ runner.os }}-geolite2-asn-${{ hashFiles('configs/GeoLite2-ASN.mmdb') }}
+          restore-keys: |
+            ${{ runner.os }}-geolite2-asn-
+
+      - name: Download GeoLite2 ASN database (optional)
+        if: ${{ !cached }}
+        run: |
+          # Если у вас есть лицензионный ключ MaxMind, можно скачать базу:
+          # wget -O configs/GeoLite2-ASN.mmdb "https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-ASN&license_key=${{ secrets.MAXMIND_LICENSE_KEY }}&suffix=mmdb"
+          # Если ключа нет – просто создаём заглушку (будет использован встроенный список)
+          touch configs/GeoLite2-ASN.mmdb
+          echo "⚠️ GeoLite2 база не установлена. Будет использован встроенный список датацентров."
 
       # ===== Подготовка файлов =====
       - name: Ensure required files exist
@@ -269,6 +287,8 @@ jobs:
             configs/output_simple.txt
             configs/history.db
             configs/parsed_cache.json
+            configs/name_mapping.json
+            bloom_shards/
           retention-days: 7
           if-no-files-found: warn
 
@@ -278,9 +298,12 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add configs/output_archive.txt configs/output_simple.txt configs/parsed_cache.json custom_channels.txt
+          git add configs/output_archive.txt configs/output_simple.txt configs/parsed_cache.json configs/name_mapping.json custom_channels.txt
           if [ -f "configs/history.db" ]; then
             git add configs/history.db
+          fi
+          if [ -d "bloom_shards" ]; then
+            git add bloom_shards/
           fi
           if git diff --staged --quiet; then
             echo "✅ No changes to commit"
@@ -310,9 +333,10 @@ jobs:
           echo "❌ 'Run optimized pipeline' step failed. Failing the job after diagnostics were uploaded."
           exit 1
 
-      # ===== Очистка старых логов =====
+      # ===== Очистка старых логов и артефактов =====
       - name: Cleanup old artifacts (optional)
         if: always()
         run: |
-          find . -name "bloom_shards" -type d -exec rm -rf {} \; 2>/dev/null || true
           find logs -name "*.log" -type f -mtime +7 -delete 2>/dev/null || true
+          # Удаляем старые артефакты (если нужно)
+          # curl -L -X DELETE "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?name=proxy-output" -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}"
