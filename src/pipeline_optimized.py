@@ -13,6 +13,7 @@
 - Автоматическое обновление весов
 - Детекция датацентров (штраф/бонус)
 - Фильтрация по возрасту профилей (14 дней для архива, 3 дня для простого вывода)
+- Красивый итоговый вывод статистики
 """
 
 import sys
@@ -56,6 +57,9 @@ from regional_stats import RegionalStats
 from sni_filter import SNIFilter
 from weight_updater import WeightUpdater
 from datacenter_detector import is_datacenter_ip
+
+# Импорт для красивого вывода статистики
+from logger_utils import print_summary
 
 # Импорты из обновлённого user_settings
 from user_settings import (
@@ -466,7 +470,7 @@ class OptimizedPipeline:
         try:
             start_time = time.time()
             logger.info("=" * 60)
-            logger.info("🚀 Starting Proxy-Hunter Pipeline (optimized, async, SQLite, no GeoIP)")
+            logger.info("🚀 Starting Proxy-Hunter Pipeline (optimized, async, SQLite)")
             logger.info("=" * 60)
 
             # Шаг 1: Сбор
@@ -814,6 +818,34 @@ class OptimizedPipeline:
                 self.weight_updater.update()
             except Exception as e:
                 logger.warning(f"Weight update failed: {e}")
+
+            # ===== НОВОЕ: Вывод итоговой статистики =====
+            active_count = sum(1 for ch in self.config.SOURCE_URLS if ch.enabled)
+            recovering_count = sum(1 for ch in self.config.SOURCE_URLS if not ch.enabled and self.channel_analyzer and self.channel_analyzer.get_channel_state(ch.url) == 'recovering')
+            inactive_count = sum(1 for ch in self.config.SOURCE_URLS if not ch.enabled and self.channel_analyzer and self.channel_analyzer.get_channel_state(ch.url) == 'inactive')
+
+            summary_stats = {
+                'raw': len(raw_configs),
+                'valid': len(valid_configs),
+                'active_ok': len(good_configs),
+                'deduped': len(deduped),
+                'archive': len(merged_archive),
+                'simple': len(simple_configs),
+                'protocols': parse_stats,
+                'quality': {
+                    'avg_score': sum(item['score'] for item in filtered) / len(filtered) if filtered else 0,
+                    'median_score': sorted([item['score'] for item in filtered])[len(filtered)//2] if filtered else 0,
+                    'min_score': min([item['score'] for item in filtered]) if filtered else 0,
+                    'max_score': max([item['score'] for item in filtered]) if filtered else 0,
+                },
+                'channels': {
+                    'active': active_count,
+                    'recovering': recovering_count,
+                    'inactive': inactive_count,
+                    'total': len(self.config.SOURCE_URLS),
+                }
+            }
+            print_summary(summary_stats)
 
             elapsed = time.time() - start_time
             logger.info("=" * 60)
