@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 """
 Модуль для работы с SQLite-базой данных истории.
 Хранит статистику запусков, каналов и профилей с компрессией.
@@ -7,6 +10,7 @@
 - lru_cache заменён на TTL-кеш с инвалидацией
 - Добавлена функция get_db() для обратной совместимости с channel_quality_analyzer.py
 - Добавлен метод update_profiles_batch() для ProfileScorer._flush_profiles()
+- Добавлен метод get_profile_last_seen() для фильтрации по возрасту
 """
 
 import sqlite3
@@ -430,6 +434,17 @@ class HistoryDB:
                 d['is_active'] = bool(row['is_active'])
                 result.append(d)
             return result
+
+    # ========== НОВЫЙ МЕТОД ==========
+    def get_profile_last_seen(self, key: str) -> Optional[str]:
+        """Возвращает last_seen для профиля или None."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT last_seen FROM profiles WHERE key = ?', (key,))
+            row = cursor.fetchone()
+            if row:
+                return row['last_seen']
+            return None
 
     # ----- Методы для метаданных -----
     def get_metadata(self, key: str, default: Any = None) -> Any:
