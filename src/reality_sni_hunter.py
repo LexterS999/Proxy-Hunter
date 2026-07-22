@@ -92,8 +92,7 @@ class RealitySNIHunter:
         """
         # Создаём конфиг на основе шаблона, заменяя sni и адрес
         config = config_template.copy()
-        # Ожидаем, что в config_template есть outbounds с vless/trojan и т.д.
-        # Упрощённо: если шаблон пустой, создаём минимальный vless-конфиг
+        # Если шаблон пустой, создаём минимальный vless-конфиг
         if not config:
             config = {
                 "log": {"loglevel": "warning"},
