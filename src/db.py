@@ -174,6 +174,8 @@ class HistoryDB:
                     fail_count INTEGER DEFAULT 0,
                     latencies BLOB,
                     timestamps BLOB,
+                    sni_history BLOB,
+                    host_history BLOB,
                     is_active INTEGER DEFAULT 1,
                     stability REAL,
                     lifetime REAL,
@@ -217,6 +219,75 @@ class HistoryDB:
                 )
             ''')
 
+
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS probe_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_key TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    success INTEGER DEFAULT 0,
+                    latency REAL DEFAULT 0,
+                    tls_handshake_latency REAL DEFAULT 0,
+                    http_first_byte REAL DEFAULT 0,
+                    http_total REAL DEFAULT 0,
+                    status_code INTEGER DEFAULT 0,
+                    error_type TEXT,
+                    protocol TEXT,
+                    transport TEXT,
+                    sni_used TEXT,
+                    host_used TEXT,
+                    path_used TEXT,
+                    attempt_number INTEGER DEFAULT 1,
+                    total_attempts INTEGER DEFAULT 1
+                )
+            ''')
+
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS profile_features (
+                    profile_key TEXT PRIMARY KEY,
+                    server TEXT,
+                    port INTEGER DEFAULT 0,
+                    protocol TEXT,
+                    transport TEXT,
+                    sni TEXT,
+                    host TEXT,
+                    path TEXT,
+                    has_sni INTEGER DEFAULT 0,
+                    has_host INTEGER DEFAULT 0,
+                    has_path INTEGER DEFAULT 0,
+                    has_pbk INTEGER DEFAULT 0,
+                    has_flow INTEGER DEFAULT 0,
+                    is_reality INTEGER DEFAULT 0,
+                    alter_id INTEGER DEFAULT 0,
+                    ss_method TEXT,
+                    config_length INTEGER DEFAULT 0,
+                    sni_count INTEGER DEFAULT 0,
+                    host_count INTEGER DEFAULT 0,
+                    path_count INTEGER DEFAULT 0,
+                    same_ip_count INTEGER DEFAULT 0,
+                    same_ip_success_rate REAL DEFAULT 0,
+                    same_sni_count INTEGER DEFAULT 0,
+                    count_1h INTEGER DEFAULT 0,
+                    success_1h INTEGER DEFAULT 0,
+                    avg_latency_1h REAL DEFAULT 0,
+                    count_6h INTEGER DEFAULT 0,
+                    success_6h INTEGER DEFAULT 0,
+                    avg_latency_6h REAL DEFAULT 0,
+                    count_24h INTEGER DEFAULT 0,
+                    success_24h INTEGER DEFAULT 0,
+                    avg_latency_24h REAL DEFAULT 0,
+                    p90_latency_24h REAL DEFAULT 0,
+                    p99_latency_24h REAL DEFAULT 0,
+                    latency_std_24h REAL DEFAULT 0,
+                    latency_cv_24h REAL DEFAULT 0,
+                    latency_trend_24h REAL DEFAULT 0,
+                    check_interval_avg REAL DEFAULT 0,
+                    count_7d INTEGER DEFAULT 0,
+                    success_7d INTEGER DEFAULT 0,
+                    avg_latency_7d REAL DEFAULT 0
+                )
+            ''')
+
             # Индексы
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_history_url ON channel_history(url)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_history_timestamp ON channel_history(timestamp)")
@@ -225,9 +296,28 @@ class HistoryDB:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_profiles_protocol ON profiles(protocol)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_profiles_last_seen ON profiles(last_seen)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_runs_timestamp ON runs(timestamp)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_probe_history_profile_time ON probe_history(profile_key, timestamp)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_probe_history_sni_time ON probe_history(sni_used, timestamp)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_probe_history_success_time ON probe_history(success, timestamp)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_profile_features_server ON profile_features(server)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_profile_features_protocol ON profile_features(protocol)")
 
+            self._ensure_schema_migrations(conn)
             conn.commit()
             logger.info("SQLite history database initialized with indexes, WAL and auto_vacuum=FULL.")
+
+
+    def _ensure_schema_migrations(self, conn) -> None:
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(profiles)")
+        existing = {row[1] for row in cursor.fetchall()}
+        migrations = {
+            'sni_history': "ALTER TABLE profiles ADD COLUMN sni_history BLOB",
+            'host_history': "ALTER TABLE profiles ADD COLUMN host_history BLOB",
+        }
+        for column, sql in migrations.items():
+            if column not in existing:
+                cursor.execute(sql)
 
     @contextmanager
     def _get_connection(self):
@@ -332,8 +422,8 @@ class HistoryDB:
                 INSERT OR REPLACE INTO profiles (
                     key, server, protocol, first_seen, last_seen,
                     success_count, fail_count, latencies, timestamps,
-                    is_active, stability, lifetime, overall_score
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    sni_history, host_history, is_active, stability, lifetime, overall_score
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 key,
                 profile_data.get('server', ''),
@@ -344,6 +434,8 @@ class HistoryDB:
                 profile_data.get('fail_count', 0),
                 _compress(profile_data.get('latencies', [])),
                 _compress(profile_data.get('timestamps', [])),
+                _compress(profile_data.get('sni_history', [])),
+                _compress(profile_data.get('host_history', [])),
                 1 if profile_data.get('is_active', True) else 0,
                 profile_data.get('stability', 0.0),
                 profile_data.get('lifetime', 0.0),
@@ -373,6 +465,8 @@ class HistoryDB:
                         profile_data.get('fail_count', 0),
                         _compress(profile_data.get('latencies', [])),
                         _compress(profile_data.get('timestamps', [])),
+                        _compress(profile_data.get('sni_history', [])),
+                        _compress(profile_data.get('host_history', [])),
                         1 if profile_data.get('is_active', True) else 0,
                         profile_data.get('stability', 0.0),
                         profile_data.get('lifetime', 0.0),
@@ -383,8 +477,8 @@ class HistoryDB:
                         INSERT OR REPLACE INTO profiles (
                             key, server, protocol, first_seen, last_seen,
                             success_count, fail_count, latencies, timestamps,
-                            is_active, stability, lifetime, overall_score
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            sni_history, host_history, is_active, stability, lifetime, overall_score
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', rows)
                     conn.commit()
                     logger.debug(f"Batch updated {len(rows)} profiles in SQLite")
@@ -401,6 +495,8 @@ class HistoryDB:
                 d = dict(row)
                 d['latencies'] = _decompress(row['latencies']) or []
                 d['timestamps'] = _decompress(row['timestamps']) or []
+                d['sni_history'] = _decompress(row['sni_history']) or []
+                d['host_history'] = _decompress(row['host_history']) or []
                 d['is_active'] = bool(row['is_active'])
                 return d
             return None
@@ -415,6 +511,8 @@ class HistoryDB:
                 d = dict(row)
                 d['latencies'] = _decompress(row['latencies']) or []
                 d['timestamps'] = _decompress(row['timestamps']) or []
+                d['sni_history'] = _decompress(row['sni_history']) or []
+                d['host_history'] = _decompress(row['host_history']) or []
                 d['is_active'] = bool(row['is_active'])
                 result.append(d)
             return result
@@ -427,6 +525,42 @@ class HistoryDB:
             if row:
                 return row['last_seen']
             return None
+
+
+    def add_probe_results_batch(self, results: List[Dict]) -> None:
+        if not results:
+            return
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            rows = [(
+                item.get('profile_key', ''),
+                item.get('timestamp', datetime.now().isoformat()),
+                1 if item.get('success') else 0,
+                item.get('latency', 0.0),
+                item.get('tls_handshake', 0.0),
+                item.get('http_first_byte', 0.0),
+                item.get('http_total', 0.0),
+                item.get('status_code', 0),
+                item.get('error'),
+                item.get('protocol'),
+                item.get('transport'),
+                item.get('sni_used'),
+                item.get('host_used'),
+                item.get('path_used'),
+                item.get('attempt_number', 1),
+                item.get('total_attempts', 1),
+            ) for item in results if item.get('profile_key')]
+            if rows:
+                cursor.executemany('''
+                    INSERT INTO probe_history (
+                        profile_key, timestamp, success, latency,
+                        tls_handshake_latency, http_first_byte, http_total,
+                        status_code, error_type, protocol, transport,
+                        sni_used, host_used, path_used,
+                        attempt_number, total_attempts
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', rows)
+                conn.commit()
 
     # ----- Методы для метаданных -----
     def get_metadata(self, key: str, default: Any = None) -> Any:
