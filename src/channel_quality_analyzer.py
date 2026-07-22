@@ -127,8 +127,8 @@ class ChannelQualityAnalyzer:
         Возвращает список словарей.
         """
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-        conn = self.db._get_connection()
-        try:
+        # ИСПРАВЛЕНО: правильное использование контекстного менеджера
+        with self.db._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT url, timestamp, overall_score 
@@ -138,19 +138,15 @@ class ChannelQualityAnalyzer:
             ''', (cutoff,))
             rows = cursor.fetchall()
             return [dict(row) for row in rows]
-        finally:
-            conn.close()
 
     def _get_all_channel_grace(self) -> List[Dict]:
         """Загружает состояние карантина для ВСЕХ каналов."""
-        conn = self.db._get_connection()
-        try:
+        # ИСПРАВЛЕНО: правильное использование контекстного менеджера
+        with self.db._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT * FROM channel_grace')
             rows = cursor.fetchall()
             return [dict(row) for row in rows]
-        finally:
-            conn.close()
 
     def _calculate_weighted_score(self, scores: List[float]) -> float:
         """Вычисляет экспоненциально взвешенное среднее (новые записи имеют больший вес)."""
