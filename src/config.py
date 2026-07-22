@@ -14,7 +14,7 @@ import numpy as np
 
 from user_settings import (
     SOURCE_URLS, USE_MAXIMUM_POWER, SPECIFIC_CONFIG_COUNT, ENABLED_PROTOCOLS,
-    MAX_CONFIG_AGE_DAYS, CHANNEL_HEALTH_THRESHOLD
+    MAX_CONFIG_AGE_DAYS, CHANNEL_HEALTH_THRESHOLD   # <-- добавлено MAX_CONFIG_AGE_DAYS
 )
 from channel_quality_analyzer import ChannelQualityAnalyzer
 
