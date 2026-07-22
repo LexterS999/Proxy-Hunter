@@ -1,3 +1,6 @@
+# ============================================================================
+# Файл: src/profile_scorer.py (обновлён)
+# ============================================================================
 """
 Модуль для оценки качества прокси-профилей на основе истории,
 без использования активных пингов и без GeoIP.
@@ -32,6 +35,7 @@ class ProfileScorer:
         self.region = region
         self.regional_scorer = RegionalScorer(region)
         self.regional_stats = RegionalStats()
+        self._has_history_cache = None
 
     def __del__(self):
         """Гарантированная запись при завершении."""
@@ -218,6 +222,16 @@ class ProfileScorer:
             score += 0.05
         return max(0, min(1, round(score, 2)))
 
+    def _has_history(self) -> bool:
+        """Проверяет, есть ли записи в БД."""
+        if self._has_history_cache is None:
+            try:
+                runs = self.db.get_recent_runs(1)
+                self._has_history_cache = len(runs) > 0
+            except Exception:
+                self._has_history_cache = False
+        return self._has_history_cache
+
     def calculate_composite_score(self, profile: Dict, parsed: Dict) -> float:
         stability = profile.get('stability', 0.5)
         lifetime = profile.get('lifetime', 24.0)
@@ -227,7 +241,9 @@ class ProfileScorer:
 
         timestamps = profile.get('timestamps', [])
         if not timestamps:
-            return 50.0
+            # Нет истории — базовый скор 30 (было 50)
+            base_score = 30.0
+            return base_score
 
         half_life = 7 * 24 * 3600
         now = datetime.now()
@@ -258,18 +274,23 @@ class ProfileScorer:
                       w['reputation'] * reputation +
                       w['lifetime'] * (lifetime / 48) +
                       w['config_quality'] * config_quality)
+        # Базовый скор теперь начинается с 30 (было 100)
         base_score = max(0, min(100, base_score * 100))
 
-        # === РЕГИОНАЛЬНЫЙ БОНУС ===
-        region_multiplier = self.regional_scorer.calculate_region_score(
-            config='', parsed=parsed, base_score=base_score
-        )
-        # Корректировка из статистики
-        adjustment = self.regional_stats.compute_adjustment(
-            config=parsed.get('address', ''), parsed=parsed, region=self.region
-        )
-        final_score = region_multiplier * adjustment
-        final_score = max(0, min(100, final_score))
+        # === РЕГИОНАЛЬНЫЙ БОНУС (только если есть история) ===
+        if self._has_history():
+            region_multiplier = self.regional_scorer.calculate_region_score(
+                config='', parsed=parsed, base_score=base_score
+            )
+            # Корректировка из статистики
+            adjustment = self.regional_stats.compute_adjustment(
+                config=parsed.get('address', ''), parsed=parsed, region=self.region
+            )
+            final_score = region_multiplier * adjustment
+            final_score = max(0, min(100, final_score))
+        else:
+            final_score = base_score
+
         return round(final_score, 2)
 
     def score_profile(self, config: str, parsed: Dict, success: bool = True,
@@ -278,7 +299,7 @@ class ProfileScorer:
         key = self.get_profile_key(config, parsed)
         profile = self._get_cached_profile(key)
         if not profile:
-            return {'score': 50, 'stability': 0.5, 'lifetime': 24, 'is_datacenter': False, 'server_type': 'UNK'}
+            return {'score': 30, 'stability': 0.5, 'lifetime': 24, 'is_datacenter': False, 'server_type': 'UNK'}
 
         stability = profile.get('stability', 0.5)
         lifetime = profile.get('lifetime', 24.0)
