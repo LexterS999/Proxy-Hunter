@@ -2,9 +2,6 @@
 Единый пул aiohttp ClientSession для всего приложения.
 Предотвращает создание множества соединений и улучшает переиспользование keep-alive.
 Добавлена блокировка и корректное закрытие старых соединений.
-
-ИСПРАВЛЕНО: asyncio.Lock() создаётся лениво внутри работающего event loop,
-а не при импорте модуля (Python 3.10+ DeprecationWarning / 3.12+ breakage).
 """
 
 import aiohttp
@@ -24,7 +21,7 @@ class SessionPool:
     _instance: Optional['SessionPool'] = None
     _session: Optional[aiohttp.ClientSession] = None
     _connector: Optional[aiohttp.TCPConnector] = None
-    _lock: Optional[asyncio.Lock] = None  # Создаётся лениво
+    _lock: Optional[asyncio.Lock] = None
 
     def __new__(cls) -> 'SessionPool':
         if cls._instance is None:
@@ -32,15 +29,14 @@ class SessionPool:
         return cls._instance
 
     def _get_lock(self) -> asyncio.Lock:
-        """Ленивое создание Lock внутри работающего event loop."""
         if self._lock is None:
             self._lock = asyncio.Lock()
         return self._lock
 
     async def get_session(
         self,
-        connector_limit: int = 200,
-        per_host_limit: int = 50,
+        connector_limit: int = 500,      # ИЗМЕНЕНО: было 200
+        per_host_limit: int = 100,        # ИЗМЕНЕНО: было 50
         timeout_total: float = 60.0,
         headers: Optional[dict] = None
     ) -> aiohttp.ClientSession:
@@ -51,7 +47,6 @@ class SessionPool:
         lock = self._get_lock()
         async with lock:
             if self._session is None or self._session.closed:
-                # Закрываем старые объекты перед созданием новых
                 await self._cleanup_old()
 
                 self._connector = aiohttp.TCPConnector(
@@ -59,7 +54,7 @@ class SessionPool:
                     limit_per_host=per_host_limit,
                     ttl_dns_cache=300,
                     enable_cleanup_closed=True,
-                    force_close=True  # Явно закрывать соединения
+                    force_close=True
                 )
                 timeout = aiohttp.ClientTimeout(total=timeout_total)
                 default_headers = {
@@ -82,7 +77,6 @@ class SessionPool:
             return self._session
 
     async def _cleanup_old(self) -> None:
-        """Закрывает старый коннектор и сессию, если они существуют."""
         if self._connector and not self._connector.closed:
             await self._connector.close()
             logger.debug("Closed old TCPConnector")
@@ -93,14 +87,12 @@ class SessionPool:
         self._session = None
 
     async def close(self) -> None:
-        """Закрывает сессию и коннектор."""
         lock = self._get_lock()
         async with lock:
             await self._cleanup_old()
             logger.info("Closed shared ClientSession and TCPConnector")
 
     def reset(self) -> None:
-        """Сброс состояния (для тестов)."""
         self._session = None
         self._connector = None
         self._lock = None
