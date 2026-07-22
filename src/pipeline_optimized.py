@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """
 Оптимизированный пайплайн Proxy-Hunter с улучшенной оценкой,
 активной проверкой (асинхронной), кешированием, graceful shutdown,
@@ -10,6 +11,8 @@
 - Сбор статистики локальных проверок
 - Интеграция RealitySNIHunter
 - Автоматическое обновление весов
+- Детекция датацентров (штраф/бонус)
+- Фильтрация по возрасту профилей (14 дней для архива, 3 дня для простого вывода)
 """
 
 import sys
@@ -43,7 +46,7 @@ from active_checker import ActiveChecker
 from parse_fallback import FallbackParser
 from session_pool import SessionPool
 from channel_quality_analyzer import ChannelQualityAnalyzer
-from db import HistoryDB
+from db import get_db  # для доступа к БД
 
 # Новые импорты
 from sni_probe import SNIProbe
@@ -52,6 +55,46 @@ from regional_scorer import RegionalScorer
 from regional_stats import RegionalStats
 from sni_filter import SNIFilter
 from weight_updater import WeightUpdater
+from datacenter_detector import is_datacenter_ip
+
+# Импорты из обновлённого user_settings
+from user_settings import (
+    ARCHIVE_MAX_AGE_DAYS,
+    SIMPLE_MAX_AGE_DAYS,
+    SCORE_MIN_THRESHOLD,
+    ACTIVE_CHECKER_WORKERS,
+    TCP_TIMEOUT,
+    HTTP_TIMEOUT,
+    MAX_LATENCY_MS,
+    PER_HOST_LIMIT,
+    ENABLED_PROTOCOLS,
+    USE_MAXIMUM_POWER,
+    SPECIFIC_CONFIG_COUNT,
+    CHANNEL_HEALTH_THRESHOLD,
+    CHANNEL_MIN_CONFIGS,
+    CHANNEL_MIN_VALID_RATIO,
+    CHANNEL_MIN_PROTOCOLS,
+    CHANNEL_HISTORY_DAYS,
+    CHANNEL_RECOVERING_TREND_THRESHOLD,
+    CHANNEL_MIN_RECENT_DAYS_FOR_TREND,
+    CHANNEL_WHITELIST,
+    SCORE_WEIGHTS,
+    DECAY_PERIOD_HOURS,
+    MIN_RUNS_FOR_ADAPTIVE_THRESHOLDS,
+    ANOMALY_Z_SCORE_THRESHOLD,
+    ANOMALY_IQR_MULTIPLIER,
+    ANOMALY_DROP_THRESHOLD,
+    MAX_HISTORY_RUNS,
+    SAVE_INTERVAL_SECONDS,
+    ENCRYPT_IPS,
+    ENCRYPTION_SALT,
+    TELEGRAM_CALLS_PER_SECOND,
+    MAX_RESPONSE_SIZE_BYTES,
+    CHANNEL_RETRY_ATTEMPTS,
+    CHANNEL_RETRY_BASE_DELAY,
+    CHANNEL_RETRY_MAX_DELAY,
+    CHANNEL_RETRY_DEADLINE,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -204,6 +247,10 @@ class OptimizedPipeline:
             import aiofiles
         except ImportError:
             missing.append("aiofiles")
+        try:
+            import maxminddb
+        except ImportError:
+            missing.append("maxminddb")  # для детекции датацентров
         if missing:
             logger.error(f"Missing required dependencies: {', '.join(missing)}")
             logger.error("Please install: pip install -r requirements.txt")
@@ -380,6 +427,32 @@ class OptimizedPipeline:
         except Exception as e:
             logger.warning(f"Failed to refresh channel health: {e}")
 
+    # ========== НОВЫЙ МЕТОД: фильтрация по возрасту ==========
+    def _filter_by_age(self, configs: List[str], max_age_days: int) -> List[str]:
+        """
+        Фильтрует список конфигов, оставляя только те, у которых last_seen
+        не старше max_age_days дней.
+        """
+        if max_age_days <= 0:
+            return []
+        db = get_db()
+        cutoff = datetime.now() - timedelta(days=max_age_days)
+        filtered = []
+        for cfg in configs:
+            key = self._get_config_key(cfg)
+            last_seen = db.get_profile_last_seen(key)
+            if last_seen:
+                try:
+                    last_dt = datetime.fromisoformat(last_seen)
+                    if last_dt >= cutoff:
+                        filtered.append(cfg)
+                    continue
+                except:
+                    pass
+            # Если нет last_seen, считаем, что профиль новый (пропускаем)
+            filtered.append(cfg)
+        return filtered
+
     async def save_state(self) -> None:
         logger.info("Saving state before shutdown...")
         if hasattr(self.deduplicator, '_bloom'):
@@ -485,17 +558,25 @@ class OptimizedPipeline:
                     try:
                         parsed = self._get_or_parse_config(cfg)
                         if parsed and parsed.parsed_data:
+                            # ---- НОВОЕ: детекция датацентра и коррекция скора ----
                             score_info = self.scorer.score_profile(cfg, parsed.parsed_data, success=True)
-                            parsed.score = score_info['score']
-                            parsed.stability = score_info['stability']
-                            parsed.lifetime = score_info['lifetime']
+                            base_score = score_info['score']
+                            # Корректируем на основе датацентра
+                            server = parsed.server
+                            if is_datacenter_ip(server):
+                                base_score *= 0.95   # штраф
+                            else:
+                                base_score *= 1.05   # бонус
+                            base_score = max(0, min(100, base_score))
+                            score_info['score'] = base_score
+
                             scored_configs.append({
                                 'config': cfg,
                                 'score': score_info['score'],
                                 'stability': score_info['stability'],
                                 'lifetime': score_info['lifetime'],
-                                'is_datacenter': False,
-                                'server_type': 'UNK',
+                                'is_datacenter': is_datacenter_ip(server),
+                                'server_type': 'datacenter' if is_datacenter_ip(server) else 'vps',
                                 'parsed': parsed.parsed_data
                             })
                     except Exception as e:
@@ -511,9 +592,8 @@ class OptimizedPipeline:
                 logger.error("No configs scored.")
                 return False
 
-            # Шаг 4: Фильтр по скору
-            min_score = 0.0
-            filtered = [item for item in scored_configs if item['score'] >= min_score]
+            # Шаг 4: Фильтр по скору (используем SCORE_MIN_THRESHOLD)
+            filtered = [item for item in scored_configs if item['score'] >= SCORE_MIN_THRESHOLD]
             logger.info(f"✅ After min_score filter: {len(filtered)}")
             if not filtered:
                 logger.warning("No configs passed min_score filter, lowering threshold...")
@@ -529,9 +609,9 @@ class OptimizedPipeline:
             history = self._safe_load_history()
             if self.checker_cache is None:
                 self.checker_cache = ActiveChecker(
-                    timeout=5.0,
-                    max_workers=None,
-                    max_latency=10000.0,
+                    timeout=TCP_TIMEOUT,
+                    max_workers=ACTIVE_CHECKER_WORKERS,
+                    max_latency=MAX_LATENCY_MS,
                     history=history,
                     cache_ttl=3600
                 )
@@ -626,30 +706,50 @@ class OptimizedPipeline:
                     await self.save_state()
                 return False
 
+            # ========== НОВОЕ: Фильтрация по возрасту ==========
+            logger.info(f"⏳ Filtering configs by age (archive: {ARCHIVE_MAX_AGE_DAYS} days, simple: {SIMPLE_MAX_AGE_DAYS} days)")
+            archive_configs = self._filter_by_age(deduped, ARCHIVE_MAX_AGE_DAYS)
+            simple_configs = self._filter_by_age(deduped, SIMPLE_MAX_AGE_DAYS)
+            logger.info(f"   Archive configs: {len(archive_configs)}")
+            logger.info(f"   Simple configs: {len(simple_configs)}")
+
             # Шаг 7: Архивация с именами
             logger.info("💾 Archiving logic (with name mapping)...")
             name_mapping = await self._load_name_mapping_async()
-            new_configs_with_names = []
-            for cfg in deduped:
+            # Добавляем имена только для тех, кто попадает в архив
+            for cfg in archive_configs:
                 key = self._get_config_key(cfg)
                 if key not in name_mapping:
                     name_mapping[key] = self._generate_name(cfg)
-                new_configs_with_names.append(cfg)
-            archive_configs = await self._load_archive_async()
+
+            # Загружаем старый архив (если есть)
+            old_archive = await self._load_archive_async()
+            # Объединяем старый архив с новым (только те, что прошли фильтр)
+            merged_archive = []
             seen_keys = set()
-            merged_configs = []
-            for cfg in archive_configs + new_configs_with_names:
+            # Сначала добавляем старые, но только если они ещё не просрочены
+            # (пропускаем старые, которые не прошли фильтр)
+            for cfg in old_archive:
                 key = self._get_config_key(cfg)
                 if key not in seen_keys:
+                    # Проверяем возраст для старого конфига
+                    if self._filter_by_age([cfg], ARCHIVE_MAX_AGE_DAYS):
+                        merged_archive.append(cfg)
+                        seen_keys.add(key)
+            # Добавляем новые
+            for cfg in archive_configs:
+                key = self._get_config_key(cfg)
+                if key not in seen_keys:
+                    merged_archive.append(cfg)
                     seen_keys.add(key)
-                    merged_configs.append(cfg)
-            logger.info(f"🔄 Merged archive: {len(archive_configs)} old + {len(new_configs_with_names)} new → {len(merged_configs)} unique")
 
-            await self._save_archive_with_names_async(merged_configs, name_mapping)
-            await self._save_simple_async(new_configs_with_names, name_mapping)
+            logger.info(f"🔄 Merged archive: {len(old_archive)} old + {len(archive_configs)} new → {len(merged_archive)} unique")
 
-            logger.info(f"✅ Archive saved: {len(merged_configs)} configs in {self.output_file}")
-            logger.info(f"✅ Simple output saved: {len(new_configs_with_names)} configs in {self.simple_file}")
+            await self._save_archive_with_names_async(merged_archive, name_mapping)
+            await self._save_simple_async(simple_configs, name_mapping)
+
+            logger.info(f"✅ Archive saved: {len(merged_archive)} configs in {self.output_file}")
+            logger.info(f"✅ Simple output saved: {len(simple_configs)} configs in {self.simple_file}")
 
             # Шаг 8: Xray конфиг
             logger.info("📦 Generating Xray balanced config...")
@@ -665,7 +765,7 @@ class OptimizedPipeline:
             final_stats = {
                 'total_raw': len(raw_configs),
                 'total_valid': len(valid_configs),
-                'total_final': len(merged_configs),
+                'total_final': len(merged_archive),
                 'avg_score': sum(item['score'] for item in filtered) / len(filtered) if filtered else 0,
                 'protocols': {},
                 'geo_distribution': {},
@@ -718,7 +818,7 @@ class OptimizedPipeline:
             elapsed = time.time() - start_time
             logger.info("=" * 60)
             logger.info(f"✅ Pipeline completed in {elapsed:.2f}s")
-            logger.info(f"📊 Final configs in archive: {len(merged_configs)}")
+            logger.info(f"📊 Final configs in archive: {len(merged_archive)}")
             logger.info("=" * 60)
             return True
 
