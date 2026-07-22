@@ -612,148 +612,19 @@ class OptimizedPipeline:
                 await self.save_state()
                 return False
 
-            # Шаг 5: Активная проверка (с кешированием)
-            logger.info("🔌 Active checking (TCP, HTTP HEAD, async, cached)...")
-            history = self._safe_load_history()
-            if self.checker_cache is None:
-                self.checker_cache = ActiveChecker(
-                    timeout=TCP_TIMEOUT,
-                    max_workers=ACTIVE_CHECKER_WORKERS,
-                    max_latency=MAX_LATENCY_MS,
-                    history=history,
-                    cache_ttl=3600
-                )
-            checker = self.checker_cache
-
-            configs_to_check = [item['config'] for item in filtered]
-            check_results = await checker.check_batch(configs_to_check)
-
-            if self._shutdown_requested:
-                await self.save_state()
-                return False
-
-            await SessionPool().close()
-
-            # Сохраняем локальную статистику
-            for result in check_results:
-                if result.get('valid', False):
-                    config = result['config']
-                    parsed = self._get_or_parse_config(config)
-                    if parsed:
-                        self.scorer.record_local_result(
-                            config, parsed.parsed_data,
-                            success=result.get('success', False),
-                            latency=result.get('latency', -1)
-                        )
-
-            good_configs = [
-                r['config'] for r in check_results
-                if r.get('valid', False) and r.get('latency', -1) > 0
-            ]
-            logger.info(f"✅ Active check: {len(good_configs)} configs passed")
+            # =================================================================
+            # Шаг 5: Используем скоринг
+            # =================================================================
+            logger.info("🔌 Skipping active checking (using only scoring history)...")
+            # Просто используем filtered по порогу (уже отфильтрованы)
+            good_configs = [item['config'] for item in filtered]  # все, что прошли порог
+            logger.info(f"✅ Selected {len(good_configs)} configs with score >= {SCORE_MIN_THRESHOLD}")
 
             if not good_configs:
-                error_counts = {}
-                for r in check_results:
-                    err = r.get('error', 'unknown')
-                    error_counts[err] = error_counts.get(err, 0) + 1
-                logger.error("❌ No configs passed active check!")
-                logger.error(f"   Error breakdown: {error_counts}")
-                return False
-
-            # Обновляем скоры
-            for result in check_results:
-                if result.get('valid', False) and result.get('latency', -1) > 0:
-                    latency_ms = result['latency']
-                    latency_bonus = max(0, min(20, 20 * (1 - latency_ms / 3000)))
-                    for item in filtered:
-                        if item['config'] == result['config']:
-                            item['score'] = min(100, item['score'] + latency_bonus)
-                            break
-
-            # ========== НОВОЕ: множественные замеры для пограничных конфигов ==========
-            logger.info("📊 Multi-probe for borderline configs (score 25-35)...")
-            borderline = [item for item in filtered if 25 <= item['score'] <= 35]
-            if borderline:
-                logger.info(f"   Found {len(borderline)} borderline configs, performing 3 probes with 2s interval...")
-                import statistics
-                for item in borderline:
-                    cfg = item['config']
-                    parsed = self._get_or_parse_config(cfg)
-                    if not parsed:
-                        continue
-                    host = parsed.server
-                    port = parsed.port
-                    use_tls = parsed.parsed_data.get('security') in ('tls', 'reality') or parsed.parsed_data.get('tls') in ('tls', 'reality')
-                    latencies = []
-                    for _ in range(3):
-                        latency = await checker._tcp_latency(host, port, use_tls)
-                        if latency > 0:
-                            latencies.append(latency)
-                        await asyncio.sleep(2.0)
-                    if len(latencies) >= 2:
-                        median_lat = statistics.median(latencies)
-                        if median_lat < MAX_LATENCY_MS:
-                            # Улучшаем скор
-                            item['score'] = min(100, item['score'] + 10)
-                            logger.debug(f"   Improved score for {cfg[:30]}... to {item['score']}")
-                        else:
-                            item['score'] = max(0, item['score'] - 5)
-                            logger.debug(f"   Lowered score for {cfg[:30]}... to {item['score']}")
-
-            # ========== НОВОЕ: финальная верификация через Xray для пограничных ==========
-            logger.info("🔬 Final Xray verification for borderline configs (score 25-35)...")
-            for item in borderline:
-                cfg = item['config']
-                parsed = self._get_or_parse_config(cfg)
-                if not parsed:
-                    continue
-                # Создаём шаблон конфига (упрощённо)
-                config_template = {}  # в реальности нужно построить outbound
-                # Проверяем через Xray
-                try:
-                    result = await self.reality_hunter.verify_with_xray(
-                        sni=parsed.parsed_data.get('sni', parsed.server),
-                        server_ip=parsed.server,
-                        config_template=config_template
-                    )
-                    if result.get('success'):
-                        item['score'] = min(100, item['score'] + 5)
-                        logger.debug(f"   Xray verification passed for {cfg[:30]}")
-                except Exception as e:
-                    logger.debug(f"   Xray verification failed for {cfg[:30]}: {e}")
-
-            # Шаг 5.1: SNI-тестирование для топ-10 конфигов
-            logger.info("🔬 SNI multi-test for top 10 configs...")
-            top_configs = filtered[:10]
-            sni_list = ['cloudflare.com', 'google.com', 'youtube.com', 'speedtest.net', 'dl.google.com']
-            for item in top_configs:
-                cfg = item['config']
-                try:
-                    sni_results = await checker.test_with_multiple_sni(cfg, sni_list)
-                    if sni_results and 'error' not in sni_results:
-                        working_snis = [s for s, res in sni_results.items() if res.get('success')]
-                        if working_snis:
-                            item['score'] += 10 * len(working_snis) / len(sni_list)
-                except Exception as e:
-                    logger.debug(f"SNI test failed for {cfg[:50]}: {e}")
-
-            # Шаг 5.2: Интеграция RealitySNIHunter (сканирование SNI)
-            logger.info("🔍 Scanning for working SNIs via RealitySNIHunter...")
-            try:
-                ip_range = "104.16.0.0/16"  # Cloudflare IP range
-                found_snis = await self.reality_hunter.hunt(ip_range, top_n=10)
-                if found_snis:
-                    logger.info(f"Found {len(found_snis)} working SNIs: {[s['sni'] for s in found_snis]}")
-                    for item in filtered:
-                        server = item.get('parsed', {}).get('address') or item.get('parsed', {}).get('add')
-                        if server:
-                            for entry in found_snis:
-                                if entry['ip'] == server:
-                                    item['score'] *= 1.2
-                                    break
-            except Exception as e:
-                logger.warning(f"RealitySNIHunter scan failed: {e}")
+                logger.error("❌ No configs passed the minimum score threshold!")
+                # Можно понизить порог или использовать все scored
+                logger.warning("Using all scored configs as fallback.")
+                good_configs = [item['config'] for item in scored_configs]
 
             # Шаг 6: Дедупликация
             logger.info("🧹 Deep deduplication (new configs)...")
