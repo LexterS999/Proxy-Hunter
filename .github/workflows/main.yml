@@ -2,8 +2,8 @@ name: Proxy-Hunter
 
 on:
   schedule:
-    - cron: '0 */5 * * *'
-  workflow_dispatch:
+    - cron: '0 */5 * * *'          # каждые 5 часов
+  workflow_dispatch:                # ручной запуск
 
 jobs:
   run-pipeline:
@@ -48,7 +48,7 @@ jobs:
         run: |
           mkdir -p configs logs assets bloom_shards
 
-      # ===== Кэширование SQLite и Bloom =====
+      # ===== Кэширование SQLite =====
       - name: Cache SQLite database
         uses: actions/cache@v4
         with:
@@ -57,6 +57,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-history-db-
 
+      # ===== Кэширование Bloom shards =====
       - name: Cache Bloom shards
         uses: actions/cache@v4
         with:
@@ -65,8 +66,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-bloom-shards-
 
-      # ===== Кэширование GeoLite2 базы (опционально) =====
+      # ===== Кэширование GeoLite2 ASN базы (с id для проверки) =====
       - name: Cache GeoLite2 ASN database
+        id: cache-geolite
         uses: actions/cache@v4
         with:
           path: configs/GeoLite2-ASN.mmdb
@@ -74,12 +76,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-geolite2-asn-
 
+      # ===== Скачивание GeoLite2 (только если нет в кэше) =====
       - name: Download GeoLite2 ASN database (optional)
-        if: ${{ !cached }}
+        if: steps.cache-geolite.outputs.cache-hit != 'true'
         run: |
-          # Если у вас есть лицензионный ключ MaxMind, можно скачать базу:
+          # Если у вас есть лицензионный ключ MaxMind, раскомментируйте строку ниже
+          # и добавьте секрет MAXMIND_LICENSE_KEY в настройках репозитория.
           # wget -O configs/GeoLite2-ASN.mmdb "https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-ASN&license_key=${{ secrets.MAXMIND_LICENSE_KEY }}&suffix=mmdb"
-          # Если ключа нет – просто создаём заглушку (будет использован встроенный список)
+          # Если ключа нет – создаём заглушку (будет использован встроенный список).
           touch configs/GeoLite2-ASN.mmdb
           echo "⚠️ GeoLite2 база не установлена. Будет использован встроенный список датацентров."
 
@@ -333,10 +337,8 @@ jobs:
           echo "❌ 'Run optimized pipeline' step failed. Failing the job after diagnostics were uploaded."
           exit 1
 
-      # ===== Очистка старых логов и артефактов =====
+      # ===== Очистка старых логов =====
       - name: Cleanup old artifacts (optional)
         if: always()
         run: |
           find logs -name "*.log" -type f -mtime +7 -delete 2>/dev/null || true
-          # Удаляем старые артефакты (если нужно)
-          # curl -L -X DELETE "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?name=proxy-output" -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}"
