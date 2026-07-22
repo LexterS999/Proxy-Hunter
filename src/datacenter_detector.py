@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """
 Модуль для определения, принадлежит ли IP-адрес дата-центру или частному VPS.
@@ -18,13 +17,15 @@ logger = logging.getLogger(__name__)
 # Глобальный кеш для ускорения
 _cache = {}
 _asn_reader = None
+_loaded = False          # флаг, что мы уже пытались загрузить базу
 
 
 def _load_asn_reader():
-    """Загружает MaxMind ASN-ридер, если файл существует."""
-    global _asn_reader
-    if _asn_reader is not None:
+    """Загружает MaxMind ASN-ридер, если файл существует. Предупреждение только один раз."""
+    global _asn_reader, _loaded
+    if _loaded:
         return _asn_reader
+    _loaded = True
     if os.path.exists(GEOLITE2_ASN_PATH):
         try:
             import maxminddb
@@ -67,7 +68,6 @@ def is_datacenter_ip(ip: str) -> bool:
 
     asn = get_asn(ip)
     if asn is not None:
-        # Проверяем по встроенному списку
         is_dc = asn in BUILTIN_DATACENTER_ASNS
         _cache[ip] = is_dc
         return is_dc
