@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """
 Модуль для работы с SQLite-базой данных истории.
 Хранит статистику запусков, каналов и профилей с компрессией.
-Добавлены индексы, TTL-кеш для распаковки, WAL-режим.
+Добавлены индексы, TTL-кеш для распаковки, WAL-режим, авто-вакуум.
 
 ИСПРАВЛЕНО:
 - lru_cache заменён на TTL-кеш с инвалидацией
 - Добавлена функция get_db() для обратной совместимости с channel_quality_analyzer.py
 - Добавлен метод update_profiles_batch() для ProfileScorer._flush_profiles()
 - Добавлен метод get_profile_last_seen() для фильтрации по возрасту
+- Добавлен auto_vacuum = FULL для автоматического сжатия базы
+- Добавлен метод vacuum() для ручного сжатия
 """
 
 import sqlite3
@@ -30,7 +31,6 @@ logger = logging.getLogger(__name__)
 DB_PATH = "configs/history.db"
 COMPRESS_LEVEL = 6  # уровень сжатия zlib
 
-
 def _compress(data: Any) -> bytes:
     """Сжимает JSON-данные в bytes."""
     if data is None:
@@ -39,7 +39,6 @@ def _compress(data: Any) -> bytes:
         return zlib.compress(json.dumps(data).encode('utf-8'), level=COMPRESS_LEVEL)
     except Exception:
         return b''
-
 
 class TTLCache:
     """
@@ -94,10 +93,8 @@ class TTLCache:
             for k in keys_to_remove:
                 del self._cache[k]
 
-
 # Глобальный TTL-кеш для распаковки
 _decompress_cache = TTLCache(maxsize=1024, ttl_seconds=300.0)
-
 
 def _decompress_cached(blob: bytes) -> Any:
     """Распаковывает bytes в JSON-объект с TTL-кешированием."""
@@ -117,16 +114,13 @@ def _decompress_cached(blob: bytes) -> Any:
     except Exception:
         return None
 
-
 def _decompress(blob: bytes) -> Any:
     """Обёртка для обратной совместимости."""
     return _decompress_cached(blob)
 
-
 def invalidate_decompress_cache() -> None:
     """Публичная функция для инвалидации кеша распаковки (вызывать после UPDATE в БД)."""
     _decompress_cache.invalidate()
-
 
 class HistoryDB:
     """Синглтон для доступа к SQLite базе истории с индексами и WAL."""
@@ -140,11 +134,12 @@ class HistoryDB:
         return cls._instance
 
     def _init_db(self) -> None:
-        """Создаёт таблицы и индексы, включает WAL."""
+        """Создаёт таблицы и индексы, включает WAL и авто-вакуум."""
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         with self._get_connection() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA auto_vacuum = FULL")  # <-- добавлено для сжатия
             cursor = conn.cursor()
 
             # Таблица запусков (runs)
@@ -230,7 +225,7 @@ class HistoryDB:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_runs_timestamp ON runs(timestamp)")
 
             conn.commit()
-            logger.info("SQLite history database initialized with indexes and WAL.")
+            logger.info("SQLite history database initialized with indexes, WAL and auto_vacuum=FULL.")
 
     @contextmanager
     def _get_connection(self):
@@ -524,12 +519,17 @@ class HistoryDB:
             return None
         return sum(valid_scores) / len(valid_scores)
 
+    # ========== НОВЫЙ МЕТОД ДЛЯ СЖАТИЯ ==========
+    def vacuum(self) -> None:
+        """Выполняет VACUUM для сжатия базы данных и освобождения места."""
+        with self._get_connection() as conn:
+            conn.execute("VACUUM")
+            logger.info("SQLite database vacuumed (space reclaimed).")
 
 # =============================================================================
 # Инициализация и обратная совместимость
 # =============================================================================
 _db = HistoryDB()
-
 
 def get_db() -> HistoryDB:
     """
