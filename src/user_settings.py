@@ -54,6 +54,10 @@ PROXY_ARCHIVE_MAX_AGE_DAYS = 14   # пример: 14
 # Профили, у которых last_seen старше этого числа, не будут включены в простой вывод.
 PROXY_SIMPLE_MAX_AGE_DAYS = 3     # пример: 3
 
+# Максимальный возраст конфигурации (в днях) для проверки валидности.
+# Используется в is_config_valid (fetch_configs.py) для фильтрации старых конфигов.
+PROXY_MAX_CONFIG_AGE_DAYS = 14    # совпадает с ARCHIVE по умолчанию
+
 # ============================================================
 # БЛОК 4: СЕТЕВЫЕ ПАРАМЕТРЫ (таймауты, лимиты)
 # ============================================================
@@ -156,7 +160,6 @@ PROXY_BUILTIN_DATACENTER_ASNS = {
     'AS133752': 'Leaseweb',
     'AS20473': 'Vultr',
 }
-# Примечание: этот список можно расширять вручную.
 
 # ============================================================
 # БЛОК 9: ПРОТОКОЛЫ (включить/выключить)
@@ -282,6 +285,7 @@ USE_MAXIMUM_POWER = _get_bool('PROXY_USE_MAXIMUM_POWER', PROXY_USE_MAXIMUM_POWER
 SPECIFIC_CONFIG_COUNT = _get_int('PROXY_SPECIFIC_CONFIG_COUNT', PROXY_SPECIFIC_CONFIG_COUNT, 1, 50000)
 ARCHIVE_MAX_AGE_DAYS = _get_int('PROXY_ARCHIVE_MAX_AGE_DAYS', PROXY_ARCHIVE_MAX_AGE_DAYS, 1, 90)
 SIMPLE_MAX_AGE_DAYS = _get_int('PROXY_SIMPLE_MAX_AGE_DAYS', PROXY_SIMPLE_MAX_AGE_DAYS, 1, 30)
+MAX_CONFIG_AGE_DAYS = _get_int('PROXY_MAX_CONFIG_AGE_DAYS', PROXY_MAX_CONFIG_AGE_DAYS, 1, 90)   # <-- НОВАЯ ПЕРЕМЕННАЯ
 TCP_TIMEOUT = _get_float('PROXY_CHECK_TCP_TIMEOUT', PROXY_CHECK_TCP_TIMEOUT, 0.5, 30.0)
 HTTP_TIMEOUT = _get_float('PROXY_CHECK_HTTP_TIMEOUT', PROXY_CHECK_HTTP_TIMEOUT, 0.5, 30.0)
 MAX_LATENCY_MS = _get_float('PROXY_MAX_LATENCY_MS', PROXY_MAX_LATENCY_MS, 100.0, 60000.0)
@@ -304,7 +308,7 @@ CHANNEL_MIN_PROTOCOLS = _get_int('PROXY_CHANNEL_MIN_PROTOCOLS', PROXY_CHANNEL_MI
 CHANNEL_HISTORY_DAYS = _get_int('PROXY_CHANNEL_HISTORY_DAYS', PROXY_CHANNEL_HISTORY_DAYS, 3, 30)
 CHANNEL_RECOVERING_TREND_THRESHOLD = _get_float('PROXY_CHANNEL_RECOVERING_TREND_THRESHOLD', PROXY_CHANNEL_RECOVERING_TREND_THRESHOLD, 0.01, 0.5)
 CHANNEL_MIN_RECENT_DAYS_FOR_TREND = _get_int('PROXY_CHANNEL_MIN_RECENT_DAYS_FOR_TREND', PROXY_CHANNEL_MIN_RECENT_DAYS_FOR_TREND, 1, 7)
-CHANNEL_WHITELIST = PROXY_CHANNEL_WHITELIST  # можно переопределить через ENV, но оставим как есть
+CHANNEL_WHITELIST = PROXY_CHANNEL_WHITELIST
 MIN_RUNS_FOR_ADAPTIVE_THRESHOLDS = _get_int('PROXY_MIN_RUNS_FOR_ADAPTIVE_THRESHOLDS', PROXY_MIN_RUNS_FOR_ADAPTIVE_THRESHOLDS, 3, 50)
 ANOMALY_Z_SCORE_THRESHOLD = _get_float('PROXY_ANOMALY_Z_SCORE_THRESHOLD', PROXY_ANOMALY_Z_SCORE_THRESHOLD, 1.0, 5.0)
 ANOMALY_IQR_MULTIPLIER = _get_float('PROXY_ANOMALY_IQR_MULTIPLIER', PROXY_ANOMALY_IQR_MULTIPLIER, 0.5, 3.0)
