@@ -3280,23 +3280,6 @@
     "spx": "",
     "name": "Channel : @Daily_Configs"
   },
-  "28b53fc018a2202a9205be62072a78f8": {
-    "uuid": "218fd696-e3a2-4c33-b397-a5f13a82969e",
-    "address": "89.23.113.159",
-    "port": 443,
-    "flow": "",
-    "sni": "www.tradingview.com",
-    "type": "tcp",
-    "path": "",
-    "host": "89.23.113.159",
-    "security": "reality",
-    "alpn": "",
-    "fp": "chrome",
-    "pbk": "4e4FI0siWxFtLCRCVDQurn1wLTuvKWhRY0zj1SaUcyw",
-    "sid": "1559b440",
-    "spx": "",
-    "name": "\ud83c\uddf7\ud83c\uddfa118242 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
-  },
   "2098b182698bc53afdd289d98032ab2a": {
     "uuid": "21e22226-0b96-4b4e-9a91-5c7f9e3f1760",
     "address": "145.239.137.250",
@@ -3585,6 +3568,57 @@
     "sid": "",
     "spx": "",
     "name": "@VPN_VIP_NOR"
+  },
+  "38ea37ade377bece5e7999120736fa45": {
+    "uuid": "2cd6ed0f-636e-4e6c-9449-5a263d7a0fa5",
+    "address": "66.81.247.244",
+    "port": 443,
+    "flow": "",
+    "sni": "cfed.tgzdyz2.top",
+    "type": "ws",
+    "path": "tg@zdyz2securityfp=chrome",
+    "host": "cfed.tgzdyz2.top",
+    "security": "tls",
+    "alpn": "",
+    "fp": "",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "@GozargahAzad|#CloudFlare@GozargahAzad"
+  },
+  "b0d343b8b07f93495e2599ba3a447fb8": {
+    "uuid": "2cd6ed0f-636e-4e6c-9449-5a263d7a0fa5",
+    "address": "66.81.247.244",
+    "port": 443,
+    "flow": "",
+    "sni": "cfed.tgzdyz2.top",
+    "type": "ws",
+    "path": "tg@soskeynets=chrome",
+    "host": "cfed.tgzdyz2.top",
+    "security": "tls",
+    "alpn": "",
+    "fp": "",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "\ud83c\uddfa\ud83c\uddf8118412 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
+  },
+  "38821824d2e86c57ea4e656f07975f97": {
+    "uuid": "2cd6ed0f-636e-4e6c-9449-5a263d7a0fa5",
+    "address": "66.81.247.244",
+    "port": 443,
+    "flow": "",
+    "sni": "cfed.tgzdyz2.top",
+    "type": "ws",
+    "path": "tg@zdyz2securityfp=chrome",
+    "host": "cfed.tgzdyz2.top",
+    "security": "tls",
+    "alpn": "",
+    "fp": "",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "@Hope_Net-join-us-on-Telegram"
   },
   "476eda84fadb38c5e02550f652ddb280": {
     "uuid": "2d361025-6e07-4914-bcee-19f47683d7c3",
@@ -4232,6 +4266,23 @@
     "spx": "",
     "name": "\ud83c\udde9\ud83c\uddeaDE_662_@Surfboardv2ray"
   },
+  "49cde81860a8e8d384643abafb13ae33": {
+    "uuid": "3757a383-ca03-4d85-a4f0-5c9602a8949a",
+    "address": "soskeynets.gdsrguydsrghj.ir",
+    "port": 1010,
+    "flow": "",
+    "sni": "soskeynets.gdsrguydsrghj.ir",
+    "type": "tcp",
+    "path": "",
+    "host": "soskeynets.gdsrguydsrghj.ir",
+    "security": "none",
+    "alpn": "",
+    "fp": "",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "\ud83c\uddee\ud83c\uddf7118410 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
+  },
   "c76285c3cbb0e84d949ee8a03a6b6d72": {
     "uuid": "37966092-f71c-8f7a-484f-d68c68f01ab7",
     "address": "x4g-production-ed65.up.railway.app",
@@ -4741,23 +4792,6 @@
     "sid": "",
     "spx": "",
     "name": "@VPN_VIP_NOR"
-  },
-  "7c9a61ecfa0f215feca466a4d6774246": {
-    "uuid": "3f646f4d-b96e-4ba4-b562-0fd4854391a8",
-    "address": "135.181.45.18",
-    "port": 2056,
-    "flow": "",
-    "sni": "yahoo.com",
-    "type": "xhttp",
-    "path": "/path",
-    "host": "hostname",
-    "security": "reality",
-    "alpn": "",
-    "fp": "chrome",
-    "pbk": "qXZfqpQScWQea7Kpr69if9iHhiA7IMLwUgZflIvuWh8",
-    "sid": "4eee3ae71639f189",
-    "spx": "",
-    "name": "\ud83c\uddeb\ud83c\uddee118246 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
   "948e8284475207c279c2a797d3cb7585": {
     "uuid": "3f7f50bb-e489-9684-74a7-4b0669b8cb15",
@@ -7649,6 +7683,40 @@
     "spx": "",
     "name": "TokaVpn"
   },
+  "e450df75d86a1fa1a1c3900016003dd4": {
+    "uuid": "72a9841d-f4b4-425e-b7b9-7f7d4c1dc81e",
+    "address": "190.93.247.56",
+    "port": 8880,
+    "flow": "",
+    "sni": "190.93.247.56",
+    "type": "ws",
+    "path": "/-ViV2ry@V2RIRAN-TEL--@V2RIRAN-TEL--@V2RIRAN-TEL--@V2RIRAN-JOIN-@V2RIRAN-TEL--@V2RIRAN-JOIN-@V2RIRAN-TEL-@V2RIRAN-TEL--@V2RIRAN-JOIN-@V2RIRAN-TEL--@V2RIRAN?ed=8880",
+    "host": "www.speedtest.net.B.PeYmOd.CoM.",
+    "security": "none",
+    "alpn": "",
+    "fp": "",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "@GozargahAzad|#CloudFlare@GozargahAzad"
+  },
+  "6d63833cd5fa52d787318cbe457eeb75": {
+    "uuid": "72a9841d-f4b4-425e-b7b9-7f7d4c1dc81e",
+    "address": "190.93.247.56",
+    "port": 8880,
+    "flow": "",
+    "sni": "190.93.247.56",
+    "type": "ws",
+    "path": "/-ViV2ry@V2RIRAN-TEL--@V2RIRAN-TEL--@V2RIRAN-TEL--@V2RIRAN-JOIN-@V2RIRAN-TEL--@V2RIRAN-JOIN-@V2RIRAN-TEL-@V2RIRAN-TEL--@V2RIRAN-JOIN-@V2RIRAN-TEL--@V2RIRAN?ed=8880",
+    "host": "www.speedtest.net.B.PeYmOd.CoM.",
+    "security": "none",
+    "alpn": "",
+    "fp": "",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "@Hope_Net-join-us-on-Telegram"
+  },
   "42cd6489dc33b3a2cfbd93ca97d32729": {
     "uuid": "72d1797c-cef8-410a-b8fd-db9104dc3cb0",
     "address": "45.130.125.207",
@@ -8635,40 +8703,6 @@
     "spx": "",
     "name": "@v2rayNplus |FR"
   },
-  "3cf347e6ac63d78d0c211e901208deaa": {
-    "uuid": "7b81d175-d180-4ec8-bbc5-dfe80e8d3b68",
-    "address": "144.31.0.100",
-    "port": 443,
-    "flow": "xtls-rprx-vision",
-    "sni": "vaultivo-hgooe.ru",
-    "type": "tcp",
-    "path": "",
-    "host": "144.31.0.100",
-    "security": "reality",
-    "alpn": "",
-    "fp": "",
-    "pbk": "CxMPFpwhcR9Ocp-Xy_1J08mo-atdHKUf58WLOy_XlgM",
-    "sid": "5e3ab3ab228625",
-    "spx": "",
-    "name": "\ud83c\uddf5\ud83c\uddf1118241 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
-  },
-  "9a900f10e294cbc7173c392de0786e9f": {
-    "uuid": "7b81d175-d180-4ec8-bbc5-dfe80e8d3b68",
-    "address": "144.31.129.42",
-    "port": 443,
-    "flow": "",
-    "sni": "morphbinerkkw.ru",
-    "type": "grpc",
-    "path": "",
-    "host": "144.31.129.42",
-    "security": "reality",
-    "alpn": "",
-    "fp": "",
-    "pbk": "CxMPFpwhcR9Ocp-Xy_1J08mo-atdHKUf58WLOy_XlgM",
-    "sid": "d9662905",
-    "spx": "",
-    "name": "\ud83c\udde6\ud83c\uddf1118240 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
-  },
   "f47817d983bdabb88598a4edb1b97003": {
     "uuid": "7c0f30a2-a7c1-43b1-bc51-20f07036a76e",
     "address": "ru-01.gni-daed.ru",
@@ -9280,23 +9314,6 @@
     "sid": "",
     "spx": "",
     "name": "@VPNine1"
-  },
-  "5eafc5115cd9d0ee6a0e99324dda3610": {
-    "uuid": "838382a4-8346-4ce2-96c5-5ba132747d74",
-    "address": "162.159.38.119",
-    "port": 443,
-    "flow": "",
-    "sni": "telegram.mxgrid.xyz",
-    "type": "ws",
-    "path": "/-----MxGriD-----",
-    "host": "telegram.mxgrid.xyz",
-    "security": "tls",
-    "alpn": "",
-    "fp": "chrome",
-    "pbk": "",
-    "sid": "",
-    "spx": "",
-    "name": "\ud83c\uddfa\ud83c\uddf8118243 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
   "1a0318675e61eda21de30aa60eeb95d9": {
     "uuid": "838382a4-8346-4ce2-96c5-5ba132747d74",
@@ -11950,6 +11967,23 @@
     "spx": "",
     "name": "ConfigV2RayNG"
   },
+  "54e374c4f570d20a7ab56eabb93b95c2": {
+    "uuid": "8ad6f598-cd8d-4fca-848e-05fc9be15ff3",
+    "address": "love.ns.cloudflare.com",
+    "port": 443,
+    "flow": "",
+    "sni": "deicl.redstone-vex.sbs",
+    "type": "ws",
+    "path": "/sea",
+    "host": "deicl.redstone-vex.sbs",
+    "security": "tls",
+    "alpn": "",
+    "fp": "chrome",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "@GozargahAzad|#CloudFlare@GozargahAzad"
+  },
   "0c484649ce2f2c8375baf487cbe663a9": {
     "uuid": "8ad6f598-cd8d-4fca-848e-05fc9be15ff3",
     "address": "love.ns.cloudflare.com",
@@ -14245,23 +14279,6 @@
     "spx": "",
     "name": "TokaVpn"
   },
-  "d13fd23611d0191ddbe578497d86cac6": {
-    "uuid": "a3f8f570-3e53-4252-a01f-f95156680e39",
-    "address": "162.159.38.119",
-    "port": 443,
-    "flow": "",
-    "sni": "telegram.mxgrid.xyz",
-    "type": "ws",
-    "path": "/-----MxGriD-----",
-    "host": "telegram.mxgrid.xyz",
-    "security": "tls",
-    "alpn": "",
-    "fp": "chrome",
-    "pbk": "",
-    "sid": "",
-    "spx": "",
-    "name": "\ud83c\uddfa\ud83c\uddf8118245 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
-  },
   "349e1deda91a8f3244c39e675458406d": {
     "uuid": "a3f8f570-3e53-4252-a01f-f95156680e39",
     "address": "162.159.38.119",
@@ -15859,23 +15876,6 @@
     "sid": "1a",
     "spx": "",
     "name": "@Moftconfig \ud83c\uddef\ud83c\uddf5 Unknown \ud83d\udce1mci \u23f1322ms \u26a11.3MB/s"
-  },
-  "09680499661b5252312780c6a164ee0f": {
-    "uuid": "ba0f90b6-3c3c-4701-b2b6-afe57da05527",
-    "address": "soskeynets.kaguya.sbs",
-    "port": 443,
-    "flow": "xtls-rprx-vision",
-    "sni": "denode.kaguya.sbs",
-    "type": "tcp",
-    "path": "",
-    "host": "soskeynets.kaguya.sbs",
-    "security": "reality",
-    "alpn": "",
-    "fp": "",
-    "pbk": "5Tt-quE0unPIlD-aN03PqpjZ4eMh34Dq1FSbPuFMzGA",
-    "sid": "",
-    "spx": "",
-    "name": "\ud83c\uddf3\ud83c\uddf1118239 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
   "b26d116ba7538f0b5810ec17a2f6c2f7": {
     "uuid": "ba613b9f-712b-4411-804b-9687cb92dbff",
@@ -18324,6 +18324,23 @@
     "sid": "",
     "spx": "",
     "name": "\ud83c\uddf8\ud83c\uddec118409 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET Join: @soskeynets"
+  },
+  "c88847e85238b57b435acb4daa3f00c6": {
+    "uuid": "d342d11e-d424-4583-b36e-524ab1f0afa4",
+    "address": "123.241.137.138",
+    "port": 12071,
+    "flow": "",
+    "sni": "a.ssll.gay",
+    "type": "ws",
+    "path": "/?ed=2048security=tls",
+    "host": "a.ssll.gay",
+    "security": "none",
+    "alpn": "",
+    "fp": "",
+    "pbk": "",
+    "sid": "",
+    "spx": "",
+    "name": "@Hope_Net-join-us-on-Telegram"
   },
   "f96e822be6c2fd72350594aad8feeafc": {
     "uuid": "d4951d91-23e0-4301-a1ea-5300e0b5ec67",
@@ -26200,20 +26217,6 @@
     "flow": "",
     "name": "[\ud83c\udde8\ud83c\udded]t.me/ConfigV2RayNG"
   },
-  "c1d22b1a88d8eb8015e57822617cc538": {
-    "password": "---------------BanV2ray-------------",
-    "address": "oooooooooooooooo-00000000000000000.poki-pakipon.ir",
-    "port": 13349,
-    "sni": "yahoo.com",
-    "alpn": "",
-    "type": "grpc",
-    "path": "",
-    "host": "oooooooooooooooo-00000000000000000.poki-pakipon.ir",
-    "security": "reality",
-    "fp": "chrome",
-    "flow": "",
-    "name": "[463] - Telegram : @V2All\u206a \u0633\u0631\u0648\u0631 \u0633\u0648\u0645 :"
-  },
   "6f5247e175cd923b5549eca7712fd390": {
     "password": "---------------BanV2ray-------------",
     "address": "oooooooooooooooo-00000000000000000.poki-pakipon.ir",
@@ -26339,20 +26342,6 @@
     "fp": "chrome",
     "flow": "",
     "name": "[\ud83c\udde8\ud83c\udded]t.me/ConfigV2RayNG"
-  },
-  "973e7aa647a192d4ca4831626ac1e40d": {
-    "password": "---------------BanV2ray-------------",
-    "address": "oooooooooooooooo-00000000000000000.poki-pakipon.ir",
-    "port": 2831,
-    "sni": "yahoo.com",
-    "alpn": "",
-    "type": "grpc",
-    "path": "",
-    "host": "oooooooooooooooo-00000000000000000.poki-pakipon.ir",
-    "security": "reality",
-    "fp": "chrome",
-    "flow": "",
-    "name": "[462] - Telegram : @V2All\u206a \u0633\u0631\u0648\u0631 \u062f\u0648\u0645 :\u206a"
   },
   "712fc8e1772a42e727e3fdaa82d0112d": {
     "password": "---------------BanV2ray-------------",
@@ -26731,6 +26720,20 @@
     "fp": "chrome",
     "flow": "",
     "name": "\ud83c\udde8\ud83c\uddedCH-@VPNine1"
+  },
+  "1d01ac6dc51e2f9bdd430aef50da093f": {
+    "password": "--------------BanV2ray-----------",
+    "address": "mmmmmmmmmmmmmmmm-11111111111111111111111.poki-pakipon.ir",
+    "port": 23917,
+    "sni": "yahoo.com",
+    "alpn": "",
+    "type": "grpc",
+    "path": "",
+    "host": "mmmmmmmmmmmmmmmm-11111111111111111111111.poki-pakipon.ir",
+    "security": "reality",
+    "fp": "chrome",
+    "flow": "",
+    "name": "@GozargahAzad|\ud83c\udde8\ud83c\udded#Switzerland\ud83c\udde8\ud83c\udded@GozargahAzad"
   },
   "b0fc69f549308f5ccf858b5f9fc3de47": {
     "password": "--------------BanV2ray-----------",
@@ -27964,20 +27967,6 @@
     "flow": "",
     "name": "@v2rayNplus |\ud83c\udde8\ud83c\udded\u062e\u0631\u06cc\u062f \u0627\u0634\u062a\u0631\u0627\u06a9 \u0627\u062e\u062a\u0635\u0627\u0635\u06cc\ufe0fv2rayNplus"
   },
-  "4983b71f2c883b884fdfd64f30e58f99": {
-    "password": "8557692d-c228-48f0-b6f9-50d44d4a2096",
-    "address": "104.19.52.181",
-    "port": 443,
-    "sni": "tjjd.yzyx1.v6.army",
-    "alpn": "",
-    "type": "ws",
-    "path": "",
-    "host": "104.19.52.181",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "@VPNine1"
-  },
   "8878cf2267608893c9f811015347c1c9": {
     "password": "8557692d-c228-48f0-b6f9-50d44d4a2096",
     "address": "104.19.52.181",
@@ -28132,20 +28121,6 @@
     "flow": "",
     "name": "@Hope_Net-join-us-on-Telegram"
   },
-  "f73f1e6be62e6844f82f14f3351aac32": {
-    "password": "CMLiu",
-    "address": "43.153.80.208",
-    "port": 443,
-    "sni": "aliorg.filegear-sg.me",
-    "alpn": "",
-    "type": "tcp",
-    "path": "",
-    "host": "43.153.80.208",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "[469] - Telegram : @V2All\u206a \u0633\u0631\u0648\u0631 \u0633\u0648\u0645 :"
-  },
   "b1e496de520c1af975a3433eae3b7b01": {
     "password": "CMLiu",
     "address": "43.153.80.208",
@@ -28216,20 +28191,6 @@
     "flow": "",
     "name": "\u2705@AR14N24b"
   },
-  "31e84613bc57f1bc402481cb779e8082": {
-    "password": "IQ68037294",
-    "address": "accurate-drake.rooster465.autos",
-    "port": 443,
-    "sni": "accurate-drake.rooster465.autos",
-    "alpn": "",
-    "type": "tcp",
-    "path": "",
-    "host": "accurate-drake.rooster465.autos",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "[491] - Telegram : @V2All\u206a \u0633\u0631\u0648\u0631 \u0633\u0648\u0645 :"
-  },
   "bca160d920da968f0a1798ec8b78a026": {
     "password": "IQ68037294",
     "address": "accurate-drake.rooster465.autos",
@@ -28258,33 +28219,33 @@
     "flow": "",
     "name": "\ud83c\uddf0\ud83c\uddf7 Join+Telegram:@Farah_VPN \ud83c\uddf0\ud83c\uddf7"
   },
-  "414e5ceb1ec9a0f8d9bd26dbd15ed351": {
+  "4ffb9622f6340c6a542c4f3def622669": {
     "password": "IQ68037294",
-    "address": "apt-midge.rooster465.autos",
+    "address": "accurate-drake.rooster465.autos",
     "port": 443,
-    "sni": "apt-midge.rooster465.autos",
+    "sni": "accurate-drake.rooster465.autos",
     "alpn": "",
     "type": "tcp",
     "path": "",
-    "host": "apt-midge.rooster465.autos",
+    "host": "accurate-drake.rooster465.autos",
     "security": "tls",
     "fp": "",
     "flow": "",
-    "name": "\ud83c\uddf8\ud83c\uddec Join+Telegram:@Farah_VPN \ud83c\uddf8\ud83c\uddec"
+    "name": "\ud83c\uddf0\ud83c\uddf7KR-@VPNine1"
   },
-  "fa6fedf8b8a945c4e66a1ece926ad25a": {
+  "8a9e8004850ed7f10c628ee1c4c9f137": {
     "password": "IQ68037294",
-    "address": "casual-stallion.rooster465.autos",
+    "address": "aware-pika.rooster465.autos",
     "port": 443,
-    "sni": "casual-stallion.rooster465.autos",
+    "sni": "aware-pika.rooster465.autos",
     "alpn": "",
     "type": "tcp",
     "path": "",
-    "host": "casual-stallion.rooster465.autos",
+    "host": "aware-pika.rooster465.autos",
     "security": "tls",
     "fp": "",
     "flow": "",
-    "name": "\ud83c\uddf8\ud83c\uddec Join+Telegram:@Farah_VPN \ud83c\uddf8\ud83c\uddec"
+    "name": "\ud83c\udde9\ud83c\uddea Join+Telegram:@Farah_VPN \ud83c\udde9\ud83c\uddea"
   },
   "c87cb4d0e4be2f3708643ba9752cfa65": {
     "password": "IQ68037294",
@@ -28300,20 +28261,6 @@
     "flow": "",
     "name": "\u2705@AR14N24b"
   },
-  "1fb2670708747c6d73d1ca114381dbaa": {
-    "password": "IQ68037294",
-    "address": "correct-pony.rooster465.autos",
-    "port": 443,
-    "sni": "correct-pony.rooster465.autos",
-    "alpn": "",
-    "type": "tcp",
-    "path": "",
-    "host": "correct-pony.rooster465.autos",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "\ud83c\uddeb\ud83c\uddf7 Join+Telegram:@Farah_VPN \ud83c\uddeb\ud83c\uddf7J\u1d0f\u026a\u0274 \u00bb\u00bb @Farah_VPN - @Farah_Proxy"
-  },
   "a37cd3c8cea0a269c092f37458605cef": {
     "password": "IQ68037294",
     "address": "correct-pony.rooster465.autos",
@@ -28327,34 +28274,6 @@
     "fp": "",
     "flow": "",
     "name": "\ud83c\uddeb\ud83c\uddf7FR-@VPNine1"
-  },
-  "110f4864afe69be99fe26a9dfb72608a": {
-    "password": "IQ68037294",
-    "address": "dear-ferret.rooster465.autos",
-    "port": 443,
-    "sni": "dear-ferret.rooster465.autos",
-    "alpn": "",
-    "type": "tcp",
-    "path": "",
-    "host": "dear-ferret.rooster465.autos",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "[479] - Telegram : @V2All \u0622\u062e\u0631\u06cc\u0646 \u0642\u06cc\u0645\u062a \u062f\u0644\u0627\u0631 \u06f1\u06f9\u06f0,\u06f6\u06f0\u06f0 \u062a\u0648\u0645\u0627\u0646\u2705 \u0645\u062e\u0632\u0646 \u0633\u0631\u0648\u0631\u0647\u0627\u200c : V2All@\u206a#v2ray #proxy #config\u206a\u206a\u206a"
-  },
-  "85e52b2c513f8afac3f97ab60e00ac32": {
-    "password": "IQ68037294",
-    "address": "dear-ferret.rooster465.autos",
-    "port": 443,
-    "sni": "dear-ferret.rooster465.autos",
-    "alpn": "",
-    "type": "tcp",
-    "path": "",
-    "host": "dear-ferret.rooster465.autos",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "[493] - Telegram : @V2All\u206a \u0633\u0631\u0648\u0631 \u0633\u0648\u0645 :"
   },
   "a349ac3f54e91321caf9ac671cbd6d13": {
     "password": "IQ68037294",
@@ -28370,7 +28289,7 @@
     "flow": "",
     "name": "\u2705@AR14N24b"
   },
-  "f38002f2c43dbbfb03b0e9793b0c5ba5": {
+  "5b38ae6f418f7190e33d324114cf7e34": {
     "password": "IQ68037294",
     "address": "dear-ferret.rooster465.autos",
     "port": 443,
@@ -28382,21 +28301,21 @@
     "security": "tls",
     "fp": "",
     "flow": "",
-    "name": "\ud83c\uddf5\ud83c\uddf1 Join+Telegram:@Farah_VPN \ud83c\uddf5\ud83c\uddf1J\u1d0f\u026a\u0274 \u00bb\u00bb @Farah_VPN - @Farah_Proxy"
+    "name": "\ud83c\uddf5\ud83c\uddf1PL-@VPNine1"
   },
-  "c1fb60aa4510cabcdd0ff5fc9047d9e8": {
+  "c7e2631553bae1a95608e82526675b77": {
     "password": "IQ68037294",
-    "address": "enabling-gobbler.rooster465.autos",
+    "address": "definite-giraffe.rooster465.autos",
     "port": 443,
-    "sni": "enabling-gobbler.rooster465.autos",
+    "sni": "definite-giraffe.rooster465.autos",
     "alpn": "",
     "type": "tcp",
     "path": "",
-    "host": "enabling-gobbler.rooster465.autos",
+    "host": "definite-giraffe.rooster465.autos",
     "security": "tls",
     "fp": "",
     "flow": "",
-    "name": "\ud83c\udde9\ud83c\uddea Join+Telegram:@Farah_VPN \ud83c\udde9\ud83c\uddeaJ\u1d0f\u026a\u0274 \u00bb\u00bb @Farah_VPN - @Farah_Proxy"
+    "name": "\ud83c\uddeb\ud83c\uddf7 Join+Telegram:@Farah_VPN \ud83c\uddeb\ud83c\uddf7"
   },
   "5fb4b92cc005e54dd2276b2828b7c0e9": {
     "password": "IQ68037294",
@@ -28412,7 +28331,7 @@
     "flow": "",
     "name": "\u2705@AR14N24b"
   },
-  "d96899e62fc72a4c7d8a817c7744f76f": {
+  "16f52d28d53dddfbe263fc48c5218850": {
     "password": "IQ68037294",
     "address": "flexible-pony.rooster465.autos",
     "port": 443,
@@ -28424,35 +28343,7 @@
     "security": "tls",
     "fp": "",
     "flow": "",
-    "name": "\ud83c\uddef\ud83c\uddf5 Join+Telegram:@Farah_VPN \ud83c\uddef\ud83c\uddf5"
-  },
-  "b0cd36e35c8fce2eb7c6d87e0b3afec2": {
-    "password": "IQ68037294",
-    "address": "glad-javelin.rooster465.autos",
-    "port": 443,
-    "sni": "glad-javelin.rooster465.autos",
-    "alpn": "",
-    "type": "tcp",
-    "path": "",
-    "host": "glad-javelin.rooster465.autos",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "\ud83c\udde9\ud83c\uddea Join+Telegram:@Farah_VPN \ud83c\udde9\ud83c\uddea"
-  },
-  "1d707d4f5342c4a12c214de5536efade": {
-    "password": "IQ68037294",
-    "address": "guided-warthog.rooster465.autos",
-    "port": 443,
-    "sni": "guided-warthog.rooster465.autos",
-    "alpn": "",
-    "type": "tcp",
-    "path": "",
-    "host": "guided-warthog.rooster465.autos",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "[482] - Telegram : @V2All \u0622\u062e\u0631\u06cc\u0646 \u0642\u06cc\u0645\u062a \u062f\u0644\u0627\u0631 \u06f1\u06f9\u06f0,\u06f6\u06f0\u06f0 \u062a\u0648\u0645\u0627\u0646\u2705 \u0645\u062e\u0632\u0646 \u0633\u0631\u0648\u0631\u0647\u0627\u200c : V2All@\u206a#v2ray #config #vpn\u206a\u206a\u206a"
+    "name": "\ud83c\uddef\ud83c\uddf5JP-@VPNine1"
   },
   "778ae4cf3c052451ea743458d461048d": {
     "password": "IQ68037294",
@@ -28482,19 +28373,19 @@
     "flow": "",
     "name": "\ud83c\uddef\ud83c\uddf5 Join+Telegram:@Farah_VPN \ud83c\uddef\ud83c\uddf5"
   },
-  "c84e75cd2721b1250fed9f8ef0a78749": {
+  "371a13383246a5244f401710bdc596b5": {
     "password": "IQ68037294",
-    "address": "happy-mutt.rooster465.autos",
+    "address": "guided-warthog.rooster465.autos",
     "port": 443,
-    "sni": "happy-mutt.rooster465.autos",
+    "sni": "guided-warthog.rooster465.autos",
     "alpn": "",
     "type": "tcp",
     "path": "",
-    "host": "happy-mutt.rooster465.autos",
+    "host": "guided-warthog.rooster465.autos",
     "security": "tls",
     "fp": "",
     "flow": "",
-    "name": "[499] - Telegram : @V2All \u0622\u062e\u0631\u06cc\u0646 \u0642\u06cc\u0645\u062a \u062f\u0644\u0627\u0631 \u06f1\u06f9\u06f0,\u06f6\u06f0\u06f0 \u062a\u0648\u0645\u0627\u0646\u2705 \u0645\u062e\u0632\u0646 \u0633\u0631\u0648\u0631\u0647\u0627\u200c : V2All@\u206a#v2ray #proxy #config\u206a\u206a\u206a"
+    "name": "\ud83c\uddef\ud83c\uddf5JP-@VPNine1"
   },
   "69603bd643eff46fa6c623db2d832d67": {
     "password": "IQ68037294",
@@ -28510,20 +28401,6 @@
     "flow": "",
     "name": "\u2705@AR14N24b"
   },
-  "438dbaf21d2942660ad0a544a88cbec8": {
-    "password": "IQ68037294",
-    "address": "happy-mutt.rooster465.autos",
-    "port": 443,
-    "sni": "happy-mutt.rooster465.autos",
-    "alpn": "",
-    "type": "tcp",
-    "path": "",
-    "host": "happy-mutt.rooster465.autos",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "\ud83c\uddf8\ud83c\uddec Join+Telegram:@Farah_VPN \ud83c\uddf8\ud83c\uddec"
-  },
   "a29b144e706c6c42af6eb6de260000f5": {
     "password": "IQ68037294",
     "address": "happy-mutt.rooster465.autos",
@@ -28537,20 +28414,6 @@
     "fp": "",
     "flow": "",
     "name": "\ud83c\uddf8\ud83c\uddecSG-@VPNine1"
-  },
-  "6df593b01f890c4b5325b15eb455ceff": {
-    "password": "IQ68037294",
-    "address": "helpful-possum.rooster465.autos",
-    "port": 443,
-    "sni": "helpful-possum.rooster465.autos",
-    "alpn": "",
-    "type": "tcp",
-    "path": "",
-    "host": "helpful-possum.rooster465.autos",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "\ud83c\uddf8\ud83c\uddec Join+Telegram:@Farah_VPN \ud83c\uddf8\ud83c\uddec"
   },
   "fb1402e8c7c6a2fa5e30b2487d9cea79": {
     "password": "IQ68037294",
@@ -28566,20 +28429,6 @@
     "flow": "",
     "name": "\u2705@AR14N24b"
   },
-  "c2e4d1fb4d54fc1fb5551713386e8871": {
-    "password": "IQ68037294",
-    "address": "humane-hawk.rooster465.autos",
-    "port": 443,
-    "sni": "humane-hawk.rooster465.autos",
-    "alpn": "",
-    "type": "tcp",
-    "path": "",
-    "host": "humane-hawk.rooster465.autos",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "\ud83c\uddf8\ud83c\uddec Join+Telegram:@Farah_VPN \ud83c\uddf8\ud83c\uddec"
-  },
   "08158abed7645261ff1d70e3a33aed0d": {
     "password": "IQ68037294",
     "address": "humane-hawk.rooster465.autos",
@@ -28593,20 +28442,6 @@
     "fp": "",
     "flow": "",
     "name": "\ud83c\uddf8\ud83c\uddecSG-@VPNine1"
-  },
-  "d230295103947c05b8c4f358e10fdb58": {
-    "password": "IQ68037294",
-    "address": "internal-sunbird.rooster465.autos",
-    "port": 443,
-    "sni": "internal-sunbird.rooster465.autos",
-    "alpn": "",
-    "type": "tcp",
-    "path": "",
-    "host": "internal-sunbird.rooster465.autos",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "[492] - Telegram : @V2All \u0622\u062e\u0631\u06cc\u0646 \u0642\u06cc\u0645\u062a \u062f\u0644\u0627\u0631 \u06f1\u06f9\u06f0,\u06f6\u06f0\u06f0 \u062a\u0648\u0645\u0627\u0646\u2705 \u0645\u062e\u0632\u0646 \u0633\u0631\u0648\u0631\u0647\u0627\u200c : V2All@\u206a#v2ray #proxy #config\u206a\u206a\u206a"
   },
   "d0abed301579096a767640f3915d7f4f": {
     "password": "IQ68037294",
@@ -28636,19 +28471,33 @@
     "flow": "",
     "name": "\ud83c\uddf8\ud83c\uddec Join+Telegram:@Farah_VPN \ud83c\uddf8\ud83c\uddec"
   },
-  "4815a3594504b214d841ff0455bd7d96": {
+  "de023540bee3358677dcdbe738e1b68f": {
     "password": "IQ68037294",
-    "address": "pleased-lobster.rooster465.autos",
+    "address": "internal-sunbird.rooster465.autos",
     "port": 443,
-    "sni": "pleased-lobster.rooster465.autos",
+    "sni": "internal-sunbird.rooster465.autos",
     "alpn": "",
     "type": "tcp",
     "path": "",
-    "host": "pleased-lobster.rooster465.autos",
+    "host": "internal-sunbird.rooster465.autos",
     "security": "tls",
     "fp": "",
     "flow": "",
-    "name": "[481] - Telegram : @V2All\u206a \u0633\u0631\u0648\u0631 \u0633\u0648\u0645 :"
+    "name": "\ud83c\uddf8\ud83c\uddecSG-@VPNine1"
+  },
+  "8cb1b694a1cdd62997e72fc93a8cecd7": {
+    "password": "IQ68037294",
+    "address": "moving-wren.rooster465.autos",
+    "port": 443,
+    "sni": "moving-wren.rooster465.autos",
+    "alpn": "",
+    "type": "tcp",
+    "path": "",
+    "host": "moving-wren.rooster465.autos",
+    "security": "tls",
+    "fp": "",
+    "flow": "",
+    "name": "\ud83c\uddee\ud83c\uddea Join+Telegram:@Farah_VPN \ud83c\uddee\ud83c\uddea"
   },
   "153c6e002d600cc99a0ac054361992d1": {
     "password": "IQ68037294",
@@ -28678,6 +28527,20 @@
     "flow": "",
     "name": "\ud83c\uddef\ud83c\uddf5 Join+Telegram:@Farah_VPN \ud83c\uddef\ud83c\uddf5"
   },
+  "880af3812955f99197cbd0a1c950d1fb": {
+    "password": "IQ68037294",
+    "address": "pleased-lobster.rooster465.autos",
+    "port": 443,
+    "sni": "pleased-lobster.rooster465.autos",
+    "alpn": "",
+    "type": "tcp",
+    "path": "",
+    "host": "pleased-lobster.rooster465.autos",
+    "security": "tls",
+    "fp": "",
+    "flow": "",
+    "name": "\ud83c\uddef\ud83c\uddf5JP-@VPNine1"
+  },
   "a8c7197c6ea7162e1d01230ffb57e170": {
     "password": "IQ68037294",
     "address": "proud-escargot.rooster465.autos",
@@ -28691,20 +28554,6 @@
     "fp": "",
     "flow": "",
     "name": "\u2705@AR14N24b"
-  },
-  "def1125f228b5d2b6204a404a817d3d4": {
-    "password": "IQ68037294",
-    "address": "proud-escargot.rooster465.autos",
-    "port": 443,
-    "sni": "proud-escargot.rooster465.autos",
-    "alpn": "",
-    "type": "tcp",
-    "path": "",
-    "host": "proud-escargot.rooster465.autos",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "\ud83c\uddf8\ud83c\uddec Join+Telegram:@Farah_VPN \ud83c\uddf8\ud83c\uddec"
   },
   "6905121bcdc692008f6042832cf9b48a": {
     "password": "IQ68037294",
@@ -28846,20 +28695,6 @@
     "flow": "",
     "name": "\ud83c\uddef\ud83c\uddf5118389 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
-  "348c23eeb5499de33058d575d15d537c": {
-    "password": "IQ68037294",
-    "address": "still-mastodon.rooster465.autos",
-    "port": 443,
-    "sni": "still-mastodon.rooster465.autos",
-    "alpn": "",
-    "type": "tcp",
-    "path": "",
-    "host": "still-mastodon.rooster465.autos",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "\ud83c\uddf8\ud83c\uddec Join+Telegram:@Farah_VPN \ud83c\uddf8\ud83c\uddec"
-  },
   "53d930950908abbd22f8354a29db741d": {
     "password": "JA96378052",
     "address": "3.112.1.122",
@@ -28958,6 +28793,20 @@
     "flow": "",
     "name": "Join Sho : @Iran_V2ray1 \ud83c\udde9\ud83c\uddea\u06af\u0631\u0648\u0647 \u06a9\u0627\u0646\u0641\u06cc\u06af \u0648 \u067e\u0631\u0648\u06a9\u0633\u06cc\u2b50\ufe0f\u2b50\ufe0f\u062c\u0647\u062a \u062e\u0631\u06cc\u062f \u06a9\u0627\u0646\u0641\u06cc\u06af #vip #v2ray #free_config #config #v2box #napsternet\u26a0\ufe0f @IRAN_V2RAY1 \u2705"
   },
+  "aa4a7862400ddfd29bdece9c3e6913ae": {
+    "password": "KV63147582",
+    "address": "evolving-baboon.rooster465.autos",
+    "port": 443,
+    "sni": "evolving-baboon.rooster465.autos",
+    "alpn": "",
+    "type": "tcp",
+    "path": "",
+    "host": "evolving-baboon.rooster465.autos",
+    "security": "tls",
+    "fp": "",
+    "flow": "",
+    "name": "\ud83c\udde9\ud83c\uddea Join+Telegram:@Farah_VPN \ud83c\udde9\ud83c\uddea"
+  },
   "f6f3eeb51504d5f60390b513dc57883d": {
     "password": "Ldbgt4IUYv0S+5cFrG4vcWEbvdf8RgPGmoIXhnnOEh4=",
     "address": "65.109.215.50",
@@ -29027,20 +28876,6 @@
     "fp": "chrome",
     "flow": "",
     "name": "\u2705@AR14N24b"
-  },
-  "a43de983ef702d245e229edf9b832c22": {
-    "password": "MITIVPN",
-    "address": "104.16.72.50",
-    "port": 443,
-    "sni": "win-mitivpn-----mitivpn.app-Cloud.ir",
-    "alpn": "http/1.1",
-    "type": "ws",
-    "path": "/---@VPNine1---@VPNine1---@VPNine1---@VPNine1---@VPNine1---@VPNine1---@VPNine1---@VPNine1---@VPNine1---@VPNine1---@VPNine1---@VPNine1---@VPNine1---@VPNine1---@VPNine1---@VPNine1=winusa",
-    "host": "winusa-mitivpn-----mitivpn.app-Cloud.ir",
-    "security": "tls",
-    "fp": "chrome",
-    "flow": "",
-    "name": "@VPNine1"
   },
   "7402f1fa0d1d5d8362a5e9beeed3c109": {
     "password": "MITIVPN",
@@ -29434,6 +29269,20 @@
     "flow": "",
     "name": "\ud83c\uddfa\ud83c\uddf8US-@VPNine1"
   },
+  "1a6eec42a5656482b447690e408d76d3": {
+    "password": "MiTiVPN",
+    "address": "199.232.78.140",
+    "port": 443,
+    "sni": "199.232.78.140",
+    "alpn": "",
+    "type": "tcp",
+    "path": "/---@MiTiVPN---@MiTiVPN---@MiTiVPN---@MiTiVPN---@MiTiVPN---@MiTiVPN---@MiTiVPN---@MiTiVPN---@MiTiVPN---@MiTiVPN---@MiTiVPN---@MiT",
+    "host": "199.232.78.140",
+    "security": "tls",
+    "fp": "",
+    "flow": "",
+    "name": "[514] - Telegram : @V2All\u206a \u0633\u0631\u0648\u0631 \u0633\u0648\u0645 :"
+  },
   "fa0ee5e09027fbe66460818554343b3b": {
     "password": "MiTiVPN",
     "address": "199.232.78.140",
@@ -29546,19 +29395,33 @@
     "flow": "",
     "name": "Join Sho : @Iran_V2ray1  \ud83c\uddeb\ud83c\uddf7"
   },
-  "ccabf9e5d1d442f974e7e3d3f5605791": {
-    "password": "OD90375861",
-    "address": "busy-hermit.rooster465.autos",
+  "294ceeb8188c7ffbb8574631b82cc023": {
+    "password": "NQ26071394",
+    "address": "ready-kangaroo.rooster465.autos",
     "port": 443,
-    "sni": "busy-hermit.rooster465.autos",
+    "sni": "ready-kangaroo.rooster465.autos",
     "alpn": "",
     "type": "tcp",
     "path": "",
-    "host": "busy-hermit.rooster465.autos",
+    "host": "ready-kangaroo.rooster465.autos",
     "security": "tls",
     "fp": "",
     "flow": "",
-    "name": "\ud83c\udde9\ud83c\uddea Join+Telegram:@Farah_VPN \ud83c\udde9\ud83c\uddea"
+    "name": "\ud83c\uddeb\ud83c\uddf7 Join+Telegram:@Farah_VPN \ud83c\uddeb\ud83c\uddf7"
+  },
+  "03fefec9f4e224ac5948410b013468de": {
+    "password": "OD90375861",
+    "address": "wired-tick.rooster465.autos",
+    "port": 443,
+    "sni": "wired-tick.rooster465.autos",
+    "alpn": "",
+    "type": "tcp",
+    "path": "",
+    "host": "wired-tick.rooster465.autos",
+    "security": "tls",
+    "fp": "",
+    "flow": "",
+    "name": "\ud83c\uddee\ud83c\uddea Join+Telegram:@Farah_VPN \ud83c\uddee\ud83c\uddeaJ\u1d0f\u026a\u0274 \u00bb\u00bb @Farah_VPN - @Farah_Proxy"
   },
   "159abebe848dfaec68d7d687eab10bea": {
     "password": "OD90375861",
@@ -29573,20 +29436,6 @@
     "fp": "",
     "flow": "",
     "name": "Join Sho : @Iran_V2ray1  \ud83c\uddee\ud83c\uddea"
-  },
-  "f03321f1108bd18bff478c164305528b": {
-    "password": "OccIqeORGQwiNkwS",
-    "address": "jpbgp.netvigor.cc",
-    "port": 19128,
-    "sni": "yazhou10.dynu.net",
-    "alpn": "",
-    "type": "tcp",
-    "path": "",
-    "host": "jpbgp.netvigor.cc",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "\ud83c\uddf8\ud83c\uddec Join+Telegram:@Farah_VPN \ud83c\uddf8\ud83c\uddec"
   },
   "acb236b9d808cfe1380ccaf63756bc06": {
     "password": "PD07395842",
@@ -29658,19 +29507,19 @@
     "flow": "",
     "name": "\ud83c\uddee\ud83c\uddea Join+Telegram:@Farah_VPN \ud83c\uddee\ud83c\uddea"
   },
-  "f6b60418188ffa1a7fcf4cd317ed31f0": {
+  "9eea2bf12f0ddf5dd87a89d258a54220": {
     "password": "XG59623478",
-    "address": "enabling-asp.rooster465.autos",
+    "address": "renewed-chigger.rooster465.autos",
     "port": 443,
-    "sni": "enabling-asp.rooster465.autos",
+    "sni": "renewed-chigger.rooster465.autos",
     "alpn": "",
     "type": "tcp",
     "path": "",
-    "host": "enabling-asp.rooster465.autos",
+    "host": "renewed-chigger.rooster465.autos",
     "security": "tls",
     "fp": "",
     "flow": "",
-    "name": "\ud83c\udde9\ud83c\uddea Join+Telegram:@Farah_VPN \ud83c\udde9\ud83c\uddea"
+    "name": "\ud83c\uddf3\ud83c\uddf1 Join+Telegram:@Farah_VPN \ud83c\uddf3\ud83c\uddf1J\u1d0f\u026a\u0274 \u00bb\u00bb @Farah_VPN - @Farah_Proxy"
   },
   "3f81e187f1f4d6bb0ae1c4aed4c7947f": {
     "password": "a3fbc071f3a9c14",
@@ -29909,20 +29758,6 @@
     "fp": "",
     "flow": "",
     "name": "\ud83c\udf0d118253 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
-  },
-  "78b42adc8cd6f792b260fc9fa66c0364": {
-    "password": "d09d2305-24db-43c4-b309-0e1d2737329f",
-    "address": "tw93.tfzhc.top",
-    "port": 80,
-    "sni": "tw93.tfzhc.top",
-    "alpn": "",
-    "type": "tcp",
-    "path": "",
-    "host": "tw93.tfzhc.top",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "@Hope_Net-join-us-on-Telegram\u26a0\ufe0f Warning: Proxy may not work on all network operators.\u23f1 Please wait a few seconds after starting a proxy.All the apps you need to use this proxy on different platformsShare the proxy with your friends to support the channel \u270a\u2764\ufe0f\u200d \u062f\u0633\u062a\u0631\u0633\u06cc \u0628\u0647 20 \u0633\u0631\u0648\u0631 \u0627\u0632 \u06a9\u0634\u0648\u0631\u0647\u0627\u06cc \u0645\u062e\u062a\u0644\u0641 \u062a\u0646\u0647\u0627 \u0628\u0627 \u062e\u0631\u06cc\u062f \u06cc\u06a9 \u0633\u0631\u0648\u06cc\u0633! \ud83c\udde9\ud83c\uddea\ud83c\uddf3\ud83c\uddf1\ud83c\uddf9\ud83c\uddf7\ud83c\uddf8\ud83c\uddea\ud83c\uddfa\ud83c\uddf8\ud83c\udde6\ud83c\uddea\ud83c\uddeb\ud83c\uddee \u067e\u0644\u0646\u200c\u0647\u0627\u06cc \u0646\u0627\u0645\u062d\u062f\u0648\u062f \u0648 \u0627\u0642\u062a\u0635\u0627\u062f\u06cc \u0628\u0627 \u062a\u062e\u0641\u06cc\u0641 \u0648\u06cc\u0698\u0647 \u0628\u0631\u0627\u06cc \u0647\u0645\u06a9\u0627\u0631\u0627\u0646 \u0648 \u0639\u0645\u062f\u0647\u200c\u0641\u0631\u0648\u0634\u0627\u0646! \u0631\u0648\u0634\u200c\u0647\u0627\u06cc \u067e\u0631\u062f\u0627\u062e\u062a \u0645\u062a\u0646\u0648\u0639: \u0631\u0645\u0632 \u0627\u0631\u0632\u060c \u067e\u0631\u0641\u06a9\u062a \u0645\u0627\u0646\u06cc\u060c \u0648 \u0631\u06cc\u0627\u0644 \u0628\u062f\u0648\u0646 \u0645\u062d\u062f\u0648\u062f\u06cc\u062a \u06a9\u0627\u0631\u0628\u0631\u0627\u0646 \u0648 1 \u06af\u06cc\u06af \u062a\u0633\u062a \u0631\u0627\u06cc\u06af\u0627\u0646 \u0628\u0631\u0627\u06cc \u0647\u0645\u0647!\u26a1\ufe0f \u062a\u0633\u062a \u0641\u0648\u0631\u06cc \u0645\u062e\u0635\u0648\u0635 \u0639\u0645\u062f\u0647\u200c\u0641\u0631\u0648\u0634\u0627\u0646 \u062e\u0631\u06cc\u062f \u0648 \u062a\u0633\u062a \u0631\u0627\u06cc\u06af\u0627\u0646 \u06a9\u0627\u0646\u0641\u06cc\u06af:\u2796\u2796\u2796\u2796\u2796\u2796\u2796\u2796#WomenLifeFreedom#MahsaAmini \u2796\u2796\u2796\u2796\u2796\u2796\u2796\u2796@Hope_Net"
   },
   "f91101aac593b47ab031305cdde63feb": {
     "password": "d09d2305-24db-43c4-b309-0e1d2737329f",
@@ -30371,6 +30206,20 @@
     "fp": "",
     "flow": "",
     "name": "@Filtershekan_channel |1"
+  },
+  "d26a20b4f88e73540f6015b35a04f73e": {
+    "password": "humanity",
+    "address": "104.21.40.34",
+    "port": 443,
+    "sni": "www.gossipglove.com",
+    "alpn": "",
+    "type": "ws",
+    "path": "/assignment",
+    "host": "www.gossipglove.com",
+    "security": "tls",
+    "fp": "",
+    "flow": "",
+    "name": "\ud83c\uddeb\ud83c\uddf7 Join+Telegram:@Farah_VPN \ud83c\uddeb\ud83c\uddf7"
   },
   "02229c70b7fbf2d8cf4f21856a28fb64": {
     "password": "humanity",
@@ -30834,7 +30683,7 @@
     "flow": "",
     "name": "\ud83c\uddee\ud83c\uddf7118394 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
-  "83824014d013236a734b28c0f989d205": {
+  "7d58e5ed4946784f26e3f15a423c7110": {
     "password": "humanity",
     "address": "2.144.21.112",
     "port": 40443,
@@ -30846,7 +30695,7 @@
     "security": "tls",
     "fp": "",
     "flow": "",
-    "name": "[483] - Telegram : @V2All\u206a \u0633\u0631\u0648\u0631 \u062f\u0648\u0645 :\u206a"
+    "name": "\u2705@AR14N24b"
   },
   "fe4c9e45f66312dfa6a763ec20fa06cc": {
     "password": "humanity",
@@ -30931,6 +30780,20 @@
     "fp": "",
     "flow": "",
     "name": "V2ray_Alpha\ud83e\udd92 7"
+  },
+  "3e6a846b33a1f276b21b78c65c433f2b": {
+    "password": "humanity",
+    "address": "202.37.33.80",
+    "port": 443,
+    "sni": "www.creationlong.org",
+    "alpn": "",
+    "type": "ws",
+    "path": "/assignment",
+    "host": "www.creationlong.org",
+    "security": "tls",
+    "fp": "",
+    "flow": "",
+    "name": "\ud83c\uddf5\ud83c\uddf1 Join+Telegram:@Farah_VPN \ud83c\uddf5\ud83c\uddf1"
   },
   "f9932cac3426a3dedefdb4c5617b7064": {
     "password": "humanity",
@@ -31184,20 +31047,6 @@
     "flow": "",
     "name": "\ud83c\uddf0\ud83c\uddf7118384 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
-  "ea2d0e0ca4a114750b59eb31894ed387": {
-    "password": "p5jTPcffLgi4gaNOJd2KUTb9YEPBBD5B",
-    "address": "154.90.62.70",
-    "port": 56127,
-    "sni": "154.90.62.70",
-    "alpn": "",
-    "type": "tcp",
-    "path": "",
-    "host": "154.90.62.70",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "[478] - Telegram : @V2All\u206a \u0633\u0631\u0648\u0631 \u0633\u0648\u0645 :"
-  },
   "1365c920b44110cd98c1582d361fb49b": {
     "password": "p5jTPcffLgi4gaNOJd2KUTb9YEPBBD5B",
     "address": "154.90.62.70",
@@ -31212,7 +31061,7 @@
     "flow": "",
     "name": "\u2705@AR14N24b"
   },
-  "1826bebd934762c3cb9b123337379a73": {
+  "0305bee5220c7ae7b7a284810f8a0dd2": {
     "password": "p5jTPcffLgi4gaNOJd2KUTb9YEPBBD5B",
     "address": "154.90.62.70",
     "port": 56127,
@@ -31224,7 +31073,7 @@
     "security": "tls",
     "fp": "",
     "flow": "",
-    "name": "\ud83c\uddf0\ud83c\uddf7 Join+Telegram:@Farah_VPN \ud83c\uddf0\ud83c\uddf7"
+    "name": "\ud83c\uddf8\ud83c\udde8SC-@VPNine1"
   },
   "921bc4e5cee54a3277b22ab3729397c6": {
     "password": "t1k5znTjT8",
@@ -31239,48 +31088,6 @@
     "fp": "",
     "flow": "",
     "name": "@v2rayNplus |\ud83c\uddea\ud83c\uddf8"
-  },
-  "9f6a7617a47b5c4500e56443ed55c105": {
-    "password": "telegram-id-directvpn",
-    "address": "13.42.215.217",
-    "port": 22222,
-    "sni": "trojan.burgerip.co.uk",
-    "alpn": "http/1.1",
-    "type": "tcp",
-    "path": "",
-    "host": "13.42.215.217",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "\u2705@AR14N24b"
-  },
-  "105f2da52da8749f818730fd0aa77437": {
-    "password": "telegram-id-directvpn",
-    "address": "3.9.151.67",
-    "port": 22222,
-    "sni": "trojan.burgerip.co.uk",
-    "alpn": "http/1.1",
-    "type": "tcp",
-    "path": "",
-    "host": "3.9.151.67",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "@Hope_Net-join-us-on-Telegram"
-  },
-  "c618b07084565f00da4baf3b89dfdddf": {
-    "password": "telegram-id-directvpn",
-    "address": "3.97.131.250",
-    "port": 22222,
-    "sni": "trojan.burgerip.co.uk",
-    "alpn": "http/1.1",
-    "type": "tcp",
-    "path": "",
-    "host": "3.97.131.250",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "\u2705@AR14N24b"
   },
   "8bc49271b0f31477e84fe6ff34c27e2b": {
     "password": "telegram-id-directvpn",
@@ -31310,20 +31117,6 @@
     "flow": "",
     "name": "\u2705@AR14N24b"
   },
-  "1e1d5f597752d29b135cfb875bbc217e": {
-    "password": "telegram-id-directvpn",
-    "address": "54.211.67.99",
-    "port": 22222,
-    "sni": "trojan.burgerip.co.uk",
-    "alpn": "",
-    "type": "tcp",
-    "path": "",
-    "host": "54.211.67.99",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "@GozargahAzad|\ud83c\uddfa\ud83c\uddf8#UnitedStates\ud83c\uddfa\ud83c\uddf8@GozargahAzad"
-  },
   "5f4905e562e6bc7a3d4251fb3ce329ff": {
     "password": "telegram-id-directvpn",
     "address": "54.211.67.99",
@@ -31351,6 +31144,20 @@
     "fp": "",
     "flow": "",
     "name": "@Hope_Net-join-us-on-Telegram"
+  },
+  "d1276577a76df312711b75c9be1ffe80": {
+    "password": "telegram-id-directvpn",
+    "address": "54.211.67.99",
+    "port": 22222,
+    "sni": "trojan.burgerip.co.uk",
+    "alpn": "",
+    "type": "tcp",
+    "path": "",
+    "host": "54.211.67.99",
+    "security": "tls",
+    "fp": "",
+    "flow": "",
+    "name": "\u2705@AR14N24b"
   },
   "fe5cdaff92eefd8baf7dbdd3664b1520": {
     "password": "telegram-id-privatevpns",
@@ -31449,20 +31256,6 @@
     "fp": "",
     "flow": "",
     "name": "\u2705@AR14N24b"
-  },
-  "34b199703a7a80e5944ca6e83a99173e": {
-    "password": "tg-dns68",
-    "address": "162.159.153.197",
-    "port": 443,
-    "sni": "vip.putata.eu.org",
-    "alpn": "",
-    "type": "ws",
-    "path": "/?ed=2560",
-    "host": "vip.putata.eu.org",
-    "security": "tls",
-    "fp": "",
-    "flow": "",
-    "name": "@Hope_Net-join-us-on-Telegram\u26a0\ufe0f Warning: Proxy may not work on all network operators.\u23f1 Please wait a few seconds after starting a proxy.All the apps you need to use this proxy on different platformsShare the proxy with your friends to support the channel \u270a\u2764\ufe0f\u200d \u062f\u0633\u062a\u0631\u0633\u06cc \u0628\u0647 20 \u0633\u0631\u0648\u0631 \u0627\u0632 \u06a9\u0634\u0648\u0631\u0647\u0627\u06cc \u0645\u062e\u062a\u0644\u0641 \u062a\u0646\u0647\u0627 \u0628\u0627 \u062e\u0631\u06cc\u062f \u06cc\u06a9 \u0633\u0631\u0648\u06cc\u0633! \ud83c\udde9\ud83c\uddea\ud83c\uddf3\ud83c\uddf1\ud83c\uddf9\ud83c\uddf7\ud83c\uddf8\ud83c\uddea\ud83c\uddfa\ud83c\uddf8\ud83c\udde6\ud83c\uddea\ud83c\uddeb\ud83c\uddee \u067e\u0644\u0646\u200c\u0647\u0627\u06cc \u0646\u0627\u0645\u062d\u062f\u0648\u062f \u0648 \u0627\u0642\u062a\u0635\u0627\u062f\u06cc \u0628\u0627 \u062a\u062e\u0641\u06cc\u0641 \u0648\u06cc\u0698\u0647 \u0628\u0631\u0627\u06cc \u0647\u0645\u06a9\u0627\u0631\u0627\u0646 \u0648 \u0639\u0645\u062f\u0647\u200c\u0641\u0631\u0648\u0634\u0627\u0646! \u0631\u0648\u0634\u200c\u0647\u0627\u06cc \u067e\u0631\u062f\u0627\u062e\u062a \u0645\u062a\u0646\u0648\u0639: \u0631\u0645\u0632 \u0627\u0631\u0632\u060c \u067e\u0631\u0641\u06a9\u062a \u0645\u0627\u0646\u06cc\u060c \u0648 \u0631\u06cc\u0627\u0644 \u0628\u062f\u0648\u0646 \u0645\u062d\u062f\u0648\u062f\u06cc\u062a \u06a9\u0627\u0631\u0628\u0631\u0627\u0646 \u0648 1 \u06af\u06cc\u06af \u062a\u0633\u062a \u0631\u0627\u06cc\u06af\u0627\u0646 \u0628\u0631\u0627\u06cc \u0647\u0645\u0647!\u26a1\ufe0f \u062a\u0633\u062a \u0641\u0648\u0631\u06cc \u0645\u062e\u0635\u0648\u0635 \u0639\u0645\u062f\u0647\u200c\u0641\u0631\u0648\u0634\u0627\u0646 \u062e\u0631\u06cc\u062f \u0648 \u062a\u0633\u062a \u0631\u0627\u06cc\u06af\u0627\u0646 \u06a9\u0627\u0646\u0641\u06cc\u06af:\u2796\u2796\u2796\u2796\u2796\u2796\u2796\u2796#WomenLifeFreedom#MahsaAmini \u2796\u2796\u2796\u2796\u2796\u2796\u2796\u2796@Hope_Net"
   },
   "a05a6e4384a8f427bbce7a14f74774aa": {
     "password": "tg-dns68",
@@ -31597,6 +31390,22 @@
     "port": 41348,
     "plugin": "",
     "name": "Channel id: @Argo_VPN1 \ud83c\uddea\ud83c\uddea"
+  },
+  "7b796dfb18195b6d0bdc79bccea973f6": {
+    "method": "chacha20-ietf-poly1305",
+    "password": "7e731ec3-f8e1-43f6-92cf-3978d14705c4",
+    "address": "61.231.24.154",
+    "port": 50099,
+    "plugin": "",
+    "name": "\ud83c\uddf9\ud83c\uddfc118417 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
+  },
+  "b62d5ce95f191f65603eb1ef3f20b8f9": {
+    "method": "chacha20-ietf-poly1305",
+    "password": "7e731ec3-f8e1-43f6-92cf-3978d14705c4",
+    "address": "61.231.24.154",
+    "port": 50099,
+    "plugin": "",
+    "name": "\ud83c\uddf9\ud83c\uddfc118418 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET Join: @soskeynets"
   },
   "5a0219cb43cd79e966b05c70e191f0e9": {
     "method": "chacha20-ietf-poly1305",
@@ -31805,14 +31614,6 @@
     "port": 52952,
     "plugin": "",
     "name": "\ud83c\uddef\ud83c\uddf5118249 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
-  },
-  "ecc4bb37e134d7e4b33ab4514d845844": {
-    "method": "chacha20-ietf-poly1305",
-    "password": "XRUwpkSouW5HCTUFUxErfnL5AmahofrjznVrAu2iNFMFGUCrChznAULhuHGAQdC463mzcgo2jV546Ut5HKhk3pz956cHYYyc",
-    "address": "188.212.132.20",
-    "port": 52952,
-    "plugin": "",
-    "name": "@Hope_Net"
   },
   "d8a29b0602efa65832d81d3056cc18d2": {
     "method": "chacha20-ietf-poly1305",
@@ -32240,6 +32041,34 @@
     "insecure": "0",
     "name": "\ud83c\uddfa\ud83c\uddf8US_69_@Surfboardv2ray"
   },
+  "59ac29e3e4e11583abc1d9c554133ed0": {
+    "v": "2",
+    "ps": "@Hope_Net-join-us-on-Telegram",
+    "add": "172.64.166.22",
+    "port": 2086,
+    "type": "none",
+    "id": "e9e3cc13-db48-4cc1-8c24-7626439a5339",
+    "aid": "0",
+    "net": "ws",
+    "path": "github.com/Alvin9999",
+    "host": "ip2.1457230.xyz",
+    "tls": "",
+    "name": "@Hope_Net-join-us-on-Telegram"
+  },
+  "cf297a8396f34d088a5bcaf98f8e47a6": {
+    "v": "2",
+    "ps": "@Hope_Net-join-us-on-Telegram",
+    "add": "172.64.167.5",
+    "port": 2086,
+    "type": "none",
+    "id": "e9e3cc13-db48-4cc1-8c24-7626439a5339",
+    "aid": "0",
+    "net": "ws",
+    "path": "github.com/Alvin9999",
+    "host": "ip2.1457230.xyz",
+    "tls": "",
+    "name": "@Hope_Net-join-us-on-Telegram"
+  },
   "b3de6a7bf5b7fe78c219fdc759ffe744": {
     "v": "2",
     "ps": "@Hope_Net-join-us-on-Telegram",
@@ -32255,19 +32084,18 @@
     "path": "github.com/Alvin9999",
     "name": "@Hope_Net-join-us-on-Telegram"
   },
-  "c25a3945e7af14bcaf6853007d8f9b3d": {
+  "95457aa5ae3a02bf3fddef52b7ed4c56": {
     "v": "2",
     "ps": "@Hope_Net-join-us-on-Telegram",
-    "add": "23.227.38.6",
+    "add": "23.227.38.3",
     "port": 2086,
-    "aid": 0,
-    "scy": "auto",
-    "net": "ws",
     "type": "none",
-    "tls": "",
-    "id": "29eebb60-b27b-4a9d-bba5-947763d9205e",
-    "host": "ip006.dtku47.xyz",
+    "id": "e9e3cc13-db48-4cc1-8c24-7626439a5339",
+    "aid": "0",
+    "net": "ws",
     "path": "github.com/Alvin9999",
+    "host": "ip2.1457230.xyz",
+    "tls": "",
     "name": "@Hope_Net-join-us-on-Telegram"
   },
   "c5a6e984a7d5d45e940e3caa928e14a5": {
@@ -32284,51 +32112,62 @@
     "tls": "",
     "name": "@Hope_Net-join-us-on-Telegram"
   },
-  "f3fae6c08d2232b1977801be4ae5a69a": {
+  "182df51cceff627ff6a7221e38f4d857": {
     "v": "2",
-    "ps": "@Hope_Net-join-us-on-Telegram",
-    "add": "deji.kcapsys.com",
+    "ps": "[522] - Telegram : @V2All",
+    "add": "23.227.38.3",
+    "port": 2086,
+    "type": "none",
+    "id": "e9e3cc13-db48-4cc1-8c24-7626439a5339",
+    "aid": "0",
+    "net": "ws",
+    "path": "github.com/Alvin9999",
+    "host": "ip2.1457230.xyz",
+    "tls": "",
+    "name": "[522] - Telegram : @V2All"
+  },
+  "6ca22dbd6ae5923788ea4a46ae25ba3a": {
+    "v": "2",
+    "ps": "[533] - Telegram : @V2All",
+    "add": "172.64.167.5",
+    "port": 2086,
+    "type": "none",
+    "id": "e9e3cc13-db48-4cc1-8c24-7626439a5339",
+    "aid": "0",
+    "net": "ws",
+    "path": "github.com/Alvin9999",
+    "host": "ip2.1457230.xyz",
+    "tls": "",
+    "name": "[533] - Telegram : @V2All"
+  },
+  "f0cfae17d2b8379e4ac39aa95b7875db": {
+    "v": "2",
+    "ps": "[532] - Telegram : @V2All",
+    "add": "172.64.166.22",
+    "port": 2086,
+    "type": "none",
+    "id": "e9e3cc13-db48-4cc1-8c24-7626439a5339",
+    "aid": "0",
+    "net": "ws",
+    "path": "github.com/Alvin9999",
+    "host": "ip2.1457230.xyz",
+    "tls": "",
+    "name": "[532] - Telegram : @V2All"
+  },
+  "30a18c01b116c36e1e4996503686b2bf": {
+    "v": "2",
+    "add": "172.111.146.64",
     "port": 80,
-    "id": "f0273043-d637-4fdf-971c-eb486efa9c4b",
+    "id": "05b8c783-7f59-47f9-9923-06a465679f6a",
     "aid": "0",
     "scy": "auto",
     "net": "ws",
     "type": "",
-    "host": "",
-    "path": "/",
     "tls": "",
-    "sni": "",
-    "test_name": "US32",
-    "name": "@Hope_Net-join-us-on-Telegram"
-  },
-  "6338634d98e8cd40b087c3cadd5c7922": {
-    "v": "2",
-    "ps": "[476] - Telegram : @V2All",
-    "add": "172.64.175.213",
-    "port": 2086,
-    "aid": 0,
-    "scy": "auto",
-    "net": "ws",
-    "type": "none",
-    "tls": "",
-    "id": "e9e3cc13-db48-4cc1-8c24-7626439a5339",
-    "host": "ip2.1457230.xyz",
-    "path": "github.com/Alvin9999",
-    "name": "[476] - Telegram : @V2All"
-  },
-  "4ae6bb5b5b8452a9d32aa975ebc735ff": {
-    "v": "2",
-    "ps": "[496] - Telegram : @V2All",
-    "add": "cfcdn1.sanfencdn9.com",
-    "port": 2052,
-    "type": "none",
-    "id": "dd6973d6-9af9-4edd-9140-c57eab178a0d",
-    "aid": "0",
-    "net": "ws",
-    "path": "/video/QXjZG5u4F2",
-    "host": "us3AJ8biuQx.fzbqfrse.xyz",
-    "tls": "",
-    "name": "[496] - Telegram : @V2All"
+    "path": "/vmess/",
+    "ps": "\ud83c\uddef\ud83c\uddf5 Join+Telegram:@Farah_VPN \ud83c\uddef\ud83c\uddf5",
+    "skip-cert-verify": true,
+    "name": "\ud83c\uddef\ud83c\uddf5 Join+Telegram:@Farah_VPN \ud83c\uddef\ud83c\uddf5"
   },
   "f34de196c93632c404d4c58f9d964ee9": {
     "v": "2",
@@ -32365,23 +32204,56 @@
     "fp": "",
     "name": "@Moftconfig \ud83c\uddfa\ud83c\uddf8 United States \u2705GeoOK \ud83d\udce1mci \u23f1308ms"
   },
-  "3445080df5fb3ed0f8938720f3b59310": {
+  "fb3fbabb1e07012fa6ea529b1c3a1967": {
     "v": "2",
-    "ps": "\ud83c\uddef\ud83c\uddf5 Join+Telegram:@Farah_VPN \ud83c\uddef\ud83c\uddf5",
-    "add": "jp01.scpnb.top",
+    "ps": "\ud83c\udde8\ud83c\udde6 Join+Telegram:@Farah_VPN \ud83c\udde8\ud83c\udde6",
+    "add": "158.51.121.63",
     "port": 443,
-    "id": "537a036f-a4ad-4051-80c4-011a46c62bb0",
+    "id": "03fcc618-b93d-6796-6aed-8a38c975d581",
     "aid": "0",
     "scy": "auto",
     "net": "ws",
-    "type": "",
-    "host": "jp01.scpnb.top",
-    "path": "/537a036f-a4ad-4051-80c4-011a46c62bb0-vm",
+    "type": "---",
+    "host": "seribus.org",
+    "path": "linkvws",
     "tls": "tls",
-    "sni": "jp01.scpnb.top",
-    "test_name": "4",
+    "sni": "seribus.org",
+    "test_name": "26",
     "skip-cert-verify": true,
-    "name": "\ud83c\uddef\ud83c\uddf5 Join+Telegram:@Farah_VPN \ud83c\uddef\ud83c\uddf5"
+    "name": "\ud83c\udde8\ud83c\udde6 Join+Telegram:@Farah_VPN \ud83c\udde8\ud83c\udde6"
+  },
+  "7a024089b326039a092e08eb1f822392": {
+    "v": "2",
+    "ps": "\ud83c\uddf5\ud83c\udded Join+Telegram:@Farah_VPN \ud83c\uddf5\ud83c\udded",
+    "add": "61.245.11.60",
+    "port": 80,
+    "id": "a3e3a710-79f8-4ae0-b83c-607aab40d197",
+    "aid": "0",
+    "scy": "auto",
+    "net": "ws",
+    "type": "---",
+    "host": "",
+    "path": "/vmess/",
+    "tls": "",
+    "sni": "",
+    "test_name": "80",
+    "skip-cert-verify": true,
+    "name": "\ud83c\uddf5\ud83c\udded Join+Telegram:@Farah_VPN \ud83c\uddf5\ud83c\udded"
+  },
+  "0e90bd465f53d784b038042b4805f786": {
+    "v": "2",
+    "ps": "\ud83c\uddf0\ud83c\uddf7 Join+Telegram:@Farah_VPN \ud83c\uddf0\ud83c\uddf7",
+    "add": "132.145.80.230",
+    "port": 80,
+    "id": "5155860e-d07d-46c3-9128-3afbd84626c7",
+    "aid": 0,
+    "scy": "auto",
+    "net": "ws",
+    "type": "none",
+    "path": "/cctv13.m3u8",
+    "skip-cert-verify": true,
+    "name": "\ud83c\uddf0\ud83c\uddf7 Join+Telegram:@Farah_VPN \ud83c\uddf0\ud83c\uddf7",
+    "tls": "none"
   },
   "9c6ec4003f5c2fbfe6e82ae5b1249719": {
     "v": "2",
@@ -32398,6 +32270,58 @@
     "tls": "",
     "sni": "fra5.chasem2026sud.com",
     "test_name": "5",
+    "skip-cert-verify": true,
+    "name": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8"
+  },
+  "e3cb91238484fe283ee6f7b96d0a8520": {
+    "v": "2",
+    "ps": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8",
+    "add": "82.198.246.97",
+    "port": 180,
+    "id": "d13fc2f5-3e05-4795-81eb-44143a09e552",
+    "aid": "0",
+    "scy": "auto",
+    "net": "tcp",
+    "type": "none",
+    "host": "one.cf.cdn.hyli.xyz",
+    "path": "/",
+    "tls": "",
+    "sni": "",
+    "alpn": "",
+    "fp": "",
+    "insecure": "0",
+    "skip-cert-verify": true,
+    "name": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8"
+  },
+  "1dab83792a541b36ea81a406ccd0aec8": {
+    "v": "2",
+    "ps": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8",
+    "add": "104.17.77.77",
+    "port": 8443,
+    "id": "60441548-b68e-43b2-8191-e3b884be4b3c",
+    "aid": "0",
+    "scy": "auto",
+    "net": "ws",
+    "type": "---",
+    "host": "v2ray1.dozapp.xyz",
+    "path": "/lMnsZUN4/",
+    "tls": "tls",
+    "sni": "v2ray1.dozapp.xyz",
+    "test_name": "US10",
+    "skip-cert-verify": true,
+    "name": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8"
+  },
+  "f4419879b6679b796a10c466e450beb7": {
+    "v": "2",
+    "ps": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8",
+    "add": "129.146.143.80",
+    "port": 48111,
+    "aid": 0,
+    "scy": "auto",
+    "net": "tcp",
+    "type": "none",
+    "tls": "",
+    "id": "d4603cc2-e0ee-4651-83f5-1db5b7168177",
     "skip-cert-verify": true,
     "name": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8"
   },
@@ -32419,7 +32343,7 @@
     "skip-cert-verify": true,
     "name": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8"
   },
-  "446e1811fc16faddc0a1d8cd6ab620e8": {
+  "45e11e1ffa73ff383e19b2dc7a67a8c9": {
     "v": "2",
     "ps": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8",
     "add": "165.140.216.141",
@@ -32433,7 +32357,63 @@
     "path": "",
     "tls": "",
     "sni": "",
-    "test_name": "US4",
+    "alpn": "",
+    "fp": "",
+    "insecure": "0",
+    "skip-cert-verify": true,
+    "name": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8"
+  },
+  "d7903ff78cd086d5cf54d5dc5be65a4c": {
+    "v": "2",
+    "ps": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8",
+    "add": "165.140.216.142",
+    "port": 443,
+    "id": "b65a2d69-5634-42a2-e4be-54e8a6176900",
+    "aid": "0",
+    "scy": "auto",
+    "net": "tcp",
+    "type": "none",
+    "host": "",
+    "path": "",
+    "tls": "",
+    "sni": "",
+    "test_name": "US",
+    "skip-cert-verify": true,
+    "name": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8"
+  },
+  "805227f82857fba29b1f60f57e79fdba": {
+    "v": "2",
+    "ps": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8",
+    "add": "165.140.216.142",
+    "port": 443,
+    "id": "b65a2d69-5634-42a2-e4be-54e8a6176900",
+    "aid": "0",
+    "scy": "auto",
+    "net": "tcp",
+    "type": "none",
+    "host": "",
+    "path": "/LevikoConfig",
+    "tls": "",
+    "sni": "",
+    "test_name": "US3",
+    "skip-cert-verify": true,
+    "name": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8"
+  },
+  "7cc369040857fafbcb5720b2910e615d": {
+    "v": "2",
+    "ps": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8",
+    "add": "38.91.107.49",
+    "port": 18000,
+    "id": "f8c8dc3d-0d37-46b0-8b34-a7232882fcfe",
+    "aid": "0",
+    "scy": "auto",
+    "net": "tcp",
+    "type": "none",
+    "host": "",
+    "path": "",
+    "tls": "",
+    "sni": "",
+    "test_name": "87",
     "skip-cert-verify": true,
     "name": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8"
   },
@@ -32453,6 +32433,21 @@
     "path": "/v2ray",
     "skip-cert-verify": true,
     "name": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8"
+  },
+  "9596e434ff6f19e1b0c99d5808bd5631": {
+    "v": "2",
+    "ps": "\ud83c\uddfb\ud83c\uddf3 Join+Telegram:@Farah_VPN \ud83c\uddfb\ud83c\uddf3",
+    "add": "103.166.184.134",
+    "port": 27467,
+    "id": "93637105-bcea-4a68-b089-1bb6091f0b16",
+    "aid": 0,
+    "net": "tcp",
+    "type": "http",
+    "host": "speedtest.net",
+    "path": "/",
+    "tls": "none",
+    "skip-cert-verify": true,
+    "name": "\ud83c\uddfb\ud83c\uddf3 Join+Telegram:@Farah_VPN \ud83c\uddfb\ud83c\uddf3"
   },
   "700d97a00b5476e7969765eab0301108": {
     "v": "2",
@@ -32499,22 +32494,6 @@
     "net": "tcp",
     "path": "",
     "port": 41911,
-    "ps": "@Hope_Net-join-us-on-Telegram",
-    "scy": "auto",
-    "sni": "",
-    "tls": "",
-    "type": "",
-    "v": "2",
-    "name": "@Hope_Net-join-us-on-Telegram"
-  },
-  "9b16a88666605af9caa052905028d885": {
-    "add": "127.0.0.1",
-    "aid": "0",
-    "host": "",
-    "id": "bcbaaca-abac-cbaa-abdc-abacbcccaabb",
-    "net": "tcp",
-    "path": "",
-    "port": 1080,
     "ps": "@Hope_Net-join-us-on-Telegram",
     "scy": "auto",
     "sni": "",
@@ -32577,37 +32556,151 @@
     "v": "2",
     "name": "\ud83c\uddfa\ud83c\uddf8118278 | \u26a1\ufe0fTelegram = t.me/SOSkeyNET"
   },
-  "9f9ad0da268b69da0b8e248f95bc5cd6": {
-    "add": "45.76.202.45",
-    "aid": 0,
+  "96b3e489cda353888f90190f6da53816": {
+    "add": "47.83.221.185",
+    "aid": "0",
+    "alpn": "",
+    "fp": "",
     "host": "",
-    "id": "071a8a71-c656-4fb6-a908-4e42eb72243d",
-    "net": "ws",
-    "path": "/liksuzcp",
-    "port": 4010,
-    "ps": "\ud83c\uddef\ud83c\uddf5 Join+Telegram:@Farah_VPN \ud83c\uddef\ud83c\uddf5",
-    "security": "auto",
-    "skip-cert-verify": true,
-    "sni": "",
-    "tls": "",
-    "type": "auto",
-    "name": "\ud83c\uddef\ud83c\uddf5 Join+Telegram:@Farah_VPN \ud83c\uddef\ud83c\uddf5"
-  },
-  "4cad7672e148f38d5fa64d21bc49d530": {
-    "add": "47.244.120.197",
-    "aid": 0,
-    "host": "",
-    "id": "45b83519-9c4f-4052-a11b-02e017b636d4",
-    "net": "ws",
-    "path": "/arki?ed=2048",
-    "port": 36703,
+    "id": "771a590c-5eac-5732-b796-17251132f8d2",
+    "insecure": "0",
+    "net": "tcp",
+    "path": "",
+    "port": 80,
     "ps": "\ud83c\udded\ud83c\uddf0 Join+Telegram:@Farah_VPN \ud83c\udded\ud83c\uddf0",
-    "security": "auto",
-    "skip-cert-verify": true,
+    "scy": "auto",
     "sni": "",
     "tls": "",
-    "type": "auto",
+    "type": "none",
+    "v": "2",
+    "skip-cert-verify": true,
     "name": "\ud83c\udded\ud83c\uddf0 Join+Telegram:@Farah_VPN \ud83c\udded\ud83c\uddf0"
+  },
+  "19725dcaf64b45a0a9732a60e9d1bc21": {
+    "add": "5.188.190.252",
+    "aid": "0",
+    "alpn": null,
+    "fp": "chrome",
+    "host": "",
+    "id": "04621bae-ab36-11ec-b909-0242ac120002",
+    "name": "\ud83c\udff3\ufe0f Join+Telegram:@Farah_VPN \ud83c\udff3\ufe0f",
+    "net": "tcp",
+    "path": "/",
+    "port": 22324,
+    "scy": "auto",
+    "skip-cert-verify": true,
+    "sni": null,
+    "tls": "",
+    "type": null,
+    "v": null,
+    "ps": "\ud83c\udff3\ufe0f Join+Telegram:@Farah_VPN \ud83c\udff3\ufe0f"
+  },
+  "aee09296b854dde20b626b313ff6df25": {
+    "add": "57.129.121.230",
+    "aid": "0",
+    "alpn": "h2,http/1.1",
+    "fp": "chrome",
+    "host": "",
+    "id": "3d358ea5-465b-46ac-a2df-98ca1555194f",
+    "net": "tcp",
+    "path": "",
+    "port": 2053,
+    "ps": "\ud83c\udde9\ud83c\uddea Join+Telegram:@Farah_VPN \ud83c\udde9\ud83c\uddea",
+    "scy": "auto",
+    "sni": "",
+    "tls": "tls",
+    "type": "none",
+    "v": "2",
+    "skip-cert-verify": true,
+    "name": "\ud83c\udde9\ud83c\uddea Join+Telegram:@Farah_VPN \ud83c\udde9\ud83c\uddea"
+  },
+  "14edd44b8daf5df0f02b7d2c5c8e7db2": {
+    "add": "57.129.132.223",
+    "aid": "0",
+    "alpn": "",
+    "fp": "",
+    "host": "google.com",
+    "id": "a25cbf11-2908-4a1b-a3a8-9a571777dca3",
+    "net": "ws",
+    "path": "/vmess/",
+    "port": 80,
+    "ps": "\ud83c\uddec\ud83c\udde7 Join+Telegram:@Farah_VPN \ud83c\uddec\ud83c\udde7",
+    "scy": "auto",
+    "sni": "",
+    "tls": "",
+    "type": "",
+    "v": "2",
+    "skip-cert-verify": true,
+    "name": "\ud83c\uddec\ud83c\udde7 Join+Telegram:@Farah_VPN \ud83c\uddec\ud83c\udde7"
+  },
+  "826ecf1d3371bc9e3d8440cd5dbadc6e": {
+    "add": "57.131.32.191",
+    "aid": 0,
+    "host": "OV-Italy1.09vpn.com",
+    "id": "848af33c-81f2-40c9-93b2-4681d056936b",
+    "net": "ws",
+    "path": "/vmess/",
+    "port": 8443,
+    "ps": "\ud83c\uddee\ud83c\uddf9 Join+Telegram:@Farah_VPN \ud83c\uddee\ud83c\uddf9",
+    "scy": "auto",
+    "skip-cert-verify": true,
+    "sni": "OV-Italy1.09vpn.com",
+    "tls": "tls",
+    "type": "none",
+    "v": "2",
+    "name": "\ud83c\uddee\ud83c\uddf9 Join+Telegram:@Farah_VPN \ud83c\uddee\ud83c\uddf9"
+  },
+  "ba1acc7c8ba11b6795379df5b16ac1e7": {
+    "add": "67.220.95.3",
+    "aid": 0,
+    "id": "f8c8dc3d-0d37-46b0-8b34-a7232882fcfe",
+    "net": "tcp",
+    "port": 18000,
+    "ps": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8",
+    "scy": "aes-128-gcm",
+    "skip-cert-verify": true,
+    "tls": "",
+    "type": "none",
+    "v": "2",
+    "name": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8"
+  },
+  "f7bc7a38b28268389ab8af248a33f4d7": {
+    "add": "84.17.41.2",
+    "aid": "0",
+    "alpn": null,
+    "fp": null,
+    "host": "",
+    "id": "f8c8dc3d-0d37-46b0-8b34-a7232882fcfe",
+    "name": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8",
+    "net": "tcp",
+    "path": "/",
+    "port": 18000,
+    "scy": null,
+    "skip-cert-verify": true,
+    "sni": null,
+    "tls": "",
+    "type": null,
+    "v": null,
+    "ps": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8"
+  },
+  "5a7114a844fd3e861c864d8edec88c65": {
+    "add": "85.90.217.42",
+    "aid": "0",
+    "alpn": "",
+    "fp": "",
+    "host": "",
+    "id": "04621bae-ab36-11ec-b909-0242ac120002",
+    "net": "tcp",
+    "path": "",
+    "port": 22324,
+    "ps": "\ud83c\uddea\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddea\ud83c\uddf8",
+    "scy": "auto",
+    "sni": "",
+    "tls": "",
+    "type": "",
+    "v": "2",
+    "skip-cert-verify": true,
+    "name": "\ud83c\uddea\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddea\ud83c\uddf8"
   },
   "105112be14be2d8c64f8bf514544593c": {
     "add": "104.17.77.77",
@@ -32647,6 +32740,21 @@
     "v": "2",
     "name": "Channel : @Daily_Configs"
   },
+  "23ad9c6025ebcdb01524f3c3a70277c3": {
+    "add": "129.146.77.248",
+    "aid": 0,
+    "id": "f836c736-87fc-4fde-aabc-00857ecdff3e",
+    "net": "ws",
+    "path": "/cctv13.m3u8",
+    "port": 39495,
+    "ps": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8",
+    "scy": "auto",
+    "skip-cert-verify": true,
+    "tls": "",
+    "type": "none",
+    "v": "2",
+    "name": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8"
+  },
   "9585ee068e3dd1d447f81342133842f7": {
     "add": "140.83.51.161",
     "aid": "0",
@@ -32667,7 +32775,7 @@
     "skip-cert-verify": true,
     "name": "\ud83c\uddef\ud83c\uddf5 Join+Telegram:@Farah_VPN \ud83c\uddef\ud83c\uddf5"
   },
-  "aeb2e383e7caa74542257bb01abf0524": {
+  "d3b28e535f3339db8e3b243e396a761e": {
     "add": "152.67.8.205",
     "aid": 0,
     "host": "",
@@ -32702,7 +32810,7 @@
     "v": "2",
     "name": "@TEHRANARGO"
   },
-  "af89e09bac8da3b0a036fca029489605": {
+  "959dcfb4252a3997a5806ad011063db3": {
     "add": "165.140.216.141",
     "aid": "0",
     "host": "",
@@ -32712,13 +32820,68 @@
     "port": 443,
     "ps": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8",
     "scy": "auto",
-    "skip-cert-verify": true,
     "sni": "",
     "test_name": "3",
     "tls": "",
     "type": "none",
     "v": "2",
+    "skip-cert-verify": true,
     "name": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8"
+  },
+  "17977348b593af415110d84fb488e09d": {
+    "add": "165.140.216.142",
+    "aid": "0",
+    "alpn": "",
+    "fp": "",
+    "host": "LevikoConfig",
+    "id": "b65a2d69-5634-42a2-e4be-54e8a6176900",
+    "insecure": "0",
+    "net": "tcp",
+    "path": "/LevikoConfig",
+    "port": 443,
+    "ps": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8",
+    "scy": "auto",
+    "sni": "",
+    "tls": "",
+    "type": "none",
+    "v": "2",
+    "skip-cert-verify": true,
+    "name": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8"
+  },
+  "1484ad3434174c4039d9fa5cd0bc4bee": {
+    "add": "165.154.195.38",
+    "aid": "0",
+    "alpn": "",
+    "fp": "",
+    "host": "",
+    "id": "959a8caf-4cea-43d0-a548-3628e7ddfafc",
+    "name": "\ud83c\uddf9\ud83c\uddfc Join+Telegram:@Farah_VPN \ud83c\uddf9\ud83c\uddfc",
+    "net": "tcp",
+    "path": "",
+    "port": 35034,
+    "ps": "\ud83c\uddf9\ud83c\uddfc Join+Telegram:@Farah_VPN \ud83c\uddf9\ud83c\uddfc",
+    "scy": "auto",
+    "sni": "",
+    "tls": "",
+    "type": "",
+    "v": "2",
+    "skip-cert-verify": true
+  },
+  "046c3ee5b71363775f357cc7faa2b297": {
+    "add": "168.138.43.75",
+    "aid": 0,
+    "host": "None",
+    "id": "11c3627f-31e8-4695-dfbd-34076e2f1f5d",
+    "net": "ws",
+    "path": "/cctv13.m3u8",
+    "port": 80,
+    "ps": "\ud83c\uddef\ud83c\uddf5 Join+Telegram:@Farah_VPN \ud83c\uddef\ud83c\uddf5",
+    "sni": "None",
+    "tls": "",
+    "type": "none",
+    "v": "2",
+    "skip-cert-verify": true,
+    "name": "\ud83c\uddef\ud83c\uddf5 Join+Telegram:@Farah_VPN \ud83c\uddef\ud83c\uddf5"
   },
   "5d5f186791cb382468d375a4ede9d745": {
     "add": "209.250.237.71",
@@ -32888,6 +33051,21 @@
     "type": "---",
     "v": "2",
     "name": "\u2604\ufe0f @ConfigV2RayNG"
+  },
+  "68d3c59a6497fb5124703c4004cf55c5": {
+    "add": "xsj004-10.facai2024.com",
+    "aid": "0",
+    "host": "xsj004-10.facai2024.com",
+    "id": "1f1aa362-2576-4989-8fdb-7cf1c2c96490",
+    "net": "ws",
+    "path": "/1f1aa362-25",
+    "port": 443,
+    "ps": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8",
+    "skip-cert-verify": true,
+    "tls": "tls",
+    "type": "none",
+    "v": "2",
+    "name": "\ud83c\uddfa\ud83c\uddf8 Join+Telegram:@Farah_VPN \ud83c\uddfa\ud83c\uddf8"
   },
   "f7811d232b2baa3126bd38ab11929001": {
     "add": "n1747624260.4u9ma.icu",
