@@ -100,10 +100,13 @@ from user_settings import (
     CHANNEL_RETRY_DEADLINE,
 )
 
+# ===== ИЗМЕНЕНИЕ: настройка логирования с учётом переменной окружения =====
+log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG if log_level == 'DEBUG' else logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    datefmt='%Y-%m-%d %H:%M:%S',
+    stream=sys.stdout   # чтобы всё шло в stdout, а не в stderr
 )
 logger = logging.getLogger(__name__)
 
@@ -514,7 +517,9 @@ class OptimizedPipeline:
             parsed_cache = await self._load_parsed_cache_async()
             valid_configs = []
             parse_stats = {'strict': 0, 'heuristic': 0, 'failed': 0}
-            with tqdm(total=len(raw_configs), desc="Parsing configs") as pbar:
+            # ===== ИЗМЕНЕНИЕ: tqdm адаптирован для неинтерактивного режима =====
+            with tqdm(total=len(raw_configs), desc="Parsing configs",
+                      file=sys.stderr, mininterval=0.5, ncols=80, leave=False) as pbar:
                 for cfg in raw_configs:
                     if self._shutdown_requested:
                         break
@@ -560,7 +565,9 @@ class OptimizedPipeline:
             # Шаг 3: Оценка
             logger.info("⚡ Scoring profiles...")
             scored_configs = []
-            with tqdm(total=len(filtered_by_sni), desc="Scoring configs") as pbar:
+            # ===== ИЗМЕНЕНИЕ: tqdm адаптирован =====
+            with tqdm(total=len(filtered_by_sni), desc="Scoring configs",
+                      file=sys.stderr, mininterval=0.5, ncols=80, leave=False) as pbar:
                 for idx, cfg in enumerate(filtered_by_sni):
                     if self._shutdown_requested:
                         break
