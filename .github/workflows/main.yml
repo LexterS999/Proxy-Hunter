@@ -5,6 +5,23 @@ on:
     - cron: '0 */6 * * *'
   workflow_dispatch:
 
+env:
+  # === Параметры, которые можно переопределить через GitHub Secrets ===
+  PROXY_USE_MAXIMUM_POWER: ${{ secrets.PROXY_USE_MAXIMUM_POWER || 'true' }}
+  PROXY_SPECIFIC_CONFIG_COUNT: ${{ secrets.PROXY_SPECIFIC_CONFIG_COUNT || '5000' }}
+  PROXY_ARCHIVE_MAX_AGE_DAYS: ${{ secrets.PROXY_ARCHIVE_MAX_AGE_DAYS || '14' }}
+  PROXY_SIMPLE_MAX_AGE_DAYS: ${{ secrets.PROXY_SIMPLE_MAX_AGE_DAYS || '3' }}
+  PROXY_CHECK_TCP_TIMEOUT: ${{ secrets.PROXY_CHECK_TCP_TIMEOUT || '10.0' }}
+  PROXY_CHECK_HTTP_TIMEOUT: ${{ secrets.PROXY_CHECK_HTTP_TIMEOUT || '10.0' }}
+  PROXY_MAX_LATENCY_MS: ${{ secrets.PROXY_MAX_LATENCY_MS || '10000.0' }}
+  PROXY_ACTIVE_CHECKER_WORKERS: ${{ secrets.PROXY_ACTIVE_CHECKER_WORKERS || '100' }}
+  PROXY_PER_HOST_LIMIT: ${{ secrets.PROXY_PER_HOST_LIMIT || '10' }}
+  PROXY_SCORE_MIN_THRESHOLD: ${{ secrets.PROXY_SCORE_MIN_THRESHOLD || '30.0' }}
+  PROXY_CHANNEL_HEALTH_THRESHOLD: ${{ secrets.PROXY_CHANNEL_HEALTH_THRESHOLD || '30.0' }}
+  PROXY_GRACE_PERIOD_RUNS: ${{ secrets.PROXY_GRACE_PERIOD_RUNS || '5' }}
+  PROXY_ADAPTIVE_THRESHOLD_PERCENTILE: ${{ secrets.PROXY_ADAPTIVE_THRESHOLD_PERCENTILE || '20' }}
+  # === Конец параметров ===
+
 jobs:
   run-pipeline:
     runs-on: ubuntu-22.04
@@ -66,7 +83,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-bloom-shards-
 
-      # ===== Кэширование GeoLite2 ASN базы (с id для проверки) =====
+      # ===== Кэширование GeoLite2 ASN базы =====
       - name: Cache GeoLite2 ASN database
         id: cache-geolite
         uses: actions/cache@v4
@@ -121,6 +138,23 @@ jobs:
         continue-on-error: true
         run: |
           time python src/pipeline_optimized.py 2>&1 | tee pipeline_debug.log
+
+      # ===== Вакуумирование SQLite (сжатие) =====
+      - name: Vacuum SQLite database
+        if: always()
+        run: |
+          python -c "
+          import sqlite3
+          import os
+          DB_PATH = 'configs/history.db'
+          if os.path.exists(DB_PATH):
+              conn = sqlite3.connect(DB_PATH)
+              conn.execute('VACUUM')
+              conn.close()
+              print('✅ SQLite database vacuumed.')
+          else:
+              print('ℹ️ history.db not found, skipping vacuum.')
+          "
 
       # ===== Удаление неактивных каналов =====
       - name: Remove inactive channels from custom_channels.txt
@@ -292,6 +326,7 @@ jobs:
             configs/history.db
             configs/parsed_cache.json
             configs/name_mapping.json
+            configs/regional_weights.json
             bloom_shards/
           retention-days: 7
           if-no-files-found: warn
@@ -302,7 +337,7 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add configs/output_archive.txt configs/output_simple.txt configs/parsed_cache.json configs/name_mapping.json custom_channels.txt
+          git add configs/output_archive.txt configs/output_simple.txt configs/parsed_cache.json configs/name_mapping.json custom_channels.txt configs/regional_weights.json
           if [ -f "configs/history.db" ]; then
             git add configs/history.db
           fi
