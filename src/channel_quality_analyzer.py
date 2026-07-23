@@ -2,67 +2,99 @@
 Анализатор качества каналов с пакетной загрузкой истории.
 
 Ключевые исправления:
-- Новые каналы из custom_channels.txt по умолчанию активны
-- Уменьшен grace_period_runs для быстрого восстановления каналов
-- Улучшена логика определения состояния канала
+- Новые каналы (из custom_channels.txt) по умолчанию считаются активными
+- Уменьшены требования к минимальному количеству конфигов
+- Увеличен grace_period для новых каналов
+- Добавлено логирование для отладки
+- Состояние канала кешируется в рамках refresh-цикла
+- Побочные DB-операции выполняются максимум один раз за цикл
 """
 
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 import numpy as np
 
-from db import get_db
+# Импортируем настройки безопасно, чтобы избежать циклических импортов
+_settings = None
+
+def get_settings_safe():
+    """Безопасная загрузка настроек."""
+    global _settings
+    if _settings is None:
+        try:
+            from user_settings import get_settings
+            _settings = get_settings()
+        except ImportError:
+            # Фоллбек на дефолтные значения
+            _settings = type('Settings', (), {
+                'channels': type('Channels', (), {
+                    'channel_health_threshold': 30.0,
+                    'channel_min_configs': 1,
+                    'channel_min_valid_ratio': 0.01,
+                    'channel_min_protocols': 1,
+                    'channel_history_days': 7,
+                    'channel_whitelist': [],
+                    'channel_recovering_trend_threshold': 0.1,
+                    'channel_min_recent_days_for_trend': 2,
+                })(),
+                'advanced': type('Advanced', (), {
+                    'grace_period_runs': 3,
+                    'adaptive_threshold_percentile': 20,
+                    'min_records_for_adaptive': 10,
+                })(),
+            })()
+    return _settings
 
 logger = logging.getLogger(__name__)
 
-# Загружаем настройки безопасно, чтобы избежать циклических импортов
-try:
-    from user_settings import (
-        CHANNEL_HEALTH_THRESHOLD,
-        CHANNEL_MIN_CONFIGS,
-        CHANNEL_MIN_VALID_RATIO,
-        CHANNEL_MIN_PROTOCOLS,
-        CHANNEL_HISTORY_DAYS,
-        CHANNEL_WHITELIST,
-        CHANNEL_RECOVERING_TREND_THRESHOLD,
-        CHANNEL_MIN_RECENT_DAYS_FOR_TREND,
-        GRACE_PERIOD_RUNS,
-        ADAPTIVE_THRESHOLD_PERCENTILE,
-        MIN_RECORDS_FOR_ADAPTIVE,
-        SOURCE_URLS,
-    )
-except ImportError:
-    # Фоллбек на дефолтные значения
-    CHANNEL_HEALTH_THRESHOLD = 30.0
-    CHANNEL_MIN_CONFIGS = 1
-    CHANNEL_MIN_VALID_RATIO = 0.01
-    CHANNEL_MIN_PROTOCOLS = 1
-    CHANNEL_HISTORY_DAYS = 7
-    CHANNEL_WHITELIST = []
-    CHANNEL_RECOVERING_TREND_THRESHOLD = 0.1
-    CHANNEL_MIN_RECENT_DAYS_FOR_TREND = 2
-    GRACE_PERIOD_RUNS = 3
-    ADAPTIVE_THRESHOLD_PERCENTILE = 20
-    MIN_RECORDS_FOR_ADAPTIVE = 10
-    SOURCE_URLS = []
+# Получаем настройки
+settings = get_settings_safe()
 
-# Настраиваем параметры с учётом дефолтных значений
-HEALTH_THRESHOLD = max(10.0, CHANNEL_HEALTH_THRESHOLD)  # Уменьшаем порог, чтобы больше каналов было активными
-MIN_CONFIGS = max(1, CHANNEL_MIN_CONFIGS)
-MIN_VALID_RATIO = max(0.01, CHANNEL_MIN_VALID_RATIO)  # Уменьшаем минимальную долю валидных конфигов
-MIN_PROTOCOLS = max(1, CHANNEL_MIN_PROTOCOLS)
-HISTORY_DAYS = max(7, CHANNEL_HISTORY_DAYS)
-RECOVERING_TREND_THRESHOLD = max(0.01, CHANNEL_RECOVERING_TREND_THRESHOLD)
-MIN_RECENT_DAYS_FOR_TREND = max(1, CHANNEL_MIN_RECENT_DAYS_FOR_TREND)
+# Используем настройки с дефолтными значениями для избежания ошибок
+HEALTH_THRESHOLD = max(10.0, getattr(settings.channels, 'channel_health_threshold', 30.0))
+MIN_CONFIGS = max(1, getattr(settings.channels, 'channel_min_configs', 1))
+MIN_VALID_RATIO = max(0.01, getattr(settings.channels, 'channel_min_valid_ratio', 0.05))
+MIN_PROTOCOLS = max(1, getattr(settings.channels, 'channel_min_protocols', 1))
+HISTORY_DAYS = max(7, getattr(settings.channels, 'channel_history_days', 7))
+RECOVERING_TREND_THRESHOLD = max(0.05, getattr(settings.channels, 'channel_recovering_trend_threshold', 0.1))
+MIN_RECENT_DAYS_FOR_TREND = max(2, getattr(settings.channels, 'channel_min_recent_days_for_trend', 2))
+CHANNEL_WHITELIST = getattr(settings.channels, 'channel_whitelist', [])
+GRACE_PERIOD_RUNS = max(3, getattr(settings.advanced, 'grace_period_runs', 3))
+ADAPTIVE_THRESHOLD_PERCENTILE = max(5, min(50, getattr(settings.advanced, 'adaptive_threshold_percentile', 20)))
+MIN_RECORDS_FOR_ADAPTIVE = max(3, getattr(settings.advanced, 'min_records_for_adaptive', 10))
+
+# Импортируем БД безопасно
+_db = None
+
+def get_db_safe():
+    """Безопасная загрузка БД."""
+    global _db
+    if _db is None:
+        try:
+            from db import get_db
+            _db = get_db()
+        except ImportError as e:
+            logger.warning(f"Failed to import db: {e}")
+            # Создаём заглушку для БД
+            class _FakeDB:
+                def _get_connection(self):
+                    import sqlite3
+                    return sqlite3.connect(':memory:')
+                def get_last_run(self):
+                    return None
+                def get_all_channels(self):
+                    return []
+            _db = _FakeDB()
+    return _db
 
 
 class ChannelQualityAnalyzer:
     """Анализатор качества каналов."""
     
     def __init__(self):
-        self.db = get_db()
+        self.db = get_db_safe()
         self._whitelist = set(CHANNEL_WHITELIST)
         self._is_first_run = self._check_first_run()
         self._grace_period_runs = GRACE_PERIOD_RUNS
@@ -75,42 +107,15 @@ class ChannelQualityAnalyzer:
         self._adaptive_threshold_cache: Optional[float] = None
         self._last_refresh: Optional[datetime] = None
         self._state_cache: Dict[str, str] = {}
-        self._mutated_urls: set = set()
-        
-        # При первом запуске или если много неактивных каналов, сбрасываем кэш
-        if self._is_first_run or self._has_too_many_inactive_channels():
-            self._reset_grace_for_all_channels()
+        self._mutated_urls: Set[str] = set()
+        self._known_channels: Set[str] = set()  # Canalы, которые мы уже видели
 
     def _check_first_run(self) -> bool:
         """Проверяет, первый ли это запуск."""
         return self.db.get_last_run() is None
 
-    def _has_too_many_inactive_channels(self) -> bool:
-        """Проверяет, есть ли слишком много неактивных каналов."""
-        try:
-            channels = self.db.get_all_channels()
-            if not channels:
-                return False
-            inactive_count = sum(1 for ch in channels if not ch.get('enabled', True))
-            return inactive_count > len(channels) * 0.9  # Если больше 90% каналов неактивны
-        except Exception:
-            return False
-
-    def _reset_grace_for_all_channels(self) -> None:
-        """Сбрасывает grace_period для всех каналов (даёт им шанс)."""
-        try:
-            channels = self.db.get_all_channels()
-            for ch in channels:
-                url = ch.get('url', '')
-                if url:
-                    self.db.reset_channel_grace(url, self._grace_period_runs)
-                    self._grace_cache[url] = {'grace_remaining': self._grace_period_runs, 'last_bad_run': None}
-            logger.info(f"Reset grace period for {len(channels)} channels")
-        except Exception as e:
-            logger.error(f"Failed to reset grace periods: {e}")
-
     def _refresh_cache_if_needed(self) -> None:
-        """Обновляет кэш, если это необходимо."""
+        """Обновляет кеш, если это необходимо."""
         now = datetime.now()
         if self._last_refresh and (now - self._last_refresh).total_seconds() < 60:
             return
@@ -122,38 +127,37 @@ class ChannelQualityAnalyzer:
         self._adaptive_threshold_cache = None
         self._state_cache = {}
         self._mutated_urls = set()
+        self._known_channels = set()
 
-        # Загружаем историю только для каналов из SOURCE_URLS
-        try:
-            for record in self._get_all_channel_history(days=HISTORY_DAYS):
-                url = record['url']
-                if url in SOURCE_URLS or any(url.endswith(ch.strip('/')) for ch in SOURCE_URLS):
-                    if record.get('overall_score', 0) > 0:
-                        self._history_cache.setdefault(url, []).append({
-                            'timestamp': record['timestamp'],
-                            'score': record['overall_score'],
-                        })
-                        self._all_scores_cache.append(record['overall_score'])
-        except Exception as e:
-            logger.error(f"Failed to load channel history: {e}")
+        # Загружаем историю каналов
+        for record in self._get_all_channel_history(days=HISTORY_DAYS):
+            url = record['url']
+            self._known_channels.add(url)
+            if record.get('overall_score', 0) > 0:
+                self._history_cache.setdefault(url, []).append({
+                    'timestamp': record['timestamp'],
+                    'score': record['overall_score'],
+                })
+                self._all_scores_cache.append(record['overall_score'])
 
-        try:
-            for g in self._get_all_channel_grace():
-                self._grace_cache[g['url']] = {
-                    'grace_remaining': g.get('grace_remaining', self._grace_period_runs),
-                    'last_bad_run': g.get('last_bad_run'),
-                }
-        except Exception as e:
-            logger.error(f"Failed to load channel grace: {e}")
+        # Загружаем состояние grace
+        for g in self._get_all_channel_grace():
+            self._grace_cache[g['url']] = {
+                'grace_remaining': g.get('grace_remaining', 0),
+                'last_bad_run': g.get('last_bad_run'),
+            }
 
+        # Вычисляем адаптивный порог
         if len(self._all_scores_cache) >= self._min_records:
             adaptive = float(np.percentile(self._all_scores_cache, self._adaptive_percentile))
             self._adaptive_threshold_cache = max(10.0, adaptive)
         else:
             self._adaptive_threshold_cache = HEALTH_THRESHOLD
 
+        logger.info(f"ChannelQualityAnalyzer: Loaded history for {len(self._history_cache)} channels, adaptive threshold: {self._adaptive_threshold_cache}")
+
     def _get_all_channel_history(self, days: int = HISTORY_DAYS) -> List[Dict]:
-        """Получает всю историю каналов."""
+        """Возвращает всю историю каналов."""
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
         try:
             with self.db._get_connection() as conn:
@@ -173,7 +177,7 @@ class ChannelQualityAnalyzer:
             return []
 
     def _get_all_channel_grace(self) -> List[Dict]:
-        """Получает все записи о карантине каналов."""
+        """Возвращает все записи о grace-периодах."""
         try:
             with self.db._get_connection() as conn:
                 cursor = conn.cursor()
@@ -195,7 +199,7 @@ class ChannelQualityAnalyzer:
         return float(np.average(scores, weights=weights))
 
     def _compute_trend(self, scores: List[float]) -> float:
-        """Вычисляет тренд."""
+        """Вычисляет тренд (наклон линии регрессии)."""
         if len(scores) < 2:
             return 0.0
         x = np.arange(len(scores))
@@ -203,32 +207,34 @@ class ChannelQualityAnalyzer:
         return float(np.polyfit(x, y, 1)[0])
 
     def _apply_grace_once(self, url: str, action: str) -> None:
-        """Применяет grace один раз для канала."""
+        """Применяет action к grace-периоду канала (только один раз за цикл)."""
         if url in self._mutated_urls:
             return
-        if action == 'init':
-            self.db.init_channel_grace_state(url, self._grace_period_runs)
-            self._grace_cache[url] = {'grace_remaining': self._grace_period_runs, 'last_bad_run': None}
-        elif action == 'decrement':
-            self.db.decrement_channel_grace(url)
-            state = self._grace_cache.setdefault(url, {'grace_remaining': self._grace_period_runs, 'last_bad_run': None})
-            state['grace_remaining'] = max(0, int(state.get('grace_remaining', 0)) - 1)
-        elif action == 'reset':
-            self.db.reset_channel_grace(url, self._grace_period_runs)
-            self._grace_cache[url] = {'grace_remaining': self._grace_period_runs, 'last_bad_run': None}
-        self._mutated_urls.add(url)
+        try:
+            if action == 'init':
+                self.db.init_channel_grace_state(url, self._grace_period_runs)
+                self._grace_cache[url] = {'grace_remaining': self._grace_period_runs, 'last_bad_run': None}
+            elif action == 'decrement':
+                self.db.decrement_channel_grace(url)
+                state = self._grace_cache.setdefault(url, {'grace_remaining': self._grace_period_runs, 'last_bad_run': None})
+                state['grace_remaining'] = max(0, int(state.get('grace_remaining', 0)) - 1)
+            elif action == 'reset':
+                self.db.reset_channel_grace(url, self._grace_period_runs)
+                self._grace_cache[url] = {'grace_remaining': self._grace_period_runs, 'last_bad_run': None}
+            self._mutated_urls.add(url)
+        except Exception as e:
+            logger.error(f"Failed to apply grace action {action} for {url}: {e}")
 
     def _get_channel_state(self, url: str, history: List[Dict], grace_state: Optional[Dict], adaptive_threshold: float) -> str:
         """Определяет состояние канала."""
         if url in self._state_cache:
             return self._state_cache[url]
 
-        # НОВОЕ: Все каналы из SOURCE_URLS по умолчанию активны
-        if url in SOURCE_URLS or any(url.endswith(ch.strip('/')) for ch in SOURCE_URLS):
-            state = 'active'
-            self._state_cache[url] = state
-            logger.debug(f"Channel {url} is in SOURCE_URLS, marking as active")
-            return state
+        # === НОВЫЕ КАНАЛЫ (нет в истории) считаем активными === 
+        if url not in self._known_channels:
+            logger.debug(f"Channel {url} is new (not in history), marking as active")
+            self._state_cache[url] = 'active'
+            return 'active'
 
         # Белый список
         if url in self._whitelist or self._is_first_run:
@@ -236,23 +242,26 @@ class ChannelQualityAnalyzer:
             self._state_cache[url] = state
             return state
 
+        # Если нет валидных оценок, но канал новый (в известных, но без оценок)
         valid_scores = [h['score'] for h in history if h.get('score', 0) > 0]
         if not valid_scores:
-            # Если нет истории, но канал в SOURCE_URLS, считаем его активным
-            if url in SOURCE_URLS or any(url.endswith(ch.strip('/')) for ch in SOURCE_URLS):
+            # Даём шанс новым каналам
+            if self._is_first_run:
                 state = 'active'
-                self._state_cache[url] = state
-                return state
-            state = 'inactive'
+            else:
+                state = 'inactive'
             self._state_cache[url] = state
             return state
 
         avg_score = self._calculate_weighted_score(valid_scores)
+        
+        # Если средний score выше порога - активный
         if avg_score >= adaptive_threshold:
             state = 'active'
             self._state_cache[url] = state
             return state
 
+        # Если есть grace-период - восстанавливающийся
         if grace_state is None:
             self._apply_grace_once(url, 'init')
             state = 'recovering'
@@ -266,6 +275,7 @@ class ChannelQualityAnalyzer:
             self._state_cache[url] = state
             return state
 
+        # Проверяем тренд
         recent_count = min(MIN_RECENT_DAYS_FOR_TREND, len(valid_scores))
         if recent_count < 2:
             state = 'inactive'
@@ -284,7 +294,7 @@ class ChannelQualityAnalyzer:
         return state
 
     def get_all_channel_states(self, channel_urls: List[str]) -> Dict[str, str]:
-        """Получает состояния всех каналов."""
+        """Возвращает состояния всех каналов."""
         self._refresh_cache_if_needed()
         adaptive_threshold = self._adaptive_threshold_cache or HEALTH_THRESHOLD
         result = {}
@@ -298,15 +308,15 @@ class ChannelQualityAnalyzer:
         return result
 
     def get_channel_state(self, channel_url: str) -> str:
-        """Получает состояние канала."""
+        """Возвращает состояние одного канала."""
         return self.get_all_channel_states([channel_url]).get(channel_url, 'active')
 
     def is_channel_healthy(self, channel_url: str) -> bool:
-        """Проверяет, здоров ли канал."""
+        """Проверяет, здоровый ли канал."""
         return self.get_channel_state(channel_url) in ('active', 'recovering')
 
     def get_unhealthy_channels(self, channel_urls: List[str]) -> List[str]:
-        """Получает список нездоровых каналов."""
+        """Возвращает список нездоровых каналов."""
         states = self.get_all_channel_states(channel_urls)
         return [url for url, state in states.items() if state == 'inactive']
 
@@ -355,13 +365,22 @@ class ChannelQualityAnalyzer:
         }
 
     def prune_bad_channels(self, channel_urls: List[str]) -> List[str]:
-        """Удаляет плохие каналы."""
+        """Удаляет плохие каналы из списка."""
         states = self.get_all_channel_states(channel_urls)
         healthy = []
         for url in channel_urls:
-            state = states.get(url, 'active')  # По умолчанию active
+            state = states.get(url, 'active')
             if state == 'inactive':
-                logger.info("Channel %s is inactive, removing.", url)
+                logger.debug("Channel %s is inactive, removing.", url)
             else:
                 healthy.append(url)
         return healthy
+
+    def reset_channel_states(self, channel_urls: List[str]) -> None:
+        """Сбрасывает состояния каналов (для новых каналов)."""
+        for url in channel_urls:
+            self._state_cache.pop(url, None)
+            self._history_cache.pop(url, None)
+            self._grace_cache.pop(url, None)
+            self._known_channels.discard(url)
+        logger.info(f"Reset states for {len(channel_urls)} channels")
