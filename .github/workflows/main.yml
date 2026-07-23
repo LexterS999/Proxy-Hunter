@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '0 */6 * * *'
   workflow_dispatch:
+  push:
+    paths:
+      - 'src/**'
+      - 'requirements.txt'
+      - 'custom_channels.txt'
 
 env:
   # === Параметры, которые можно переопределить через GitHub Secrets ===
@@ -40,8 +45,9 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
           cache: 'pip'
+          cache-dependency-path: 'requirements.txt'
 
       - name: Convert scripts to LF
         run: |
@@ -59,7 +65,19 @@ jobs:
         run: |
           python -m pip install --upgrade pip setuptools wheel
           pip install -r requirements.txt
-          python -c "import aiofiles, xxhash, aiodns, maxminddb"
+          # Проверяем установку ключевых пакетов
+          python -c "import aiohttp, aiofiles, xxhash, aiodns, maxminddb, pydantic, tenacity; print('✅ All core dependencies installed successfully')"
+
+      - name: Verify Pydantic models
+        run: |
+          python -c "
+          from user_settings import Settings, get_settings
+          settings = get_settings()
+          print('✅ Pydantic settings loaded successfully')
+          print(f'  - TCP Timeout: {settings.network.tcp_timeout}')
+          print(f'  - Active Checker Workers: {settings.network.active_checker_workers}')
+          print(f'  - Enabled Protocols: {list(settings.protocols.enabled_protocols.keys())}')
+          " || echo "⚠️ Pydantic validation failed"
 
       - name: Create necessary directories
         run: |
@@ -138,7 +156,7 @@ jobs:
         continue-on-error: true
         env:
           PYTHONUNBUFFERED: 1
-          LOG_LEVEL: INFO   # можно сменить на DEBUG для ещё более детального вывода
+          LOG_LEVEL: INFO
         run: |
           set -x
           python -u src/pipeline_optimized.py 2>&1 | tee pipeline_debug.log
