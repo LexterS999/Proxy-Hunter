@@ -188,7 +188,7 @@ class ProxyConfig:
         self.specific_config_count = settings.channels.specific_config_count
         self.MAX_CONFIG_AGE_DAYS = settings.channels.max_config_age_days
 
-        self.SUPPORTED_PROTOCOLS = self._initialize_protocols()
+        self.SUPPORTED_PROTOCOLS = self._initialize_protocols(settings)
         initial_urls: List[ChannelConfig] = [ChannelConfig(url=url) for url in settings.channels.source_urls]
         self.SOURCE_URLS = self._remove_duplicate_urls(initial_urls)
         self._initialize_settings()
@@ -203,10 +203,8 @@ class ProxyConfig:
         if len(self.SOURCE_URLS) > 5:
             logger.debug(f"  ... and {len(self.SOURCE_URLS) - 5} more channels")
 
-    def _initialize_protocols(self) -> Dict[str, Dict]:
+    def _initialize_protocols(self, settings) -> Dict[str, Dict]:
         """Инициализирует поддерживаемые протоколы."""
-        settings = get_settings_safe()
-        # Исправлено: используем settings.protocols.enabled_protocols
         enabled_protocols = settings.protocols.enabled_protocols
         return {
             "wireguard://": {"priority": 1, "aliases": [], "enabled": enabled_protocols.get("wireguard://", False)},
