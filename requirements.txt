@@ -1,49 +1,53 @@
-# Основные зависимости
+# ============================================================================
+# Proxy-Hunter Dependencies
+# ============================================================================
+
+# --- Core Dependencies ---
 aiohttp>=3.9.0
 beautifulsoup4>=4.12.0
 python-dateutil>=2.8.2
 lxml>=5.0.0
 
-# Асинхронный HTTP-клиент
+# --- Async I/O ---
 aiofiles>=23.2.0
 
-# Прогресс-бар
+# --- Progress Bars ---
 tqdm>=4.66.0
 
-# Быстрое хеширование
+# --- Hashing ---
 mmh3>=3.0.0
 xxhash>=3.4.0
 
-# Файловая блокировка
+# --- File Locking ---
 portalocker>=2.0.0
 
-# Bloom filter
+# --- Bloom Filters ---
 pybloom-live>=4.0.0
 
-# uvloop (ускорение asyncio)
+# --- Async I/O Optimization ---
 uvloop>=0.19.0
 
-# Дополнительные утилиты
+# --- Retry Utilities ---
 tenacity>=8.2.0
 
-# Научные вычисления
+# --- Scientific Computing ---
 numpy>=1.24.0
 scipy>=1.10.0
 
-# Валидация настроек
+# --- Validation & Settings ---
 pydantic>=2.0.0
 
-# DNS-резолвер для проверки ASN
+# --- DNS Resolution ---
 aiodns>=3.0.0
 
-# Детекция датацентров
+# --- GeoIP Database ---
 maxminddb>=2.0.0
 
-# Типовые аннотации
+# --- Type Extensions ---
 typing-extensions>=4.5.0
 
-# Мониторинг (опционально)
+# --- Monitoring (Optional) ---
 prometheus-client>=0.17.0
 
-# Для горячего обновления настроек
+# --- Hot Reload for Settings (Optional) ---
 watchdog>=3.0.0
