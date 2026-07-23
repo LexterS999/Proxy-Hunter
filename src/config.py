@@ -21,18 +21,8 @@ def get_settings_safe():
     global _settings
     if _settings is None:
         try:
-            from user_settings import (
-                SOURCE_URLS, USE_MAXIMUM_POWER, SPECIFIC_CONFIG_COUNT, ENABLED_PROTOCOLS,
-                MAX_CONFIG_AGE_DAYS, CHANNEL_HEALTH_THRESHOLD
-            )
-            _settings = type('Settings', (), {
-                'SOURCE_URLS': SOURCE_URLS,
-                'USE_MAXIMUM_POWER': USE_MAXIMUM_POWER,
-                'SPECIFIC_CONFIG_COUNT': SPECIFIC_CONFIG_COUNT,
-                'ENABLED_PROTOCOLS': ENABLED_PROTOCOLS,
-                'MAX_CONFIG_AGE_DAYS': MAX_CONFIG_AGE_DAYS,
-                'CHANNEL_HEALTH_THRESHOLD': CHANNEL_HEALTH_THRESHOLD
-            })()
+            from user_settings import get_settings
+            _settings = get_settings()
         except ImportError as e:
             logger.warning(f"Failed to import settings: {e}. Using defaults.")
             _settings = type('Settings', (), {
@@ -199,6 +189,13 @@ class ProxyConfig:
         self._set_smart_limits()
         self._analyzer = None
         self._apply_region_bonus()
+        
+        # Логируем загруженные каналы
+        logger.info(f"Loaded {len(self.SOURCE_URLS)} channels from settings")
+        for ch in self.SOURCE_URLS[:5]:  # Логируем первые 5 каналов
+            logger.debug(f"  - {ch.url} (enabled: {ch.enabled})")
+        if len(self.SOURCE_URLS) > 5:
+            logger.debug(f"  ... and {len(self.SOURCE_URLS) - 5} more channels")
 
     def _initialize_protocols(self) -> Dict[str, Dict]:
         """Инициализирует поддерживаемые протоколы."""
@@ -272,6 +269,7 @@ class ProxyConfig:
                 self.save_empty_config_file()
                 logger.error("No valid sources found. Empty config file created.")
                 return []
+            logger.info(f"Removed duplicates: {len(channel_configs)} -> {len(unique_configs)} channels")
             return unique_configs
         except Exception as e:
             logger.error(f"Error removing duplicate URLs: {str(e)}")
@@ -307,6 +305,9 @@ class ProxyConfig:
         """Удаляет неработающие каналы (без конфигов за последние 24 часа)."""
         db = get_db_safe()
         cutoff = datetime.now() - timedelta(days=1)  # последние 24 часа
+        enabled_count = 0
+        disabled_count = 0
+        
         for ch in self.SOURCE_URLS:
             try:
                 history = db.get_channel_history(ch.url, limit=5)
@@ -321,28 +322,76 @@ class ProxyConfig:
                         except:
                             pass
                 total = sum(h.get('total_configs', 0) for h in history)
+                
+                # НЕ отключаем каналы без истории (новые каналы)
+                if not history:
+                    ch.enabled = True
+                    enabled_count += 1
+                    logger.debug(f"Channel {ch.url} has no history, keeping enabled (new channel)")
+                    continue
+                
                 if not recent_success and total == 0:
                     ch.enabled = False
+                    disabled_count += 1
                     logger.info(f"Channel {ch.url} disabled (no configs in last 24h and total=0).")
                 elif not recent_success and total > 0:
+                    # Даём шанс каналам с старыми конфигами
+                    ch.enabled = True
+                    enabled_count += 1
                     logger.debug(f"Channel {ch.url} has old configs but no recent success, keeping enabled.")
                 else:
                     if not ch.enabled:
                         ch.enabled = True
+                        enabled_count += 1
                         logger.info(f"Channel {ch.url} re-enabled (found recent success).")
+                    else:
+                        enabled_count += 1
             except Exception as e:
                 logger.error(f"Error checking channel {ch.url}: {e}")
+                # По умолчанию оставляем включённым
+                ch.enabled = True
+                enabled_count += 1
+        
+        logger.info(f"Channel pruning: {enabled_count} enabled, {disabled_count} disabled")
 
     def get_enabled_channels(self) -> List[ChannelConfig]:
         """Возвращает список включённых каналов."""
-        self._prune_dead_channels()
+        logger.info("Getting enabled channels...")
+        
+        # Сначала применям фильтр здоровья
         self._apply_channel_health_filter()
+        
+        # Затем удаляем мёртвые каналы
+        self._prune_dead_channels()
+        
+        # Фильтруем включённые каналы
         channels = [channel for channel in self.SOURCE_URLS if channel.enabled]
+        
         if not channels:
             self.save_empty_config_file()
             logger.error("No enabled channels found after health filter. Empty config file created.")
+            # Пробуем сбросить состояние здоровья и вернуть все каналы
+            logger.info("Attempting to reset channel health states...")
+            self._reset_channel_health()
+            channels = self.SOURCE_URLS.copy()
+            logger.info(f"Reset health states. Trying with all {len(channels)} channels.")
+        
+        # Сортируем по overall_score
         channels.sort(key=lambda c: c.metrics.overall_score, reverse=True)
+        
+        logger.info(f"✅ Enabled channels: {len(channels)}")
         return channels
+
+    def _reset_channel_health(self) -> None:
+        """Сбрасывает состояние здоровья всех каналов."""
+        try:
+            from channel_quality_analyzer import ChannelQualityAnalyzer
+            analyzer = ChannelQualityAnalyzer()
+            urls = [ch.url for ch in self.SOURCE_URLS]
+            analyzer.reset_channel_states(urls)
+            logger.info(f"Reset health states for {len(urls)} channels")
+        except Exception as e:
+            logger.error(f"Failed to reset channel health: {e}")
 
     def _apply_channel_health_filter(self) -> None:
         """Применяет фильтр здоровья к каналам."""
@@ -353,23 +402,42 @@ class ProxyConfig:
             self._analyzer = ChannelQualityAnalyzer()
         except ImportError as e:
             logger.warning(f"Failed to import ChannelQualityAnalyzer: {e}")
+            # Если не удаётся импортировать, оставляем все каналы включёнными
             return
         
         urls = [ch.url for ch in self.SOURCE_URLS]
         self._analyzer.update_health(urls)
         states: Dict[str, str] = {}
+        active_count = 0
+        recovering_count = 0
+        inactive_count = 0
+        
         for ch in self.SOURCE_URLS:
             state = self._analyzer.get_channel_state(ch.url)
             states[ch.url] = state
-            if state == 'inactive':
-                ch.enabled = False
-                logger.info(f"Channel {ch.url} disabled (state: inactive).")
-            else:
+            
+            # НЕ отключаем каналы, которые помечены как active или recovering
+            if state in ('active', 'recovering'):
                 ch.enabled = True
-                logger.debug(f"Channel {ch.url} enabled (state: {state}).")
-        active_count = sum(1 for s in states.values() if s == 'active')
-        recovering_count = sum(1 for s in states.values() if s == 'recovering')
-        inactive_count = sum(1 for s in states.values() if s == 'inactive')
+                if state == 'active':
+                    active_count += 1
+                else:
+                    recovering_count += 1
+            else:
+                # Для inactive каналов даём ещё один шанс, если это новый канал
+                # Проверяем, есть ли у канала история
+                db = get_db_safe()
+                history = db.get_channel_history(ch.url, limit=1)
+                if not history:
+                    # Новый канал - оставляем включённым
+                    ch.enabled = True
+                    active_count += 1
+                    logger.debug(f"New channel {ch.url} with no history, keeping enabled")
+                else:
+                    ch.enabled = False
+                    inactive_count += 1
+                    logger.debug(f"Channel {ch.url} disabled (state: inactive)")
+        
         logger.info(f"Channel health summary: active={active_count}, recovering={recovering_count}, inactive={inactive_count}")
 
     def update_channel_stats(
