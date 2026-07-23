@@ -42,49 +42,52 @@ from functools import lru_cache
 import aiofiles
 from tqdm import tqdm
 
-from config import ProxyConfig
-from fetch_configs import AsyncConfigFetcher
-from config_validator import ConfigValidator
-from deep_deduplicate import DeepDeduplicator
-from config_quality import ConfigQualityChecker
-from profile_scorer import ProfileScorer
-from active_checker import ActiveChecker
-from parse_fallback import FallbackParser
-from session_pool import SessionPool
-from channel_quality_analyzer import ChannelQualityAnalyzer
-from db import get_db
-
-# Новые импорты
-from sni_probe import SNIProbe
-from reality_sni_hunter import RealitySNIHunter
-from regional_scorer import RegionalScorer
-from regional_stats import RegionalStats
-from sni_filter import SNIFilter
-from weight_updater import WeightUpdater
-from datacenter_detector import is_datacenter_ip
-
-# Импорт для красивого вывода статистики
-from logger_utils import print_summary
-
-# Импорты из user_settings
-from user_settings import (
-    ARCHIVE_MAX_AGE_DAYS,
-    SIMPLE_MAX_AGE_DAYS,
-    SCORE_MIN_THRESHOLD,
-    ACTIVE_CHECKER_WORKERS,
-    TCP_TIMEOUT,
-    HTTP_TIMEOUT,
-    MAX_LATENCY_MS,
-    PER_HOST_LIMIT,
-    ENABLED_PROTOCOLS,
-    USE_MAXIMUM_POWER,
-    SPECIFIC_CONFIG_COUNT,
-    CHANNEL_HEALTH_THRESHOLD,
-    get_settings
-)
-
-# Получаем настройки
-settings = get_settings()
+# Импортируем модули с обработкой возможных ошибок
+try:
+    from config import ProxyConfig
+    from fetch_configs import AsyncConfigFetcher
+    from config_validator import ConfigValidator
+    from deep_deduplicate import DeepDeduplicator
+    from config_quality import ConfigQualityChecker
+    from profile_scorer import ProfileScorer
+    from active_checker import ActiveChecker
+    from parse_fallback import FallbackParser
+    from session_pool import SessionPool
+    from channel_quality_analyzer import ChannelQualityAnalyzer
+    from db import get_db
+    from sni_probe import SNIProbe
+    from reality_sni_hunter import RealitySNIHunter
+    from regional_scorer import RegionalScorer
+    from regional_stats import RegionalStats
+    from sni_filter import SNIFilter
+    from weight_updater import WeightUpdater
+    from datacenter_detector import is_datacenter_ip
+    from logger_utils import print_summary
+    from user_settings import get_settings, get_settings as user_get_settings
+    
+    # Получаем настройки
+    settings = user_get_settings()
+    
+    # Импортируем переменные для обратной совместимости
+    from user_settings import (
+        ARCHIVE_MAX_AGE_DAYS,
+        SIMPLE_MAX_AGE_DAYS,
+        SCORE_MIN_THRESHOLD,
+        ACTIVE_CHECKER_WORKERS,
+        TCP_TIMEOUT,
+        HTTP_TIMEOUT,
+        MAX_LATENCY_MS,
+        PER_HOST_LIMIT,
+        ENABLED_PROTOCOLS,
+        USE_MAXIMUM_POWER,
+        SPECIFIC_CONFIG_COUNT,
+        CHANNEL_HEALTH_THRESHOLD,
+    )
+except ImportError as e:
+    # Фоллбек, если какие-то модули недоступны
+    logger = logging.getLogger(__name__)
+    logger.error(f"Failed to import modules: {e}")
+    sys.exit(1)
 
 # Настройка логирования
 log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
@@ -395,10 +398,6 @@ class OptimizedPipeline:
         except Exception as e:
             logger.error(f"Failed to save simple output: {e}")
 
-    def _safe_load_history(self) -> Dict:
-        """Загружает историю безопасно."""
-        return {}
-
     def _save_channel_stats(self, run_id: int) -> None:
         """Сохраняет статистику каналов."""
         try:
@@ -468,7 +467,7 @@ class OptimizedPipeline:
         return filtered
 
     def _build_probe_shortlist(self, configs: List[str], quality_scores: Dict[str, float]) -> List[str]:
-        """Создаёт短кий список для проверки."""
+        """Создаёт короткий список для проверки."""
         if not configs:
             return []
         probe_budget = max(250, ACTIVE_CHECKER_WORKERS * 6)
@@ -518,6 +517,7 @@ class OptimizedPipeline:
     async def run(self) -> bool:
         """Запускает пайплайн."""
         start_time = time.time()
+        fetcher = None
         try:
             logger.info("=" * 60)
             logger.info("🚀 Starting Proxy-Hunter Pipeline (optimized, async, SQLite)")
@@ -816,6 +816,7 @@ class OptimizedPipeline:
             # Рассчитываем перцентили задержки
             latencies = [r.get('latency', -1) for r in probe_results if r.get('latency', -1) > 0]
             if latencies:
+                import numpy as np
                 run_stats['p50_latency'] = float(np.percentile(latencies, 50))
                 run_stats['p95_latency'] = float(np.percentile(latencies, 95))
                 run_stats['p99_latency'] = float(np.percentile(latencies, 99))
