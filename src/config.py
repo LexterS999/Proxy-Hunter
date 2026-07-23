@@ -25,18 +25,23 @@ def get_settings_safe():
             _settings = get_settings()
         except ImportError as e:
             logger.warning(f"Failed to import settings: {e}. Using defaults.")
-            _settings = type('Settings', (), {
-                'SOURCE_URLS': [
+            # Обновляем структуру заглушки, чтобы она соответствовала новой модели
+            class ChannelSettings:
+                SOURCE_URLS = [
                     "https://t.me/s/SOSkeyNET",
                     "https://t.me/s/GozargahAzad",
                     "https://t.me/s/generalconfiig",
                     "https://t.me/s/kurdconfig",
                     "https://t.me/s/MiTiVPN",
                     "https://t.me/s/WangCai2",
-                ],
-                'USE_MAXIMUM_POWER': True,
-                'SPECIFIC_CONFIG_COUNT': 5000,
-                'ENABLED_PROTOCOLS': {
+                ]
+                USE_MAXIMUM_POWER = True
+                SPECIFIC_CONFIG_COUNT = 5000
+                MAX_CONFIG_AGE_DAYS = 14
+                CHANNEL_HEALTH_THRESHOLD = 30.0
+
+            class ProtocolSettings:
+                ENABLED_PROTOCOLS = {
                     "wireguard://": False,
                     "hysteria2://": True,
                     "vless://": True,
@@ -44,10 +49,13 @@ def get_settings_safe():
                     "ss://": True,
                     "trojan://": True,
                     "tuic://": False,
-                },
-                'MAX_CONFIG_AGE_DAYS': 14,
-                'CHANNEL_HEALTH_THRESHOLD': 30.0
-            })()
+                }
+
+            class Settings:
+                channels = ChannelSettings()
+                protocols = ProtocolSettings()
+
+            _settings = Settings()
     return _settings
 
 settings = get_settings_safe()
@@ -79,7 +87,6 @@ def get_db_safe():
             _db = _FakeDB()
     return _db
 
-
 # ============================================================================
 # DATACLASSES ДЛЯ КОНФИГУРАЦИЙ
 # ============================================================================
@@ -96,7 +103,6 @@ class ChannelMetrics:
     success_count: int = 0
     overall_score: float = 0.0
     protocol_counts: Dict[str, int] = field(default_factory=dict)
-
 
 @dataclass
 class ChannelConfig:
@@ -120,12 +126,12 @@ class ChannelConfig:
         url = url.strip()
         if not url.startswith(('http://', 'https://', 'ssconf://')):
             raise ValueError(f"Invalid URL protocol: {url}")
-        
+
         # Проверяем на потенциально опасные протоколы
         dangerous_protocols = ['javascript:', 'data:', 'file:']
         if any(url.lower().startswith(proto) for proto in dangerous_protocols):
             raise ValueError(f"Dangerous URL protocol: {url}")
-        
+
         return url
 
     def calculate_overall_score(self) -> None:
@@ -153,7 +159,6 @@ class ChannelConfig:
             logger.error(f"Error calculating score for {self.url}: {str(e)}")
             self.metrics.overall_score = 0.0
 
-
 @dataclass
 class ProxyConfig:
     """Основная конфигурация прокси."""
@@ -178,18 +183,19 @@ class ProxyConfig:
         """Инициализирует конфигурацию."""
         # Загружаем настройки безопасно
         settings = get_settings_safe()
-        self.use_maximum_power = settings.USE_MAXIMUM_POWER
-        self.specific_config_count = settings.SPECIFIC_CONFIG_COUNT
-        self.MAX_CONFIG_AGE_DAYS = settings.MAX_CONFIG_AGE_DAYS
-        
+        # Исправлено: используем вложенные атрибуты
+        self.use_maximum_power = settings.channels.use_maximum_power
+        self.specific_config_count = settings.channels.specific_config_count
+        self.MAX_CONFIG_AGE_DAYS = settings.channels.max_config_age_days
+
         self.SUPPORTED_PROTOCOLS = self._initialize_protocols()
-        initial_urls: List[ChannelConfig] = [ChannelConfig(url=url) for url in settings.SOURCE_URLS]
+        initial_urls: List[ChannelConfig] = [ChannelConfig(url=url) for url in settings.channels.source_urls]
         self.SOURCE_URLS = self._remove_duplicate_urls(initial_urls)
         self._initialize_settings()
         self._set_smart_limits()
         self._analyzer = None
         self._apply_region_bonus()
-        
+
         # Логируем загруженные каналы
         logger.info(f"Loaded {len(self.SOURCE_URLS)} channels from settings")
         for ch in self.SOURCE_URLS[:5]:  # Логируем первые 5 каналов
@@ -200,14 +206,16 @@ class ProxyConfig:
     def _initialize_protocols(self) -> Dict[str, Dict]:
         """Инициализирует поддерживаемые протоколы."""
         settings = get_settings_safe()
+        # Исправлено: используем settings.protocols.enabled_protocols
+        enabled_protocols = settings.protocols.enabled_protocols
         return {
-            "wireguard://": {"priority": 1, "aliases": [], "enabled": settings.ENABLED_PROTOCOLS.get("wireguard://", False)},
-            "hysteria2://": {"priority": 2, "aliases": ["hy2://"], "enabled": settings.ENABLED_PROTOCOLS.get("hysteria2://", False)},
-            "vless://": {"priority": 2, "aliases": [], "enabled": settings.ENABLED_PROTOCOLS.get("vless://", False)},
-            "vmess://": {"priority": 1, "aliases": [], "enabled": settings.ENABLED_PROTOCOLS.get("vmess://", False)},
-            "ss://": {"priority": 2, "aliases": [], "enabled": settings.ENABLED_PROTOCOLS.get("ss://", False)},
-            "trojan://": {"priority": 2, "aliases": [], "enabled": settings.ENABLED_PROTOCOLS.get("trojan://", False)},
-            "tuic://": {"priority": 1, "aliases": [], "enabled": settings.ENABLED_PROTOCOLS.get("tuic://", False)}
+            "wireguard://": {"priority": 1, "aliases": [], "enabled": enabled_protocols.get("wireguard://", False)},
+            "hysteria2://": {"priority": 2, "aliases": ["hy2://"], "enabled": enabled_protocols.get("hysteria2://", False)},
+            "vless://": {"priority": 2, "aliases": [], "enabled": enabled_protocols.get("vless://", False)},
+            "vmess://": {"priority": 1, "aliases": [], "enabled": enabled_protocols.get("vmess://", False)},
+            "ss://": {"priority": 2, "aliases": [], "enabled": enabled_protocols.get("ss://", False)},
+            "trojan://": {"priority": 2, "aliases": [], "enabled": enabled_protocols.get("trojan://", False)},
+            "tuic://": {"priority": 1, "aliases": [], "enabled": enabled_protocols.get("tuic://", False)}
         }
 
     def _initialize_settings(self) -> None:
@@ -258,7 +266,6 @@ class ProxyConfig:
                     logger.warning(f"Invalid config skipped: {config}")
                     continue
                 try:
-                    # Учитываем протокол, сервер и порт для дедупликации
                     normalized_url = self._normalize_url(config.url)
                     if normalized_url not in seen_urls:
                         seen_urls[normalized_url] = True
@@ -304,10 +311,10 @@ class ProxyConfig:
     def _prune_dead_channels(self) -> None:
         """Удаляет неработающие каналы (без конфигов за последние 24 часа)."""
         db = get_db_safe()
-        cutoff = datetime.now() - timedelta(days=1)  # последние 24 часа
+        cutoff = datetime.now() - timedelta(days=1)
         enabled_count = 0
         disabled_count = 0
-        
+
         for ch in self.SOURCE_URLS:
             try:
                 history = db.get_channel_history(ch.url, limit=5)
@@ -322,20 +329,18 @@ class ProxyConfig:
                         except:
                             pass
                 total = sum(h.get('total_configs', 0) for h in history)
-                
-                # НЕ отключаем каналы без истории (новые каналы)
+
                 if not history:
                     ch.enabled = True
                     enabled_count += 1
                     logger.debug(f"Channel {ch.url} has no history, keeping enabled (new channel)")
                     continue
-                
+
                 if not recent_success and total == 0:
                     ch.enabled = False
                     disabled_count += 1
                     logger.info(f"Channel {ch.url} disabled (no configs in last 24h and total=0).")
                 elif not recent_success and total > 0:
-                    # Даём шанс каналам с старыми конфигами
                     ch.enabled = True
                     enabled_count += 1
                     logger.debug(f"Channel {ch.url} has old configs but no recent success, keeping enabled.")
@@ -348,37 +353,29 @@ class ProxyConfig:
                         enabled_count += 1
             except Exception as e:
                 logger.error(f"Error checking channel {ch.url}: {e}")
-                # По умолчанию оставляем включённым
                 ch.enabled = True
                 enabled_count += 1
-        
+
         logger.info(f"Channel pruning: {enabled_count} enabled, {disabled_count} disabled")
 
     def get_enabled_channels(self) -> List[ChannelConfig]:
         """Возвращает список включённых каналов."""
         logger.info("Getting enabled channels...")
-        
-        # Сначала применям фильтр здоровья
+
         self._apply_channel_health_filter()
-        
-        # Затем удаляем мёртвые каналы
         self._prune_dead_channels()
-        
-        # Фильтруем включённые каналы
+
         channels = [channel for channel in self.SOURCE_URLS if channel.enabled]
-        
+
         if not channels:
             self.save_empty_config_file()
             logger.error("No enabled channels found after health filter. Empty config file created.")
-            # Пробуем сбросить состояние здоровья и вернуть все каналы
             logger.info("Attempting to reset channel health states...")
             self._reset_channel_health()
             channels = self.SOURCE_URLS.copy()
             logger.info(f"Reset health states. Trying with all {len(channels)} channels.")
-        
-        # Сортируем по overall_score
+
         channels.sort(key=lambda c: c.metrics.overall_score, reverse=True)
-        
         logger.info(f"✅ Enabled channels: {len(channels)}")
         return channels
 
@@ -402,21 +399,19 @@ class ProxyConfig:
             self._analyzer = ChannelQualityAnalyzer()
         except ImportError as e:
             logger.warning(f"Failed to import ChannelQualityAnalyzer: {e}")
-            # Если не удаётся импортировать, оставляем все каналы включёнными
             return
-        
+
         urls = [ch.url for ch in self.SOURCE_URLS]
         self._analyzer.update_health(urls)
         states: Dict[str, str] = {}
         active_count = 0
         recovering_count = 0
         inactive_count = 0
-        
+
         for ch in self.SOURCE_URLS:
             state = self._analyzer.get_channel_state(ch.url)
             states[ch.url] = state
-            
-            # НЕ отключаем каналы, которые помечены как active или recovering
+
             if state in ('active', 'recovering'):
                 ch.enabled = True
                 if state == 'active':
@@ -424,12 +419,10 @@ class ProxyConfig:
                 else:
                     recovering_count += 1
             else:
-                # Для inactive каналов даём ещё один шанс, если это новый канал
-                # Проверяем, есть ли у канала история
                 db = get_db_safe()
                 history = db.get_channel_history(ch.url, limit=1)
+
                 if not history:
-                    # Новый канал - оставляем включённым
                     ch.enabled = True
                     active_count += 1
                     logger.debug(f"New channel {ch.url} with no history, keeping enabled")
@@ -437,7 +430,7 @@ class ProxyConfig:
                     ch.enabled = False
                     inactive_count += 1
                     logger.debug(f"Channel {ch.url} disabled (state: inactive)")
-        
+
         logger.info(f"Channel health summary: active={active_count}, recovering={recovering_count}, inactive={inactive_count}")
 
     def update_channel_stats(
