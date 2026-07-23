@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 
 """
-Оптимизированный пайплайн Proxy-Hunter с улучшенной оценкой,
-активной проверкой (асинхронной), кешированием, graceful shutdown,
-и использованием aiofiles для всех файловых операций.
+Оптимизированный пайплайн Proxy-Hunter с:
+- Улучшенной оценкой
+- Асинхронной активной проверкой
+- Кешированием
+- Graceful shutdown
+- Autoclose для всех асинхронных ресурсов
+- Transient error handling
+- Использованием aiofiles для всех файловых операций
 
 Добавлены:
 - SNI Probe для тестирования с несколькими SNI
@@ -12,13 +17,12 @@
 - Интеграция RealitySNIHunter
 - Автоматическое обновление весов
 - Детекция датацентров (штраф/бонус)
-- Фильтрация по возрасту профилей (14 дней для архива, 3 дня для простого вывода)
+- Фильтрация по возрасту профилей
 - Красивый итоговый вывод статистики
 """
 
 import sys
 import os
-from db import HistoryDB, _compress, _decompress
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import logging
@@ -30,9 +34,10 @@ import asyncio
 import shutil
 import signal
 from pathlib import Path
-from typing import List, Dict, Optional, Set
+from typing import List, Dict, Optional, Set, Any
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 import aiofiles
 from tqdm import tqdm
@@ -47,7 +52,7 @@ from active_checker import ActiveChecker
 from parse_fallback import FallbackParser
 from session_pool import SessionPool
 from channel_quality_analyzer import ChannelQualityAnalyzer
-from db import get_db  # для доступа к БД
+from db import get_db
 
 # Новые импорты
 from sni_probe import SNIProbe
@@ -61,7 +66,7 @@ from datacenter_detector import is_datacenter_ip
 # Импорт для красивого вывода статистики
 from logger_utils import print_summary
 
-# Импорты из обновлённого user_settings
+# Импорты из user_settings
 from user_settings import (
     ARCHIVE_MAX_AGE_DAYS,
     SIMPLE_MAX_AGE_DAYS,
@@ -75,44 +80,26 @@ from user_settings import (
     USE_MAXIMUM_POWER,
     SPECIFIC_CONFIG_COUNT,
     CHANNEL_HEALTH_THRESHOLD,
-    CHANNEL_MIN_CONFIGS,
-    CHANNEL_MIN_VALID_RATIO,
-    CHANNEL_MIN_PROTOCOLS,
-    CHANNEL_HISTORY_DAYS,
-    CHANNEL_RECOVERING_TREND_THRESHOLD,
-    CHANNEL_MIN_RECENT_DAYS_FOR_TREND,
-    CHANNEL_WHITELIST,
-    SCORE_WEIGHTS,
-    DECAY_PERIOD_HOURS,
-    MIN_RUNS_FOR_ADAPTIVE_THRESHOLDS,
-    ANOMALY_Z_SCORE_THRESHOLD,
-    ANOMALY_IQR_MULTIPLIER,
-    ANOMALY_DROP_THRESHOLD,
-    MAX_HISTORY_RUNS,
-    SAVE_INTERVAL_SECONDS,
-    ENCRYPT_IPS,
-    ENCRYPTION_SALT,
-    TELEGRAM_CALLS_PER_SECOND,
-    MAX_RESPONSE_SIZE_BYTES,
-    CHANNEL_RETRY_ATTEMPTS,
-    CHANNEL_RETRY_BASE_DELAY,
-    CHANNEL_RETRY_MAX_DELAY,
-    CHANNEL_RETRY_DEADLINE,
+    get_settings
 )
 
-# ===== ИЗМЕНЕНИЕ: настройка логирования с учётом переменной окружения =====
+# Получаем настройки
+settings = get_settings()
+
+# Настройка логирования
 log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
 logging.basicConfig(
     level=logging.DEBUG if log_level == 'DEBUG' else logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
-    stream=sys.stdout   # чтобы всё шло в stdout, а не в stderr
+    stream=sys.stdout
 )
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class ParsedConfig:
+    """Распарсенная конфигурация."""
     raw: str
     protocol: str
     server: str
@@ -134,6 +121,7 @@ class ParsedConfig:
 
     @property
     def dedup_key(self) -> str:
+        """Ключ для дедупликации (учитывает протокол)."""
         return f"{self.server}:{self.port}:{self.protocol}:{self.credential}"
 
     @property
@@ -146,7 +134,9 @@ class ParsedConfig:
         return f"{self.protocol}:{prefix}"
 
 
+@lru_cache(maxsize=10000)
 def parse_config_once(raw: str) -> Optional[ParsedConfig]:
+    """Парсит конфиг один раз (кешируется)."""
     try:
         data, method = FallbackParser.parse_with_stats(raw)
         if not data:
@@ -198,6 +188,7 @@ def parse_config_once(raw: str) -> Optional[ParsedConfig]:
 
 
 class OptimizedPipeline:
+    """Оптимизированный пайплайн с autoclose и обработкой ошибок."""
     def __init__(self) -> None:
         self.config = ProxyConfig()
         self.region = self.config.region
@@ -213,10 +204,12 @@ class OptimizedPipeline:
         self.channel_analyzer: Optional[ChannelQualityAnalyzer] = None
         self._shutdown_requested = False
         self._state: Dict = {}
-        self.db = HistoryDB()
+        self.db = get_db()
         self.ARCHIVE_RETENTION_DAYS = 7
         self.checker_cache: Optional[ActiveChecker] = None
         self._parsed_cache: Dict[str, ParsedConfig] = {}
+        self._session_pool = SessionPool()
+        
         # Новые компоненты
         self.sni_probe = SNIProbe(timeout=5.0)
         self.reality_hunter = RealitySNIHunter(xray_core_path="xray", timeout=5.0)
@@ -229,6 +222,7 @@ class OptimizedPipeline:
         self._setup_signal_handlers()
 
     def _check_dependencies(self) -> None:
+        """Проверяет наличие зависимостей."""
         missing: List[str] = []
         try:
             import aiohttp
@@ -257,13 +251,14 @@ class OptimizedPipeline:
         try:
             import maxminddb
         except ImportError:
-            missing.append("maxminddb")  # для детекции датацентров
+            missing.append("maxminddb")
         if missing:
             logger.error(f"Missing required dependencies: {', '.join(missing)}")
             logger.error("Please install: pip install -r requirements.txt")
             sys.exit(1)
 
     def _setup_signal_handlers(self) -> None:
+        """Настраивает обработчики сигналов для graceful shutdown."""
         def handler(sig: int, frame) -> None:
             logger.info(f"Received signal {sig}, initiating graceful shutdown...")
             self._shutdown_requested = True
@@ -271,9 +266,11 @@ class OptimizedPipeline:
         signal.signal(signal.SIGTERM, handler)
 
     def _get_cache_key(self, config: str) -> str:
+        """Возвращает кеш-ключ для конфига."""
         return hashlib.md5(config.encode()).hexdigest()
 
     def _get_or_parse_config(self, raw: str) -> Optional[ParsedConfig]:
+        """Возвращает распарсенный конфиг из кеша или парсит заново."""
         cache_key = self._get_cache_key(raw)
         if cache_key in self._parsed_cache:
             return self._parsed_cache[cache_key]
@@ -283,17 +280,19 @@ class OptimizedPipeline:
         return parsed
 
     async def _load_parsed_cache_async(self) -> Dict:
+        """Загружает кеш парсинга асинхронно."""
         if os.path.exists(self.parsed_cache_file):
             try:
                 async with aiofiles.open(self.parsed_cache_file, 'r') as f:
                     content = await f.read()
                     if content:
                         return json.loads(content)
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to load parsed cache: {e}")
         return {}
 
     async def _save_parsed_cache_async(self, cache: Dict) -> None:
+        """Сохраняет кеш парсинга асинхронно."""
         try:
             Path(self.parsed_cache_file).parent.mkdir(parents=True, exist_ok=True)
             async with aiofiles.open(self.parsed_cache_file, 'w') as f:
@@ -302,16 +301,18 @@ class OptimizedPipeline:
             logger.warning(f"Failed to save parsed cache: {e}")
 
     async def _load_name_mapping_async(self) -> Dict[str, str]:
+        """Загружает маппинг имён асинхронно."""
         if os.path.exists(self.name_mapping_file):
             try:
                 async with aiofiles.open(self.name_mapping_file, 'r', encoding='utf-8') as f:
                     content = await f.read()
                     return json.loads(content)
-            except:
+            except Exception:
                 pass
         return {}
 
     async def _save_name_mapping_async(self, mapping: Dict[str, str]) -> None:
+        """Сохраняет маппинг имён асинхронно."""
         try:
             Path(self.name_mapping_file).parent.mkdir(parents=True, exist_ok=True)
             async with aiofiles.open(self.name_mapping_file, 'w', encoding='utf-8') as f:
@@ -320,12 +321,14 @@ class OptimizedPipeline:
             logger.error(f"Failed to save name mapping: {e}")
 
     def _get_config_key(self, config: str) -> str:
+        """Возвращает ключ для конфига (учитывает протокол)."""
         parsed = self._get_or_parse_config(config)
         if parsed:
             return hashlib.md5(parsed.dedup_key.encode()).hexdigest()
         return hashlib.md5(config.encode()).hexdigest()
 
     def _generate_name(self, config: str) -> str:
+        """Генерирует имя для конфига."""
         try:
             protocol = config.split('://')[0].upper()
             key = self._get_config_key(config)
@@ -334,6 +337,7 @@ class OptimizedPipeline:
             return f"config-{hashlib.md5(config.encode()).hexdigest()[:8]}"
 
     async def _load_archive_async(self) -> List[str]:
+        """Загружает архив конфигов асинхронно."""
         if not os.path.exists(self.output_file):
             return []
         try:
@@ -345,6 +349,7 @@ class OptimizedPipeline:
             return []
 
     async def _save_archive_with_names_async(self, configs: List[str], mapping: Dict[str, str]) -> None:
+        """Сохраняет архив с именами асинхронно."""
         for cfg in configs:
             key = self._get_config_key(cfg)
             if key not in mapping:
@@ -370,6 +375,7 @@ class OptimizedPipeline:
             logger.error(f"Failed to save archive: {e}")
 
     async def _save_simple_async(self, configs: List[str], mapping: Dict[str, str]) -> None:
+        """Сохраняет простой вывод асинхронно."""
         lines = []
         for cfg in configs:
             key = self._get_config_key(cfg)
@@ -390,9 +396,11 @@ class OptimizedPipeline:
             logger.error(f"Failed to save simple output: {e}")
 
     def _safe_load_history(self) -> Dict:
+        """Загружает историю безопасно."""
         return {}
 
     def _save_channel_stats(self, run_id: int) -> None:
+        """Сохраняет статистику каналов."""
         try:
             for ch in self.config.SOURCE_URLS:
                 m = ch.metrics
@@ -414,6 +422,7 @@ class OptimizedPipeline:
             logger.error(f"Failed to save channel stats: {e}")
 
     def _refresh_channel_health(self) -> None:
+        """Обновляет состояние здоровья каналов."""
         try:
             self.channel_analyzer = ChannelQualityAnalyzer()
             urls = [ch.url for ch in self.config.SOURCE_URLS]
@@ -434,39 +443,32 @@ class OptimizedPipeline:
         except Exception as e:
             logger.warning(f"Failed to refresh channel health: {e}")
 
-    # ========== НОВЫЙ МЕТОД: фильтрация по возрасту с учётом скора ==========
     def _filter_by_age_with_score(self, configs: List[str], max_age_days: int, score_threshold: int = 80) -> List[str]:
-        """
-        Фильтрует список конфигов, оставляя только те, у которых last_seen
-        не старше max_age_days дней, ИЛИ профиль имеет высокий скор (> score_threshold).
-        """
+        """Фильтрует конфиги по возрасту и скора."""
         if max_age_days <= 0:
             return []
-        db = get_db()
         cutoff = datetime.now() - timedelta(days=max_age_days)
         filtered = []
         for cfg in configs:
             key = self._get_config_key(cfg)
-            last_seen = db.get_profile_last_seen(key)
+            last_seen = self.db.get_profile_last_seen(key)
             if last_seen:
                 try:
                     last_dt = datetime.fromisoformat(last_seen)
                     if last_dt >= cutoff:
                         filtered.append(cfg)
                         continue
-                    # Если старый, но скор высокий -> оставляем
-                    profile = db.get_profile(key)
+                    profile = self.db.get_profile(key)
                     if profile and profile.get('overall_score', 0) > score_threshold:
                         filtered.append(cfg)
                         continue
                 except:
                     pass
-            # Если нет last_seen, считаем новым -> пропускаем
             filtered.append(cfg)
         return filtered
 
-
     def _build_probe_shortlist(self, configs: List[str], quality_scores: Dict[str, float]) -> List[str]:
+        """Создаёт短кий список для проверки."""
         if not configs:
             return []
         probe_budget = max(250, ACTIVE_CHECKER_WORKERS * 6)
@@ -500,17 +502,23 @@ class OptimizedPipeline:
         return shortlist
 
     async def save_state(self) -> None:
+        """Сохраняет состояние перед выключением."""
         logger.info("Saving state before shutdown...")
-        if hasattr(self.deduplicator, '_bloom'):
-            try:
-                await self.deduplicator._bloom.save()
-            except Exception as e:
-                logger.warning(f"Failed to save bloom filter state: {e}")
+        try:
+            if hasattr(self.deduplicator, '_bloom'):
+                try:
+                    await self.deduplicator._bloom.save()
+                except Exception as e:
+                    logger.warning(f"Failed to save bloom filter state: {e}")
+            await self._session_pool.close_all()
+        except Exception as e:
+            logger.error(f"Error saving state: {e}")
         logger.info("State saved.")
 
     async def run(self) -> bool:
+        """Запускает пайплайн."""
+        start_time = time.time()
         try:
-            start_time = time.time()
             logger.info("=" * 60)
             logger.info("🚀 Starting Proxy-Hunter Pipeline (optimized, async, SQLite)")
             logger.info("=" * 60)
@@ -518,9 +526,16 @@ class OptimizedPipeline:
             # Шаг 1: Сбор
             logger.info("📡 Fetching configurations...")
             fetcher = AsyncConfigFetcher(self.config)
-            raw_configs = await fetcher.fetch_all()
+            try:
+                raw_configs = await fetcher.fetch_all()
+            except Exception as e:
+                logger.error(f"Failed to fetch configs: {e}")
+                await fetcher.close()
+                return False
+            
             if self._shutdown_requested:
                 await self.save_state()
+                await fetcher.close()
                 return False
 
             run_stats = {
@@ -543,6 +558,7 @@ class OptimizedPipeline:
 
             if not raw_configs:
                 logger.error("No configs fetched.")
+                await fetcher.close()
                 return False
             logger.info(f"✅ Raw configs: {len(raw_configs)}")
 
@@ -551,7 +567,6 @@ class OptimizedPipeline:
             parsed_cache = await self._load_parsed_cache_async()
             valid_configs = []
             parse_stats = {'strict': 0, 'heuristic': 0, 'failed': 0}
-            # ===== ИЗМЕНЕНИЕ: tqdm адаптирован для неинтерактивного режима =====
             with tqdm(total=len(raw_configs), desc="Parsing configs",
                       file=sys.stderr, mininterval=0.5, ncols=80, leave=False) as pbar:
                 for cfg in raw_configs:
@@ -575,16 +590,19 @@ class OptimizedPipeline:
 
             if self._shutdown_requested:
                 await self.save_state()
+                await fetcher.close()
                 return False
+
             await self._save_parsed_cache_async(parsed_cache)
             logger.info(f"✅ Valid configs: {len(valid_configs)}")
             logger.info(f"   Parse stats: strict={parse_stats['strict']}, heuristic={parse_stats['heuristic']}, failed={parse_stats['failed']}")
 
             if not valid_configs:
                 logger.error("No valid configs found.")
+                await fetcher.close()
                 return False
 
-            # Шаг 2.1: SNI-фильтрация (эмуляция блокировок)
+            # Шаг 2.1: SNI-фильтрация
             logger.info("🔍 Applying SNI filtering (Buildcage emulation)...")
             filtered_by_sni = []
             for cfg in valid_configs:
@@ -628,11 +646,13 @@ class OptimizedPipeline:
 
             if self._shutdown_requested:
                 await self.save_state()
+                await fetcher.close()
                 return False
             logger.info(f"✅ Passively scored {len(scored_configs)} configs")
 
             if not scored_configs:
                 logger.error("No configs scored.")
+                await fetcher.close()
                 return False
 
             filtered = [item for item in scored_configs if item['score'] >= SCORE_MIN_THRESHOLD]
@@ -643,9 +663,10 @@ class OptimizedPipeline:
                 logger.info(f"✅ After lowered filter: {len(filtered)}")
             if self._shutdown_requested or not filtered:
                 await self.save_state()
+                await fetcher.close()
                 return False
 
-            # Шаг 4: Дедупликация до активной проверки (сокращает сеть без потери качества)
+            # Шаг 4: Дедупликация до активной проверки
             logger.info("🧹 Deep deduplication before active probing...")
             quality_scores = {item['config']: item['score'] for item in filtered}
             deduped_candidates = await self.deduplicator.deduplicate_configs_async(
@@ -657,15 +678,23 @@ class OptimizedPipeline:
             if self._shutdown_requested or not deduped_candidates:
                 if self._shutdown_requested:
                     await self.save_state()
+                await fetcher.close()
                 return False
 
-            # Шаг 5: Гибридная активная проверка только лучших кандидатов
-            logger.info("🔌 Hybrid active checking on top passive candidates...")
+            # Шаг 5: Активная проверка
+            logger.info("🔌 Active checking on top passive candidates...")
             if self.checker_cache is None:
                 self.checker_cache = ActiveChecker(timeout=TCP_TIMEOUT, max_workers=ACTIVE_CHECKER_WORKERS)
             probe_shortlist = self._build_probe_shortlist(deduped_candidates, quality_scores)
             logger.info(f"   Probe shortlist: {len(probe_shortlist)} / {len(deduped_candidates)}")
-            probe_results = await self.checker_cache.check_batch(probe_shortlist)
+            try:
+                probe_results = await self.checker_cache.check_batch(probe_shortlist)
+            except Exception as e:
+                logger.error(f"Active checking failed: {e}")
+                await self.save_state()
+                await fetcher.close()
+                return False
+            
             probe_map = {item['config']: item for item in probe_results}
 
             probe_records = []
@@ -720,7 +749,10 @@ class OptimizedPipeline:
                 })
 
             if probe_records:
-                self.db.add_probe_results_batch(probe_records)
+                try:
+                    self.db.add_probe_results_batch(probe_records)
+                except Exception as e:
+                    logger.error(f"Failed to save probe records: {e}")
 
             deduped = list(dict.fromkeys(good_configs))
             logger.info(f"✅ Selected after hybrid validation: {len(deduped)}")
@@ -728,26 +760,21 @@ class OptimizedPipeline:
                 logger.warning("No configs confirmed by active checks; using strongest passive fallbacks.")
                 deduped = sorted(deduped_candidates, key=lambda c: quality_scores.get(c, 0.0), reverse=True)[:100]
 
-            # ========== ИЗМЕНЕНО: фильтрация по возрасту с учётом высокого скора ==========
+            # Шаг 6: Фильтрация по возрасту
             logger.info(f"⏳ Filtering configs by age (archive: {ARCHIVE_MAX_AGE_DAYS} days, simple: {SIMPLE_MAX_AGE_DAYS} days)")
-
             archive_configs = self._filter_by_age_with_score(deduped, ARCHIVE_MAX_AGE_DAYS)
             simple_configs = self._filter_by_age_with_score(deduped, SIMPLE_MAX_AGE_DAYS)
             logger.info(f"   Archive configs: {len(archive_configs)}")
             logger.info(f"   Simple configs: {len(simple_configs)}")
 
-            # ========== ИЗМЕНЕНО: загрузка старого архива с фильтрацией ==========
             old_archive = await self._load_archive_async()
             old_archive_filtered = self._filter_by_age_with_score(old_archive, ARCHIVE_MAX_AGE_DAYS)
             logger.info(f"   Old archive filtered: {len(old_archive)} -> {len(old_archive_filtered)}")
 
-            # ========== ИЗМЕНЕНО: мягкий вывод ==========
-            # Для простого вывода — только топ-100 со скором > 50
             sorted_by_score = sorted(simple_configs, key=lambda c: quality_scores.get(c, 0), reverse=True)
             simple_top = [c for c in sorted_by_score if quality_scores.get(c, 0) > 50][:100]
             logger.info(f"   Simple output (top-100, score>50): {len(simple_top)} configs")
 
-            # Для архива — все конфиги со скором > 0, отсортированные по score + last_seen
             archive_sorted = sorted(archive_configs, key=lambda c: (quality_scores.get(c, 0), self._get_config_key(c)), reverse=True)
             archive_all = [c for c in archive_sorted if quality_scores.get(c, 0) > 0]
             logger.info(f"   Archive output (score>0): {len(archive_all)} configs")
@@ -760,148 +787,68 @@ class OptimizedPipeline:
                 if key not in name_mapping:
                     name_mapping[key] = self._generate_name(cfg)
 
-            # Объединяем с отфильтрованным старым архивом
             merged_archive = []
             seen_keys = set()
-            # Старые (уже отфильтрованы)
             for cfg in old_archive_filtered:
                 key = self._get_config_key(cfg)
                 if key not in seen_keys:
                     merged_archive.append(cfg)
                     seen_keys.add(key)
-            # Новые
             for cfg in archive_all:
                 key = self._get_config_key(cfg)
                 if key not in seen_keys:
                     merged_archive.append(cfg)
                     seen_keys.add(key)
 
-            logger.info(f"🔄 Merged archive: {len(old_archive_filtered)} old + {len(archive_all)} new → {len(merged_archive)} unique")
-
+            # Сохраняем результаты
             await self._save_archive_with_names_async(merged_archive, name_mapping)
-            await self._save_simple_async(simple_top, name_mapping)  # сохраняем только топ-100
+            await self._save_simple_async(simple_top, name_mapping)
 
-            logger.info(f"✅ Archive saved: {len(merged_archive)} configs in {self.output_file}")
-            logger.info(f"✅ Simple output saved: {len(simple_top)} configs in {self.simple_file}")
+            # Обновляем веса
+            self.weight_updater.update_weights(quality_scores)
 
-            # Шаг 8: Xray конфиг
-            logger.info("📦 Generating Xray balanced config...")
-            try:
-                from xray_balancer import ConfigToXray
-                converter = ConfigToXray(self.output_file, 'configs/xray_loadbalanced_config.json')
-                converter.process_configs()
-            except Exception as e:
-                logger.warning(f"Xray balancer failed: {e}")
-
-            # Шаг 9: Обновление статистики
-            logger.info("📊 Updating run statistics in SQLite...")
-            final_stats = {
-                'total_raw': len(raw_configs),
-                'total_valid': len(valid_configs),
-                'total_final': len(merged_archive),
-                'avg_score': sum(item['score'] for item in filtered) / len(filtered) if filtered else 0,
-                'protocols': {},
-                'geo_distribution': {},
-                'anomalies': [],
-                'p50_latency': 0,
-                'p95_latency': 0,
-                'p99_latency': 0,
-                'success_rate': len(good_configs) / len(filtered) if filtered else 0
-            }
-            with self.db._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    UPDATE runs SET
-                        total_raw = ?,
-                        total_valid = ?,
-                        total_final = ?,
-                        avg_score = ?,
-                        p50_latency = ?,
-                        p95_latency = ?,
-                        p99_latency = ?,
-                        success_rate = ?,
-                        protocols = ?,
-                        geo_distribution = ?,
-                        anomalies = ?
-                    WHERE id = ?
-                ''', (
-                    final_stats['total_raw'],
-                    final_stats['total_valid'],
-                    final_stats['total_final'],
-                    final_stats['avg_score'],
-                    final_stats.get('p50_latency', 0),
-                    final_stats.get('p95_latency', 0),
-                    final_stats.get('p99_latency', 0),
-                    final_stats['success_rate'],
-                    _compress(final_stats.get('protocols', {})),
-                    _compress(final_stats.get('geo_distribution', {})),
-                    _compress(final_stats.get('anomalies', [])),
-                    run_id
-                ))
-                conn.commit()
-            logger.info("✅ Run statistics updated.")
-
-            # Шаг 10: Периодическое обновление весов
-            logger.info("⚖️ Updating regional weights...")
-            try:
-                self.weight_updater.update()
-            except Exception as e:
-                logger.warning(f"Weight update failed: {e}")
-
-            # ===== НОВОЕ: Вывод итоговой статистики =====
-            active_count = sum(1 for ch in self.config.SOURCE_URLS if ch.enabled)
-            recovering_count = sum(1 for ch in self.config.SOURCE_URLS if not ch.enabled and self.channel_analyzer and self.channel_analyzer.get_channel_state(ch.url) == 'recovering')
-            inactive_count = sum(1 for ch in self.config.SOURCE_URLS if not ch.enabled and self.channel_analyzer and self.channel_analyzer.get_channel_state(ch.url) == 'inactive')
-
-            summary_stats = {
-                'raw': len(raw_configs),
-                'valid': len(valid_configs),
-                'active_ok': len(good_configs),
-                'deduped': len(deduped),
-                'archive': len(merged_archive),
-                'simple': len(simple_top),
-                'protocols': parse_stats,
-                'quality': {
-                    'avg_score': sum(item['score'] for item in filtered) / len(filtered) if filtered else 0,
-                    'median_score': sorted([item['score'] for item in filtered])[len(filtered)//2] if filtered else 0,
-                    'min_score': min([item['score'] for item in filtered]) if filtered else 0,
-                    'max_score': max([item['score'] for item in filtered]) if filtered else 0,
-                },
-                'channels': {
-                    'active': active_count,
-                    'recovering': recovering_count,
-                    'inactive': inactive_count,
-                    'total': len(self.config.SOURCE_URLS),
-                }
-            }
-            print_summary(summary_stats)
-
-            elapsed = time.time() - start_time
-            logger.info("=" * 60)
-            logger.info(f"✅ Pipeline completed in {elapsed:.2f}s")
-            logger.info(f"📊 Final configs in archive: {len(merged_archive)}")
-            logger.info("=" * 60)
+            # Выводим статистику
+            run_stats['total_valid'] = len(valid_configs)
+            run_stats['total_final'] = len(deduped)
+            run_stats['avg_score'] = sum(quality_scores.values()) / len(quality_scores) if quality_scores else 0.0
+            run_stats['success_rate'] = sum(1 for r in probe_results if r.get('success')) / len(probe_results) if probe_results else 0.0
+            
+            # Рассчитываем перцентили задержки
+            latencies = [r.get('latency', -1) for r in probe_results if r.get('latency', -1) > 0]
+            if latencies:
+                run_stats['p50_latency'] = float(np.percentile(latencies, 50))
+                run_stats['p95_latency'] = float(np.percentile(latencies, 95))
+                run_stats['p99_latency'] = float(np.percentile(latencies, 99))
+            
+            # Сохраняем статистику запуска
+            self.db.add_run(run_stats)
+            
+            # Очищаем старые данные
+            self.db.cleanup_old_data()
+            
+            # Выводим итоговую статистику
+            print_summary(run_stats, len(merged_archive), len(simple_top))
+            
+            logger.info(f"✅ Pipeline completed in {time.time() - start_time:.2f} seconds")
             return True
 
-        except KeyboardInterrupt:
-            logger.warning("⚠️ Pipeline interrupted by user.")
-            await self.save_state()
-            return False
         except Exception as e:
-            logger.error(f"❌ Pipeline failed: {e}\n{traceback.format_exc()}")
+            logger.error(f"Pipeline failed: {e}")
+            logger.error(traceback.format_exc())
             return False
         finally:
+            # Autoclose для всех ресурсов
             try:
-                await SessionPool().close()
+                if fetcher:
+                    await fetcher.close()
+                if self.checker_cache:
+                    await self.checker_cache.close()
+                await self.save_state()
             except Exception as e:
-                logger.warning(f"Error closing session pool: {e}")
+                logger.error(f"Error during cleanup: {e}")
 
 
-def main() -> None:
+if __name__ == "__main__":
     pipeline = OptimizedPipeline()
     success = asyncio.run(pipeline.run())
     sys.exit(0 if success else 1)
-
-
-if __name__ == '__main__':
-    main()
