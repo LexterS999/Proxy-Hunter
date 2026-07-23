@@ -2,32 +2,37 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set, Tuple
 from datetime import datetime, timedelta
 import re
 from urllib.parse import urlparse
 from dataclasses import dataclass, field
 import logging
 from pathlib import Path
-from math import inf
-import numpy as np
+from functools import lru_cache
 
 from db import get_db
-
 from user_settings import (
     SOURCE_URLS, USE_MAXIMUM_POWER, SPECIFIC_CONFIG_COUNT, ENABLED_PROTOCOLS,
-    MAX_CONFIG_AGE_DAYS, CHANNEL_HEALTH_THRESHOLD
+    MAX_CONFIG_AGE_DAYS, CHANNEL_HEALTH_THRESHOLD, get_settings
 )
 from channel_quality_analyzer import ChannelQualityAnalyzer
 
+# Получаем настройки
+settings = get_settings()
 REGION = os.getenv('PROXY_HUNTER_REGION', 'RU')
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
+# ============================================================================
+# DATACLASSES ДЛЯ КОНФИГУРАЦИЙ
+# ============================================================================
+
 @dataclass
 class ChannelMetrics:
+    """Метрики канала."""
     total_configs: int = 0
     valid_configs: int = 0
     unique_configs: int = 0
@@ -39,25 +44,38 @@ class ChannelMetrics:
     protocol_counts: Dict[str, int] = field(default_factory=dict)
 
 
+@dataclass
 class ChannelConfig:
-    def __init__(self, url: str) -> None:
-        self.url: str = self._validate_url(url)
-        self.enabled: bool = True
-        self.metrics: ChannelMetrics = ChannelMetrics()
-        self.is_telegram: bool = bool(re.match(r'^https://t\.me/s/', self.url))
-        self.error_count: int = 0
-        self.last_check_time: Optional[datetime] = None
-        self.region_bonus: float = 0.0
+    """Конфигурация канала."""
+    url: str
+    enabled: bool = True
+    metrics: ChannelMetrics = field(default_factory=ChannelMetrics)
+    is_telegram: bool = False
+    error_count: int = 0
+    last_check_time: Optional[datetime] = None
+    region_bonus: float = 0.0
+
+    def __post_init__(self):
+        self.url = self._validate_url(self.url)
+        self.is_telegram = bool(re.match(r'^https://t\.me/s/', self.url))
 
     def _validate_url(self, url: str) -> str:
+        """Валидирует URL канала."""
         if not url or not isinstance(url, str):
-            raise ValueError("Invalid URL")
+            raise ValueError("Invalid URL: empty or not a string")
         url = url.strip()
         if not url.startswith(('http://', 'https://', 'ssconf://')):
-            raise ValueError("Invalid URL protocol")
+            raise ValueError(f"Invalid URL protocol: {url}")
+        
+        # Проверяем на потенциально опасные протоколы
+        dangerous_protocols = ['javascript:', 'data:', 'file:']
+        if any(url.lower().startswith(proto) for proto in dangerous_protocols):
+            raise ValueError(f"Dangerous URL protocol: {url}")
+        
         return url
 
     def calculate_overall_score(self) -> None:
+        """Рассчитывает общий score канала."""
         try:
             total_attempts = max(1, self.metrics.success_count + self.metrics.fail_count)
             reliability_score = (self.metrics.success_count / total_attempts) * 35
@@ -82,22 +100,38 @@ class ChannelConfig:
             self.metrics.overall_score = 0.0
 
 
+@dataclass
 class ProxyConfig:
-    def __init__(self) -> None:
-        self.use_maximum_power: bool = USE_MAXIMUM_POWER
-        self.specific_config_count: int = SPECIFIC_CONFIG_COUNT
-        self.MAX_CONFIG_AGE_DAYS: int = MAX_CONFIG_AGE_DAYS
-        self.region: str = REGION
+    """Основная конфигурация прокси."""
+    use_maximum_power: bool = USE_MAXIMUM_POWER
+    specific_config_count: int = SPECIFIC_CONFIG_COUNT
+    MAX_CONFIG_AGE_DAYS: int = MAX_CONFIG_AGE_DAYS
+    region: str = REGION
+    SOURCE_URLS: List[ChannelConfig] = field(default_factory=list)
+    SUPPORTED_PROTOCOLS: Dict[str, Dict] = field(default_factory=dict)
+    CHANNEL_RETRY_LIMIT: int = 10
+    CHANNEL_ERROR_THRESHOLD: float = 0.7
+    OUTPUT_FILE: str = 'configs/proxy_configs.txt'
+    STATS_FILE: str = 'configs/channel_stats.json'
+    MAX_RETRIES: int = 5
+    RETRY_DELAY: int = 15
+    REQUEST_TIMEOUT: int = 60
+    HEADERS: Dict[str, str] = field(default_factory=dict)
+    MIN_CONFIGS_PER_CHANNEL: int = 1
+    MAX_CONFIGS_PER_CHANNEL: int = 20000
 
+    def __post_init__(self):
+        """Инициализирует конфигурацию."""
+        self.SUPPORTED_PROTOCOLS = self._initialize_protocols()
         initial_urls: List[ChannelConfig] = [ChannelConfig(url=url) for url in SOURCE_URLS]
-        self.SOURCE_URLS: List[ChannelConfig] = self._remove_duplicate_urls(initial_urls)
-        self.SUPPORTED_PROTOCOLS: Dict[str, Dict] = self._initialize_protocols()
+        self.SOURCE_URLS = self._remove_duplicate_urls(initial_urls)
         self._initialize_settings()
         self._set_smart_limits()
         self._analyzer: Optional[ChannelQualityAnalyzer] = None
         self._apply_region_bonus()
 
     def _initialize_protocols(self) -> Dict[str, Dict]:
+        """Инициализирует поддерживаемые протоколы."""
         return {
             "wireguard://": {"priority": 1, "aliases": [], "enabled": ENABLED_PROTOCOLS.get("wireguard://", False)},
             "hysteria2://": {"priority": 2, "aliases": ["hy2://"], "enabled": ENABLED_PROTOCOLS.get("hysteria2://", False)},
@@ -109,14 +143,15 @@ class ProxyConfig:
         }
 
     def _initialize_settings(self) -> None:
-        self.CHANNEL_RETRY_LIMIT: int = min(10, max(1, 5))
-        self.CHANNEL_ERROR_THRESHOLD: float = min(0.9, max(0.1, 0.7))
-        self.OUTPUT_FILE: str = 'configs/proxy_configs.txt'
-        self.STATS_FILE: str = 'configs/channel_stats.json'
-        self.MAX_RETRIES: int = min(10, max(1, 5))
-        self.RETRY_DELAY: int = min(60, max(5, 15))
-        self.REQUEST_TIMEOUT: int = min(120, max(10, 60))
-        self.HEADERS: Dict[str, str] = {
+        """Инициализирует настройки по умолчанию."""
+        self.CHANNEL_RETRY_LIMIT = min(10, max(1, 5))
+        self.CHANNEL_ERROR_THRESHOLD = min(0.9, max(0.1, 0.7))
+        self.OUTPUT_FILE = 'configs/proxy_configs.txt'
+        self.STATS_FILE = 'configs/channel_stats.json'
+        self.MAX_RETRIES = min(10, max(1, 5))
+        self.RETRY_DELAY = min(60, max(5, 15))
+        self.REQUEST_TIMEOUT = min(120, max(10, 60))
+        self.HEADERS = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
@@ -124,41 +159,9 @@ class ProxyConfig:
             'Upgrade-Insecure-Requests': '1'
         }
 
-    def _set_smart_limits(self) -> None:
-        if self.use_maximum_power:
-            self._set_maximum_power_mode()
-        else:
-            self._set_specific_count_mode()
-
-    def _set_maximum_power_mode(self) -> None:
-        max_configs = 20000
-        for protocol in self.SUPPORTED_PROTOCOLS:
-            self.SUPPORTED_PROTOCOLS[protocol].update({
-                "min_configs": 1,
-                "max_configs": max_configs,
-                "flexible_max": True
-            })
-        self.MIN_CONFIGS_PER_CHANNEL: int = 1
-        self.MAX_CONFIGS_PER_CHANNEL: int = max_configs
-        self.MAX_RETRIES = min(10, max(1, 10))
-        self.CHANNEL_RETRY_LIMIT = min(10, max(1, 10))
-        self.REQUEST_TIMEOUT = min(120, max(30, 90))
-
-    def _set_specific_count_mode(self) -> None:
-        if self.specific_config_count <= 0:
-            self.specific_config_count = 50
-        protocols_count = len(self.SUPPORTED_PROTOCOLS)
-        base_per_protocol = max(1, self.specific_config_count // protocols_count)
-        for protocol in self.SUPPORTED_PROTOCOLS:
-            self.SUPPORTED_PROTOCOLS[protocol].update({
-                "min_configs": 1,
-                "max_configs": min(base_per_protocol * 2, 1000),
-                "flexible_max": True
-            })
-        self.MIN_CONFIGS_PER_CHANNEL = 1
-        self.MAX_CONFIGS_PER_CHANNEL = min(max(5, self.specific_config_count // 2), 1000)
-
+    @lru_cache(maxsize=1000)
     def _normalize_url(self, url: str) -> str:
+        """Нормализует URL (кешируется)."""
         try:
             if not url:
                 raise ValueError("Empty URL")
@@ -178,6 +181,7 @@ class ProxyConfig:
             raise
 
     def _remove_duplicate_urls(self, channel_configs: List[ChannelConfig]) -> List[ChannelConfig]:
+        """Удаляет дубликаты URL (учитывает протокол)."""
         try:
             seen_urls: Dict[str, bool] = {}
             unique_configs: List[ChannelConfig] = []
@@ -186,6 +190,7 @@ class ProxyConfig:
                     logger.warning(f"Invalid config skipped: {config}")
                     continue
                 try:
+                    # Учитываем протокол, сервер и порт для дедупликации
                     normalized_url = self._normalize_url(config.url)
                     if normalized_url not in seen_urls:
                         seen_urls[normalized_url] = True
@@ -203,6 +208,7 @@ class ProxyConfig:
             return []
 
     def is_protocol_enabled(self, protocol: str) -> bool:
+        """Проверяет, включён ли протокол."""
         try:
             if not protocol:
                 return False
@@ -217,6 +223,7 @@ class ProxyConfig:
             return False
 
     def _apply_region_bonus(self) -> None:
+        """Применяет региональный бонус к каналам."""
         for ch in self.SOURCE_URLS:
             url_lower = ch.url.lower()
             if any(region in url_lower for region in ['ir', 'iran', 'ru', 'russia']):
@@ -225,14 +232,12 @@ class ProxyConfig:
             else:
                 ch.region_bonus = 0.0
 
-    # ===== НОВОЕ: усиленная проверка мёртвых каналов =====
     def _prune_dead_channels(self) -> None:
-        """Помечает каналы как disabled, если они не давали конфигов за последние 24 часа."""
+        """Удаляет неработающие каналы (без конфигов за последние 24 часа)."""
         db = get_db()
         cutoff = datetime.now() - timedelta(days=1)  # последние 24 часа
         for ch in self.SOURCE_URLS:
             history = db.get_channel_history(ch.url, limit=5)
-            # Проверяем, был ли успех в последних записях
             recent_success = False
             for h in history:
                 last_success = h.get('last_success')
@@ -243,25 +248,20 @@ class ProxyConfig:
                             break
                     except:
                         pass
-            # Также проверяем total_configs за последние 5 запусков
             total = sum(h.get('total_configs', 0) for h in history)
             if not recent_success and total == 0:
                 ch.enabled = False
                 logger.info(f"Channel {ch.url} disabled (no configs in last 24h and total=0).")
             elif not recent_success and total > 0:
-                # Если были конфиги, но не в последние 24 часа, возможно стоит отключить
-                # Но пока оставим включённым, чтобы не потерять
                 logger.debug(f"Channel {ch.url} has old configs but no recent success, keeping enabled.")
             else:
-                # Если канал был отключён, но есть успех, включаем
                 if not ch.enabled:
                     ch.enabled = True
                     logger.info(f"Channel {ch.url} re-enabled (found recent success).")
 
     def get_enabled_channels(self) -> List[ChannelConfig]:
-        # Сначала удаляем мёртвые каналы
+        """Возвращает список включённых каналов."""
         self._prune_dead_channels()
-        # Затем применяем фильтр здоровья
         self._apply_channel_health_filter()
         channels = [channel for channel in self.SOURCE_URLS if channel.enabled]
         if not channels:
@@ -271,6 +271,7 @@ class ProxyConfig:
         return channels
 
     def _apply_channel_health_filter(self) -> None:
+        """Применяет фильтр здоровья к каналам."""
         if not self.SOURCE_URLS:
             return
         if self._analyzer is None:
@@ -298,6 +299,7 @@ class ProxyConfig:
         success: bool,
         response_time: float = 0.0
     ) -> None:
+        """Обновляет статистику канала."""
         if success:
             channel.metrics.success_count += 1
             channel.metrics.last_success_time = datetime.now()
@@ -321,6 +323,7 @@ class ProxyConfig:
                 logger.error("All channels are disabled. Empty config file created.")
 
     def adjust_protocol_limits(self, channel: ChannelConfig) -> None:
+        """Корректирует лимиты протоколов на основе статистики канала."""
         if self.use_maximum_power:
             return
         for protocol in channel.metrics.protocol_counts:
@@ -333,6 +336,7 @@ class ProxyConfig:
                     )
 
     def save_empty_config_file(self) -> bool:
+        """Создаёт пустой файл конфигураций."""
         try:
             Path(self.OUTPUT_FILE).parent.mkdir(parents=True, exist_ok=True)
             with open(self.OUTPUT_FILE, 'w', encoding='utf-8') as f:
@@ -340,3 +344,40 @@ class ProxyConfig:
             return True
         except Exception:
             return False
+
+    def _set_smart_limits(self) -> None:
+        """Устанавливает умные лимиты в зависимости от режима."""
+        if self.use_maximum_power:
+            self._set_maximum_power_mode()
+        else:
+            self._set_specific_count_mode()
+
+    def _set_maximum_power_mode(self) -> None:
+        """Устанавливает лимиты для режима максимальной производительности."""
+        max_configs = 20000
+        for protocol in self.SUPPORTED_PROTOCOLS:
+            self.SUPPORTED_PROTOCOLS[protocol].update({
+                "min_configs": 1,
+                "max_configs": max_configs,
+                "flexible_max": True
+            })
+        self.MIN_CONFIGS_PER_CHANNEL = 1
+        self.MAX_CONFIGS_PER_CHANNEL = max_configs
+        self.MAX_RETRIES = min(10, max(1, 10))
+        self.CHANNEL_RETRY_LIMIT = min(10, max(1, 10))
+        self.REQUEST_TIMEOUT = min(120, max(30, 90))
+
+    def _set_specific_count_mode(self) -> None:
+        """Устанавливает лимиты для режима ограниченного сбора."""
+        if self.specific_config_count <= 0:
+            self.specific_config_count = 50
+        protocols_count = len(self.SUPPORTED_PROTOCOLS)
+        base_per_protocol = max(1, self.specific_config_count // protocols_count)
+        for protocol in self.SUPPORTED_PROTOCOLS:
+            self.SUPPORTED_PROTOCOLS[protocol].update({
+                "min_configs": 1,
+                "max_configs": min(base_per_protocol * 2, 1000),
+                "flexible_max": True
+            })
+        self.MIN_CONFIGS_PER_CHANNEL = 1
+        self.MAX_CONFIGS_PER_CHANNEL = min(max(5, self.specific_config_count // 2), 1000)
