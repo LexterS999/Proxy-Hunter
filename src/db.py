@@ -29,13 +29,36 @@ from functools import wraps
 
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-from user_settings import get_settings
-
 logger = logging.getLogger(__name__)
 
-# Получаем настройки
-settings = get_settings()
-DB_PATH = settings.database.db_path
+# Импортируем настройки после определения logger, чтобы избежать циклических импортов
+# Используем ленивую загрузку, чтобы не ломать циклические зависимости
+_settings = None
+
+def get_settings_safe():
+    """Безопасная загрузка настроек для избежания циклических импортов."""
+    global _settings
+    if _settings is None:
+        try:
+            from user_settings import get_settings
+            _settings = get_settings()
+        except ImportError:
+            # Фоллбек на дефолтные значения, если настройки ещё не загружены
+            from dataclasses import dataclass
+            @dataclass
+            class _FallbackSettings:
+                db_path: str = "configs/history.db"
+                max_history_runs: int = 100
+                save_interval_seconds: int = 30
+                encrypt_ips: bool = True
+                encryption_salt: str = "proxy_hunter_salt_2026"
+                auto_cleanup_days: int = 30
+            _settings = _FallbackSettings()
+    return _settings
+
+# Получаем настройки (лениво)
+settings = get_settings_safe()
+DB_PATH = settings.db_path if hasattr(settings, 'db_path') else "configs/history.db"
 COMPRESS_LEVEL = 6  # Уровень сжатия zlib
 
 
@@ -384,8 +407,10 @@ class HistoryDB:
     @retry_db
     def cleanup_old_data(self, days: int = None) -> None:
         """Удаляет старые данные из БД (старше `days` дней)."""
+        global _settings
+        settings = get_settings_safe()
         if days is None:
-            days = settings.database.auto_cleanup_days
+            days = settings.auto_cleanup_days if hasattr(settings, 'auto_cleanup_days') else 30
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -398,9 +423,10 @@ class HistoryDB:
                 cursor.execute("DELETE FROM channel_history WHERE timestamp < ?", (cutoff,))
                 
                 # Удаляем старые записи из runs (кроме последних MAX_HISTORY_RUNS)
+                max_runs = settings.max_history_runs if hasattr(settings, 'max_history_runs') else 100
                 cursor.execute(
                     "DELETE FROM runs WHERE id NOT IN (SELECT id FROM runs ORDER BY timestamp DESC LIMIT ?)",
-                    (settings.database.max_history_runs,)
+                    (max_runs,)
                 )
                 
                 # Удаляем профили, которые не обновлялись давно
