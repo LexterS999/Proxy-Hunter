@@ -11,19 +11,83 @@ import logging
 from pathlib import Path
 from functools import lru_cache
 
-from db import get_db
-from user_settings import (
-    SOURCE_URLS, USE_MAXIMUM_POWER, SPECIFIC_CONFIG_COUNT, ENABLED_PROTOCOLS,
-    MAX_CONFIG_AGE_DAYS, CHANNEL_HEALTH_THRESHOLD, get_settings
-)
-from channel_quality_analyzer import ChannelQualityAnalyzer
+logger = logging.getLogger(__name__)
 
-# Получаем настройки
-settings = get_settings()
+# Импортируем настройки безопасно, чтобы избежать циклических импортов
+_settings = None
+
+def get_settings_safe():
+    """Безопасная загрузка настроек для избежания циклических импортов."""
+    global _settings
+    if _settings is None:
+        try:
+            from user_settings import (
+                SOURCE_URLS, USE_MAXIMUM_POWER, SPECIFIC_CONFIG_COUNT, ENABLED_PROTOCOLS,
+                MAX_CONFIG_AGE_DAYS, CHANNEL_HEALTH_THRESHOLD
+            )
+            _settings = type('Settings', (), {
+                'SOURCE_URLS': SOURCE_URLS,
+                'USE_MAXIMUM_POWER': USE_MAXIMUM_POWER,
+                'SPECIFIC_CONFIG_COUNT': SPECIFIC_CONFIG_COUNT,
+                'ENABLED_PROTOCOLS': ENABLED_PROTOCOLS,
+                'MAX_CONFIG_AGE_DAYS': MAX_CONFIG_AGE_DAYS,
+                'CHANNEL_HEALTH_THRESHOLD': CHANNEL_HEALTH_THRESHOLD
+            })()
+        except ImportError as e:
+            logger.warning(f"Failed to import settings: {e}. Using defaults.")
+            _settings = type('Settings', (), {
+                'SOURCE_URLS': [
+                    "https://t.me/s/SOSkeyNET",
+                    "https://t.me/s/GozargahAzad",
+                    "https://t.me/s/generalconfiig",
+                    "https://t.me/s/kurdconfig",
+                    "https://t.me/s/MiTiVPN",
+                    "https://t.me/s/WangCai2",
+                ],
+                'USE_MAXIMUM_POWER': True,
+                'SPECIFIC_CONFIG_COUNT': 5000,
+                'ENABLED_PROTOCOLS': {
+                    "wireguard://": False,
+                    "hysteria2://": True,
+                    "vless://": True,
+                    "vmess://": True,
+                    "ss://": True,
+                    "trojan://": True,
+                    "tuic://": False,
+                },
+                'MAX_CONFIG_AGE_DAYS': 14,
+                'CHANNEL_HEALTH_THRESHOLD': 30.0
+            })()
+    return _settings
+
+settings = get_settings_safe()
 REGION = os.getenv('PROXY_HUNTER_REGION', 'RU')
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Импортируем get_db после настройки logger, чтобы избежать циклических импортов
+_db = None
+
+def get_db_safe():
+    """Безопасная загрузка БД."""
+    global _db
+    if _db is None:
+        try:
+            from db import get_db
+            _db = get_db()
+        except ImportError as e:
+            logger.warning(f"Failed to import db: {e}")
+            # Создаём заглушку для БД
+            class _FakeDB:
+                def get_channel_history(self, *args, **kwargs):
+                    return []
+                def get_profile_last_seen(self, *args, **kwargs):
+                    return None
+                def get_profile(self, *args, **kwargs):
+                    return None
+            _db = _FakeDB()
+    return _db
 
 
 # ============================================================================
@@ -103,9 +167,9 @@ class ChannelConfig:
 @dataclass
 class ProxyConfig:
     """Основная конфигурация прокси."""
-    use_maximum_power: bool = USE_MAXIMUM_POWER
-    specific_config_count: int = SPECIFIC_CONFIG_COUNT
-    MAX_CONFIG_AGE_DAYS: int = MAX_CONFIG_AGE_DAYS
+    use_maximum_power: bool = True
+    specific_config_count: int = 5000
+    MAX_CONFIG_AGE_DAYS: int = 14
     region: str = REGION
     SOURCE_URLS: List[ChannelConfig] = field(default_factory=list)
     SUPPORTED_PROTOCOLS: Dict[str, Dict] = field(default_factory=dict)
@@ -122,24 +186,31 @@ class ProxyConfig:
 
     def __post_init__(self):
         """Инициализирует конфигурацию."""
+        # Загружаем настройки безопасно
+        settings = get_settings_safe()
+        self.use_maximum_power = settings.USE_MAXIMUM_POWER
+        self.specific_config_count = settings.SPECIFIC_CONFIG_COUNT
+        self.MAX_CONFIG_AGE_DAYS = settings.MAX_CONFIG_AGE_DAYS
+        
         self.SUPPORTED_PROTOCOLS = self._initialize_protocols()
-        initial_urls: List[ChannelConfig] = [ChannelConfig(url=url) for url in SOURCE_URLS]
+        initial_urls: List[ChannelConfig] = [ChannelConfig(url=url) for url in settings.SOURCE_URLS]
         self.SOURCE_URLS = self._remove_duplicate_urls(initial_urls)
         self._initialize_settings()
         self._set_smart_limits()
-        self._analyzer: Optional[ChannelQualityAnalyzer] = None
+        self._analyzer = None
         self._apply_region_bonus()
 
     def _initialize_protocols(self) -> Dict[str, Dict]:
         """Инициализирует поддерживаемые протоколы."""
+        settings = get_settings_safe()
         return {
-            "wireguard://": {"priority": 1, "aliases": [], "enabled": ENABLED_PROTOCOLS.get("wireguard://", False)},
-            "hysteria2://": {"priority": 2, "aliases": ["hy2://"], "enabled": ENABLED_PROTOCOLS.get("hysteria2://", False)},
-            "vless://": {"priority": 2, "aliases": [], "enabled": ENABLED_PROTOCOLS.get("vless://", False)},
-            "vmess://": {"priority": 1, "aliases": [], "enabled": ENABLED_PROTOCOLS.get("vmess://", False)},
-            "ss://": {"priority": 2, "aliases": [], "enabled": ENABLED_PROTOCOLS.get("ss://", False)},
-            "trojan://": {"priority": 2, "aliases": [], "enabled": ENABLED_PROTOCOLS.get("trojan://", False)},
-            "tuic://": {"priority": 1, "aliases": [], "enabled": ENABLED_PROTOCOLS.get("tuic://", False)}
+            "wireguard://": {"priority": 1, "aliases": [], "enabled": settings.ENABLED_PROTOCOLS.get("wireguard://", False)},
+            "hysteria2://": {"priority": 2, "aliases": ["hy2://"], "enabled": settings.ENABLED_PROTOCOLS.get("hysteria2://", False)},
+            "vless://": {"priority": 2, "aliases": [], "enabled": settings.ENABLED_PROTOCOLS.get("vless://", False)},
+            "vmess://": {"priority": 1, "aliases": [], "enabled": settings.ENABLED_PROTOCOLS.get("vmess://", False)},
+            "ss://": {"priority": 2, "aliases": [], "enabled": settings.ENABLED_PROTOCOLS.get("ss://", False)},
+            "trojan://": {"priority": 2, "aliases": [], "enabled": settings.ENABLED_PROTOCOLS.get("trojan://", False)},
+            "tuic://": {"priority": 1, "aliases": [], "enabled": settings.ENABLED_PROTOCOLS.get("tuic://", False)}
         }
 
     def _initialize_settings(self) -> None:
@@ -234,30 +305,33 @@ class ProxyConfig:
 
     def _prune_dead_channels(self) -> None:
         """Удаляет неработающие каналы (без конфигов за последние 24 часа)."""
-        db = get_db()
+        db = get_db_safe()
         cutoff = datetime.now() - timedelta(days=1)  # последние 24 часа
         for ch in self.SOURCE_URLS:
-            history = db.get_channel_history(ch.url, limit=5)
-            recent_success = False
-            for h in history:
-                last_success = h.get('last_success')
-                if last_success:
-                    try:
-                        if datetime.fromisoformat(last_success) > cutoff:
-                            recent_success = True
-                            break
-                    except:
-                        pass
-            total = sum(h.get('total_configs', 0) for h in history)
-            if not recent_success and total == 0:
-                ch.enabled = False
-                logger.info(f"Channel {ch.url} disabled (no configs in last 24h and total=0).")
-            elif not recent_success and total > 0:
-                logger.debug(f"Channel {ch.url} has old configs but no recent success, keeping enabled.")
-            else:
-                if not ch.enabled:
-                    ch.enabled = True
-                    logger.info(f"Channel {ch.url} re-enabled (found recent success).")
+            try:
+                history = db.get_channel_history(ch.url, limit=5)
+                recent_success = False
+                for h in history:
+                    last_success = h.get('last_success')
+                    if last_success:
+                        try:
+                            if datetime.fromisoformat(last_success) > cutoff:
+                                recent_success = True
+                                break
+                        except:
+                            pass
+                total = sum(h.get('total_configs', 0) for h in history)
+                if not recent_success and total == 0:
+                    ch.enabled = False
+                    logger.info(f"Channel {ch.url} disabled (no configs in last 24h and total=0).")
+                elif not recent_success and total > 0:
+                    logger.debug(f"Channel {ch.url} has old configs but no recent success, keeping enabled.")
+                else:
+                    if not ch.enabled:
+                        ch.enabled = True
+                        logger.info(f"Channel {ch.url} re-enabled (found recent success).")
+            except Exception as e:
+                logger.error(f"Error checking channel {ch.url}: {e}")
 
     def get_enabled_channels(self) -> List[ChannelConfig]:
         """Возвращает список включённых каналов."""
@@ -274,8 +348,13 @@ class ProxyConfig:
         """Применяет фильтр здоровья к каналам."""
         if not self.SOURCE_URLS:
             return
-        if self._analyzer is None:
+        try:
+            from channel_quality_analyzer import ChannelQualityAnalyzer
             self._analyzer = ChannelQualityAnalyzer()
+        except ImportError as e:
+            logger.warning(f"Failed to import ChannelQualityAnalyzer: {e}")
+            return
+        
         urls = [ch.url for ch in self.SOURCE_URLS]
         self._analyzer.update_health(urls)
         states: Dict[str, str] = {}
