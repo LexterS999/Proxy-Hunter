@@ -1,591 +1,416 @@
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+"""
+Активная проверка прокси-конфигураций с улучшенной обработкой ошибок и параллелизацией.
 
-import re
-import time
-import json
-import logging
-from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Optional, Set, Tuple
+Исправления и оптимизации:
+- Контекстные менеджеры (async with) для всех ClientSession
+- Параллельная проверка TCP для групп конфигов с одинаковым host:port
+- Улучшенная обработка ошибок (конкретные исключения)
+- Кеширование результатов проверок
+"""
+
 import asyncio
+import logging
+import re
+import ssl
+import time
+from collections import OrderedDict, deque, defaultdict
+from typing import Dict, List, Optional, Tuple, Set
+from urllib.parse import parse_qs, urlparse
+
 import aiohttp
-from aiohttp import ClientTimeout, ClientConnectorError, ClientResponseError, ClientSession
-from bs4 import BeautifulSoup
-from functools import lru_cache
+import numpy as np
 
-from config import ProxyConfig, ChannelConfig
-from config_validator import ConfigValidator
-from parse_fallback import FallbackParser
-from pathlib import Path
-from dateutil import parser as date_parser
-from collections import OrderedDict
-import hashlib
-import aiofiles
-
-from retry_utils import retry_with_backoff, is_retryable
+from concurrency import ConcurrencyLimiter
 from session_pool import SessionPool
-from user_settings import (
-    CHANNEL_RETRY_ATTEMPTS,
-    CHANNEL_RETRY_BASE_DELAY,
-    CHANNEL_RETRY_MAX_DELAY,
-    CHANNEL_RETRY_DEADLINE,
-    TELEGRAM_CALLS_PER_SECOND,
-    MAX_RESPONSE_SIZE_BYTES,
-    get_settings
-)
+from retry_utils import retry_with_backoff
+from user_settings import TCP_TIMEOUT, HTTP_TIMEOUT, MAX_LATENCY_MS, ACTIVE_CHECKER_WORKERS, PER_HOST_LIMIT, get_settings
+from parse_fallback import FallbackParser
+from sni_probe import SNIProbe
 
 logger = logging.getLogger(__name__)
-
-# Получаем настройки
 settings = get_settings()
 
-# Кеширование каналов
-CACHE_DIR = Path("configs/channel_cache")
-CACHE_MAX_AGE = 3600  # 1 час
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
+class CachedActiveChecker:
+    """Проверяет работоспособность прокси с кешированием и параллелизацией."""
+    def __init__(
+        self,
+        timeout: float = None,
+        max_workers: int = None,
+        test_url: str = "https://www.gstatic.com/generate_204",
+        max_latency: float = None,
+        history: Dict = None,
+        cache_ttl: int = 1800,
+    ):
+        self.timeout = timeout or TCP_TIMEOUT
+        self.max_workers = max_workers or ACTIVE_CHECKER_WORKERS
+        self.test_url = test_url
+        self.max_latency = max_latency or MAX_LATENCY_MS
+        self.history = history or {}
+        self.cache_ttl = cache_ttl
+        self.negative_cache_ttl = min(300, cache_ttl)
+        self._cache: Dict[str, Tuple[float, Dict]] = {}
+        self._limiter = ConcurrencyLimiter(global_limit=self.max_workers, per_host_limit=PER_HOST_LIMIT)
+        self._tcp_cache: OrderedDict[Tuple[str, int, bool], float] = OrderedDict()
+        self._tcp_cache_max_size = 5000
+        self._tcp_cache_alpha = 0.3
+        self._historical_latencies = deque(maxlen=1000)
+        self._parsed_cache: Dict[str, Optional[Dict]] = {}
+        self._sni_probe = SNIProbe(timeout=self.timeout)
+        self._session_pool = SessionPool()
 
-class BoundedSet:
-    """Множество с ограничением размера и LRU-эвикцией."""
-    def __init__(self, maxsize: int = 50000):
-        self._maxsize = maxsize
-        self._data: OrderedDict[str, None] = OrderedDict()
+    def _cache_get(self, config: str) -> Optional[Dict]:
+        """Получает результат из кеша."""
+        item = self._cache.get(config)
+        if not item:
+            return None
+        ts, result = item
+        ttl = self.cache_ttl if result.get('success') else self.negative_cache_ttl
+        if time.time() - ts < ttl:
+            return result
+        self._cache.pop(config, None)
+        return None
 
-    def add(self, item: str) -> None:
-        if item in self._data:
-            self._data.move_to_end(item)
-        else:
-            if len(self._data) >= self._maxsize:
-                self._data.popitem(last=False)
-            self._data[item] = None
+    def _cache_put(self, config: str, result: Dict) -> Dict:
+        """Сохраняет результат в кеш."""
+        self._cache[config] = (time.time(), result)
+        return result
 
-    def __contains__(self, item: str) -> bool:
-        return item in self._data
+    def _should_skip(self, config: str) -> bool:
+        """Проверяет, нужно ли пропустить конфиг на основе истории."""
+        if not self.history:
+            return False
+        from profile_scorer import ProfileScorer
+        scorer = ProfileScorer()
+        try:
+            parsed = self._extract_parsed(config)
+            if not parsed:
+                return False
+            key = scorer.get_profile_key(config, parsed)
+            profile = self.history.get('profiles', {}).get(key, {})
+            if profile.get('is_active') is False:
+                return True
+            if profile.get('overall_score', 100) < 15:
+                return True
+        except Exception:
+            pass
+        return False
 
-    def __len__(self) -> int:
-        return len(self._data)
+    def _extract_parsed(self, config: str) -> Optional[Dict]:
+        """Извлекает распарсенные данные из кеша или парсит заново."""
+        if config in self._parsed_cache:
+            return self._parsed_cache[config]
+        parsed, _ = FallbackParser.parse_with_stats(config)
+        self._parsed_cache[config] = parsed
+        return parsed
 
-    def clear(self) -> None:
-        self._data.clear()
-
-
-class AdaptiveRateLimiter:
-    """Адаптивный Token Bucket с обратной связью по ошибкам."""
-    def __init__(self, rate: float = TELEGRAM_CALLS_PER_SECOND, max_burst: int = 10):
-        self.rate = rate
-        self.max_tokens = max_burst
-        self.tokens = max_burst
-        self.last_refill = time.time()
-        self._lock: Optional[asyncio.Lock] = None
-        self.backoff_factor = 1.0
-        self.success_count = 0
-        self.error_count = 0
-
-    def _get_lock(self) -> asyncio.Lock:
-        if self._lock is None:
-            self._lock = asyncio.Lock()
-        return self._lock
-
-    async def acquire(self) -> None:
-        lock = self._get_lock()
-        async with lock:
-            now = time.time()
-            elapsed = now - self.last_refill
-            # Динамически увеличиваем rate при успешных запросах
-            effective_rate = self.rate * self.backoff_factor
-            self.tokens = min(self.max_tokens,
-                              self.tokens + elapsed * effective_rate)
-            self.last_refill = now
-            if self.tokens < 1:
-                wait = (1 - self.tokens) / effective_rate
-                await asyncio.sleep(wait)
-                self.tokens = 0
-            else:
-                self.tokens -= 1
-
-    def report_success(self) -> None:
-        self.success_count += 1
-        # Увеличиваем backoff_factor при успешных запросах
-        if self.success_count % 10 == 0:
-            self.backoff_factor = min(2.0, self.backoff_factor * 1.05)
-
-    def report_error(self, is_429: bool = False) -> None:
-        self.error_count += 1
-        # Уменьшаем backoff_factor только при 429 или 5xx ошибках
-        if is_429:
-            self.backoff_factor = max(0.1, self.backoff_factor * 0.7)
-        else:
-            # Для других ошибок уменьшаем не так сильно
-            self.backoff_factor = max(0.3, self.backoff_factor * 0.95)
-
-    def set_retry_after(self, seconds: int) -> None:
-        self.last_refill = time.time() + seconds
-
-
-class AsyncConfigFetcher:
-    """Полностью асинхронный сборщик конфигураций с адаптивным лимитером и кешированием."""
-
-    def __init__(self, config: ProxyConfig, max_concurrent: int = 200):
-        self.config = config
-        self.validator = ConfigValidator()
-        self.max_concurrent = max_concurrent
-        self._session: Optional[ClientSession] = None
-        self._semaphore = asyncio.Semaphore(max_concurrent)
-        self.protocol_counts: Dict[str, int] = {p: 0 for p in config.SUPPORTED_PROTOCOLS}
-        self.seen_configs: BoundedSet = BoundedSet(maxsize=50000)
-        self.channel_protocol_counts: Dict[str, Dict[str, int]] = {}
-        self._parsing_cache: Dict[str, List[str]] = {}  # Кеш для парсинговых результатов
-
-        num_channels = len(config.SOURCE_URLS) if config.SOURCE_URLS else 1
-        self._connector_limit = min(500, num_channels * 10)
-        self._connector_per_host = min(100, num_channels * 5)
-
-        self._rate_limiter = AdaptiveRateLimiter(rate=TELEGRAM_CALLS_PER_SECOND)
-
-    async def _ensure_session(self) -> ClientSession:
-        """Возвращает сессию из пула."""
-        pool = SessionPool()
-        session = await pool.get_session(
-            connector_limit=self._connector_limit,
-            per_host_limit=self._connector_per_host,
-            timeout_total=self.config.REQUEST_TIMEOUT,
-            headers=self.config.HEADERS
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Получает сессию из пула."""
+        return await self._session_pool.get_session(
+            connector_limit=max(200, self.max_workers * 4),
+            per_host_limit=max(20, PER_HOST_LIMIT * 2),
+            timeout_total=HTTP_TIMEOUT * 2,
         )
-        return session
-
-    async def _fetch_with_cache(self, url: str) -> Optional[str]:
-        """Фетчит URL с кешированием (включая ssconf://)."""
-        cache_key = hashlib.md5(url.encode()).hexdigest()
-        cache_path = CACHE_DIR / f"{cache_key}.txt"
-        etag_path = CACHE_DIR / f"{cache_key}.etag"
-
-        # Проверяем кеш
-        if cache_path.exists():
-            mtime = cache_path.stat().st_mtime
-            if time.time() - mtime < CACHE_MAX_AGE:
-                try:
-                    async with aiofiles.open(cache_path, 'r') as f:
-                        return await f.read()
-                except Exception as e:
-                    logger.warning(f"Failed to read cache for {url}: {e}")
-
-            # Проверяем ETag
-            if etag_path.exists():
-                try:
-                    async with aiofiles.open(etag_path, 'r') as f:
-                        etag = await f.read()
-                    async with await self._ensure_session() as session:
-                        async with session.head(url) as resp:
-                            if resp.status == 200:
-                                new_etag = resp.headers.get('ETag')
-                                if new_etag and new_etag == etag:
-                                    os.utime(cache_path, None)
-                                    async with aiofiles.open(cache_path, 'r') as f:
-                                        return await f.read()
-                except Exception as e:
-                    logger.debug(f"ETag check failed for {url}: {e}")
-
-        # Фетчим данные
-        text = await self._fetch_with_retry(url)
-        if text:
-            CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            try:
-                async with aiofiles.open(cache_path, 'w') as f:
-                    await f.write(text)
-                # Сохраняем ETag
-                async with await self._ensure_session() as session:
-                    async with session.head(url) as resp:
-                        if resp.status == 200:
-                            etag = resp.headers.get('ETag')
-                            if etag:
-                                async with aiofiles.open(etag_path, 'w') as f:
-                                    await f.write(etag)
-            except Exception as e:
-                logger.debug(f"Failed to cache {url}: {e}")
-        return text
 
     @retry_with_backoff(
         attempts=3,
         base_delay=0.2,
-        max_delay=5.0,
-        deadline=30.0,
-        retryable_exceptions=(asyncio.TimeoutError, ClientConnectorError, ClientResponseError)
+        max_delay=1.0,
+        deadline=5.0,
+        retryable_exceptions=(asyncio.TimeoutError, ConnectionError, OSError, ConnectionResetError),
     )
-    async def _fetch_with_retry(self, url: str) -> Optional[str]:
-        """Фетчит URL с ретраями."""
-        await self._rate_limiter.acquire()
+    async def _tcp_latency_with_retry(self, host: str, port: int, use_tls: bool = False, server_hostname: Optional[str] = None) -> float:
+        """Выполняет TCP-проверку с ретраями."""
+        return await self._tcp_latency_raw(host, port, use_tls, server_hostname)
+
+    async def _tcp_latency_raw(self, host: str, port: int, use_tls: bool = False, server_hostname: Optional[str] = None) -> float:
+        """Выполняет TCP-проверку."""
+        start = time.time()
         try:
-            async with await self._ensure_session() as session:
-                async with session.get(url) as response:
-                    if response.status == 429:
-                        retry_after = response.headers.get('Retry-After', '5')
-                        try:
-                            wait_time = int(retry_after)
-                        except ValueError:
-                            wait_time = 5
-                        self._rate_limiter.set_retry_after(wait_time)
-                        self._rate_limiter.report_error(is_429=True)
-                        await asyncio.sleep(wait_time)
-                        raise ClientResponseError(
-                            response.request_info,
-                            response.history,
-                            status=response.status,
-                            message=f"Rate limited, retry after {wait_time}s"
-                        )
-                    if response.status >= 500:
-                        self._rate_limiter.report_error(is_429=False)
-                        raise ClientResponseError(
-                            response.request_info,
-                            response.history,
-                            status=response.status,
-                            message=response.reason
-                        )
-                    text = await response.text()
-                    if len(text) > MAX_RESPONSE_SIZE_BYTES:
-                        logger.warning(f"Response from {url} too large ({len(text)} bytes), truncating")
-                        text = text[:MAX_RESPONSE_SIZE_BYTES]
-                    self._rate_limiter.report_success()
-                    return text
-        except asyncio.TimeoutError as e:
-            self._rate_limiter.report_error(is_429=False)
-            logger.warning(f"Timeout fetching {url}: {e}")
-            raise
-        except ClientConnectorError as e:
-            self._rate_limiter.report_error(is_429=False)
-            logger.warning(f"Connection error fetching {url}: {e}")
-            raise
-        except ClientResponseError as e:
-            if e.status == 429:
-                self._rate_limiter.report_error(is_429=True)
+            if use_tls:
+                context = ssl.create_default_context()
+                context.check_hostname = False
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(host, port, ssl=context, server_hostname=server_hostname or host),
+                    timeout=self.timeout,
+                )
             else:
-                self._rate_limiter.report_error(is_429=False)
-            logger.warning(f"HTTP error fetching {url}: {e}")
-            raise
-
-    async def fetch_ssconf_configs(self, url: str) -> List[str]:
-        """Фетчит и парсит ssconf-конфиги."""
-        https_url = self.validator.convert_ssconf_to_https(url)
-        text = await self._fetch_with_cache(https_url)
-        if not text:
-            return []
-        text = text.strip()
-        if self.validator.is_base64(text):
-            decoded = self.validator.decode_base64_text(text)
-            if decoded:
-                text = decoded
-        if text.startswith('ss://'):
-            return [text]
-        return self.validator.split_configs(text)
-
-    @retry_with_backoff(
-        attempts=CHANNEL_RETRY_ATTEMPTS,
-        base_delay=CHANNEL_RETRY_BASE_DELAY,
-        max_delay=CHANNEL_RETRY_MAX_DELAY,
-        deadline=CHANNEL_RETRY_DEADLINE
-    )
-    async def fetch_channel(self, channel: ChannelConfig) -> List[str]:
-        """Фетчит конфиги из канала."""
-        async with self._semaphore:
-            return await self._fetch_channel_internal(channel)
-
-    async def _fetch_channel_internal(self, channel: ChannelConfig) -> List[str]:
-        """Внутренняя логика фетчинга канала."""
-        configs: List[str] = []
-        channel.metrics.total_configs = 0
-        channel.metrics.valid_configs = 0
-        channel.metrics.unique_configs = 0
-        channel.metrics.protocol_counts = {p: 0 for p in self.config.SUPPORTED_PROTOCOLS}
-        start_time = time.time()
-
-        if channel.url.startswith('ssconf://'):
-            configs.extend(await self.fetch_ssconf_configs(channel.url))
-            if configs:
-                response_time = time.time() - start_time
-                self.config.update_channel_stats(channel, True, response_time)
-            return configs
-
-        text = await self._fetch_with_cache(channel.url)
-        if text is None:
-            self.config.update_channel_stats(channel, False)
-            return configs
-
-        response_time = time.time() - start_time
-
-        if channel.is_telegram:
-            soup = BeautifulSoup(text, 'html.parser')
-            messages = soup.find_all('div', class_='tgme_widget_message_text')
-            sorted_messages = sorted(
-                messages,
-                key=lambda m: self.extract_date_from_message(m) or datetime.min.replace(tzinfo=timezone.utc),
-                reverse=True
-            )
-            
-            # Параллельный парсинг сообщений
-            configs = await self._parse_messages_parallel(sorted_messages, channel)
-        else:
-            # Парсинг простого текста
-            configs = self._parse_text(text, channel)
-
-        # Удаляем дубликаты
-        configs = list(set(configs))
-        processed: List[str] = []
-        for cfg in configs:
-            proc = self.process_config(cfg, channel)
-            if proc:
-                processed.extend(proc)
-
-        if len(processed) >= self.config.MIN_CONFIGS_PER_CHANNEL:
-            self.config.update_channel_stats(channel, True, response_time)
-            self.config.adjust_protocol_limits(channel)
-        else:
-            self.config.update_channel_stats(channel, False)
-            logger.warning(f"Not enough configs from {channel.url}: {len(processed)}")
-
-        return processed
-
-    async def _parse_messages_parallel(self, messages: List, channel: ChannelConfig) -> List[str]:
-        """Параллельно парсит сообщения из Telegram."""
-        async def parse_message(message) -> List[str]:
-            if not message or not message.text:
-                return []
-            message_date = self.extract_date_from_message(message)
-            if not self.is_config_valid(message.text, message_date):
-                return []
-            msg_text = message.text
-            parts = msg_text.split()
-            found_configs: List[str] = []
-            for part in parts:
-                part = part.strip()
-                if not part:
-                    continue
-                if part.startswith('ssconf://'):
-                    ssconf_configs = await self.fetch_ssconf_configs(part)
-                    found_configs.extend(ssconf_configs)
-                else:
-                    decoded_part = self.check_and_decode_base64(part)
-                    if decoded_part != part:
-                        found = self.validator.split_configs(decoded_part)
-                        found_configs.extend(found)
-            found = self.validator.split_configs(msg_text)
-            found_configs.extend(found)
-            return found_configs
-
-        # Параллельный парсинг
-        tasks = [parse_message(message) for message in messages]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        all_configs: List[str] = []
-        for result in results:
-            if isinstance(result, Exception):
-                logger.error(f"Error parsing message: {result}")
-            else:
-                all_configs.extend(result)
-        return all_configs
-
-    def _parse_text(self, text: str, channel: ChannelConfig) -> List[str]:
-        """Парсит простой текст."""
-        parts = text.split()
-        configs: List[str] = []
-        for part in parts:
-            part = part.strip()
-            if not part:
-                continue
-            decoded_part = self.check_and_decode_base64(part)
-            if decoded_part != part:
-                found = self.validator.split_configs(decoded_part)
-                channel.metrics.total_configs += len(found)
-                configs.extend(found)
-        found = self.validator.split_configs(text)
-        channel.metrics.total_configs += len(found)
-        configs.extend(found)
-        return configs
-
-    def process_config(self, config: str, channel: ChannelConfig) -> List[str]:
-        """Обрабатывает один конфиг."""
-        # Проверяем минимальную валидность
-        if not self._is_config_minimally_valid(config):
-            return []
-        
-        # Используем кеш для парсинга
-        cache_key = hashlib.md5(config.encode()).hexdigest()
-        if cache_key in self._parsing_cache:
-            return self._parsing_cache[cache_key]
-        
-        processed: List[str] = []
-        if config.startswith('hy2://'):
-            config = self.validator.normalize_hysteria2_protocol(config)
-        for protocol in self.config.SUPPORTED_PROTOCOLS:
-            aliases = self.config.SUPPORTED_PROTOCOLS[protocol].get('aliases', [])
-            match = False
-            if config.startswith(protocol):
-                match = True
-            else:
-                for alias in aliases:
-                    if config.startswith(alias):
-                        match = True
-                        config = config.replace(alias, protocol, 1)
-                        break
-            if match:
-                if not self.config.is_protocol_enabled(protocol):
-                    break
-                if protocol == "vmess://":
-                    config = self.validator.clean_vmess_config(config)
-                clean = self.validator.clean_config(config)
-                if self.validator.validate_protocol_config(clean, protocol):
-                    channel.metrics.valid_configs += 1
-                    channel.metrics.protocol_counts[protocol] = channel.metrics.protocol_counts.get(protocol, 0) + 1
-                    if clean not in self.seen_configs:
-                        channel.metrics.unique_configs += 1
-                        self.seen_configs.add(clean)
-                        processed.append(clean)
-                    self.protocol_counts[protocol] = self.protocol_counts.get(protocol, 0) + 1
-                break
-        
-        # Кешируем результат
-        self._parsing_cache[cache_key] = processed
-        return processed
-
-    def _is_config_minimally_valid(self, config: str) -> bool:
-        """Проверяет минимальную валидность конфига (наличие host:port)."""
-        try:
-            if not config:
-                return False
-            # Проверяем наличие хоста и порта
-            if '://' not in config:
-                return False
-            scheme, rest = config.split('://', 1)
-            if not rest:
-                return False
-            # Для base64-конфигов
-            if scheme in ['vmess', 'vless', 'trojan', 'ss']:
-                return True
-            # Для других схем проверяем наличие @ или :
-            if '@' in rest or ':' in rest:
-                return True
-            return False
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(host, port, ssl=False),
+                    timeout=self.timeout,
+                )
+            writer.close()
+            await writer.wait_closed()
+            return (time.time() - start) * 1000.0
+        except asyncio.TimeoutError:
+            return -1.0
+        except ConnectionRefusedError:
+            return -1.0
+        except OSError:
+            return -1.0
         except Exception:
-            return False
+            return -1.0
 
-    def check_and_decode_base64(self, text: str) -> str:
-        """Проверяет и декодирует base64."""
-        if self.validator.is_base64(text):
-            decoded = self.validator.decode_base64_text(text)
-            if decoded:
-                return decoded
-        return text
+    async def _tcp_latency(self, host: str, port: int, use_tls: bool = False, server_hostname: Optional[str] = None) -> float:
+        """Возвращает закешированную TCP-задержку."""
+        key = (host.lower(), int(port), bool(use_tls))
+        if key in self._tcp_cache:
+            self._tcp_cache.move_to_end(key)
+            return self._tcp_cache[key]
 
-    def extract_date_from_message(self, message) -> Optional[datetime]:
-        """Извлекает дату из сообщения Telegram."""
         try:
-            time_element = message.find_parent('div', class_='tgme_widget_message').find('time')
-            if time_element and 'datetime' in time_element.attrs:
-                dt_str = time_element['datetime']
-                return date_parser.parse(dt_str)
-        except Exception as e:
-            logger.debug(f"Date parsing failed: {e}")
+            latency = await self._tcp_latency_with_retry(host, port, use_tls, server_hostname)
+        except Exception:
+            latency = -1.0
+
+        if key in self._tcp_cache:
+            old = self._tcp_cache[key]
+            if old > 0 and latency > 0:
+                latency = self._tcp_cache_alpha * latency + (1 - self._tcp_cache_alpha) * old
+
+        if len(self._tcp_cache) >= self._tcp_cache_max_size:
+            self._tcp_cache.popitem(last=False)
+        self._tcp_cache[key] = latency
+        return latency
+
+    def _extract_server_info(self, config: str, parsed: Optional[Dict] = None) -> Optional[Tuple[str, int, bool]]:
+        """Извлекает информацию о сервере из конфига."""
+        parsed = parsed or self._extract_parsed(config)
+        if parsed:
+            host = parsed.get('address') or parsed.get('add') or parsed.get('host')
+            port = int(parsed.get('port', 0) or 0)
+            use_tls = (parsed.get('security') in ('tls', 'reality') or parsed.get('tls') in ('tls', 'reality'))
+            if host and port:
+                return host, port, use_tls
+
+        try:
+            base = config.split('#')[0]
+            parsed_url = urlparse(base)
+            if parsed_url.hostname:
+                params = parse_qs(parsed_url.query)
+                security = params.get('security', [''])[0].lower()
+                tls = security in ('tls', 'reality', 'xtls') or parsed_url.scheme in ('https', 'trojan')
+                return parsed_url.hostname, parsed_url.port or 443, tls
+        except Exception:
+            pass
+
+        match = re.search(r'@([^:]+):(\d+)', config)
+        if match:
+            host = match.group(1)
+            port = int(match.group(2))
+            tls = 'security=tls' in config or 'security=reality' in config or 'sni=' in config
+            return host, port, tls
         return None
 
-    def is_config_valid(self, config_text: str, date: Optional[datetime]) -> bool:
-        """Проверяет валидность конфига по дате."""
-        if not date:
-            return True
-        cutoff = datetime.now(timezone.utc) - timedelta(days=self.config.MAX_CONFIG_AGE_DAYS)
-        return date >= cutoff
+    def _extract_probe_request(self, parsed: Optional[Dict], host: str) -> Tuple[str, str]:
+        """Извлекает параметры для HTTP-пробы."""
+        if not parsed:
+            return '/', host
+        path = parsed.get('path') or '/'
+        if not str(path).startswith('/'):
+            path = '/' + str(path)
+        host_header = parsed.get('host') or parsed.get('authority') or parsed.get('sni') or host
+        return path, host_header
 
-    def balance_protocols(self, configs: List[str]) -> List[str]:
-        """Балансирует конфиги по протоколам."""
-        protocol_configs: Dict[str, List[str]] = {p: [] for p in self.config.SUPPORTED_PROTOCOLS}
-        for cfg in configs:
-            if cfg.startswith('hy2://'):
-                cfg = self.validator.normalize_hysteria2_protocol(cfg)
-            for p in self.config.SUPPORTED_PROTOCOLS:
-                if cfg.startswith(p):
-                    protocol_configs[p].append(cfg)
-                    break
-        total = sum(len(c) for c in protocol_configs.values())
-        if total == 0:
+    async def _http_probe(self, config: str, parsed: Optional[Dict], host: str, port: int, use_tls: bool) -> float:
+        """Выполняет HTTP-пробу."""
+        try:
+            async with await self._get_session() as session:
+                scheme = 'https' if use_tls else 'http'
+                path, host_header = self._extract_probe_request(parsed, host)
+                url = f"{scheme}://{host}:{port}{path}"
+                headers = {
+                    'Host': host_header,
+                    'User-Agent': 'Proxy-Hunter/2.1',
+                    'Range': 'bytes=0-0',
+                    'Accept': '*/*',
+                    'Connection': 'keep-alive',
+                }
+                start = time.time()
+                async with session.get(url, headers=headers, timeout=HTTP_TIMEOUT, allow_redirects=False) as resp:
+                    if resp.status < 500:
+                        await resp.content.readany()
+                        return (time.time() - start) * 1000.0
+                    return -1.0
+        except asyncio.TimeoutError:
+            return -1.0
+        except aiohttp.ClientError as e:
+            logger.debug("HTTP probe error for %s:%s: %s", host, port, e)
+            return -1.0
+        except Exception as e:
+            logger.debug("HTTP probe error for %s:%s: %s", host, port, e)
+            return -1.0
+
+    async def check_config(self, config: str) -> Dict:
+        """Проверяет один конфиг."""
+        cached = self._cache_get(config)
+        if cached is not None:
+            return cached
+
+        result = {'config': config, 'valid': False, 'latency': -1.0, 'success': False, 'error': None}
+        if self._should_skip(config):
+            result['error'] = 'skipped_by_history'
+            return self._cache_put(config, result)
+
+        parsed = self._extract_parsed(config)
+        server_info = self._extract_server_info(config, parsed)
+        if not server_info:
+            result['error'] = 'no_server_info'
+            return self._cache_put(config, result)
+
+        host, port, use_tls = server_info
+        sni = parsed.get('sni') if parsed else None
+        
+        # Используем лимитер для параллельных TCP-проверок
+        tcp_latency = await self._limiter.run(host, self._tcp_latency(host, port, use_tls, sni))
+        if tcp_latency < 0:
+            result['error'] = 'tcp_failed'
+            return self._cache_put(config, result)
+
+        if len(self._historical_latencies) > 20:
+            p90 = float(np.percentile(list(self._historical_latencies), 90))
+            dynamic_max = min(p90 * 1.5, self.max_latency)
+        else:
+            dynamic_max = self.max_latency
+
+        if tcp_latency > dynamic_max:
+            result['error'] = 'latency_too_high'
+            result['latency'] = tcp_latency
+            return self._cache_put(config, result)
+
+        http_latency = await self._limiter.run(host, self._http_probe(config, parsed, host, port, use_tls))
+        final_latency = http_latency if http_latency > 0 else tcp_latency
+        result['latency'] = final_latency
+        result['valid'] = True
+        result['success'] = final_latency > 0
+        if result['success']:
+            self._historical_latencies.append(final_latency)
+        else:
+            result['error'] = 'http_probe_failed'
+        return self._cache_put(config, result)
+
+    async def check_with_alternative_sni(self, config: str, alt_sni_list: List[str] = None) -> Dict:
+        """Проверяет конфиг с альтернативными SNI."""
+        if alt_sni_list is None:
+            alt_sni_list = ['cloudflare.com', 'www.cloudflare.com', 'google.com', 'dl.google.com', 'speedtest.net']
+
+        result = await self.check_config(config)
+        if result.get('success'):
+            return result
+
+        parsed = self._extract_parsed(config)
+        if not parsed:
+            return result
+        host = parsed.get('address') or parsed.get('add')
+        port = int(parsed.get('port', 443) or 443)
+        use_tls = parsed.get('security') in ('tls', 'reality') or parsed.get('tls') in ('tls', 'reality')
+        if not host or not use_tls:
+            return result
+
+        for sni in alt_sni_list:
+            try:
+                res = await self._sni_probe.probe_check(host, sni)
+            except Exception:
+                continue
+            if res.get('success'):
+                new_result = result.copy()
+                new_result['sni_override'] = sni
+                new_result['success'] = True
+                new_result['valid'] = True
+                new_result['latency'] = res.get('latency', result.get('latency', 0))
+                new_result['error'] = None
+                return self._cache_put(config, new_result)
+        return result
+
+    async def check_batch(self, configs: List[str]) -> List[Dict]:
+        """Проверяет пачку конфигов с параллелизацией по host:port."""
+        if not configs:
             return []
-        balanced: List[str] = []
-        sorted_protocols = sorted(
-            protocol_configs.items(),
-            key=lambda x: (self.config.SUPPORTED_PROTOCOLS[x[0]]["priority"], len(x[1])),
-            reverse=True
-        )
-        for protocol, plist in sorted_protocols:
-            info = self.config.SUPPORTED_PROTOCOLS[protocol]
-            if len(plist) >= info["min_configs"]:
-                max_c = min(info["max_configs"], len(plist))
-                balanced.extend(plist[:max_c])
-            elif info["flexible_max"] and len(plist) > 0:
-                balanced.extend(plist)
-        return balanced
 
-    async def fetch_chunk(self, channels: List[ChannelConfig]) -> List[str]:
-        """Обрабатывает список каналов параллельно."""
-        if not channels:
-            return []
-        tasks = [self.fetch_channel(ch) for ch in channels]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        all_configs: List[str] = []
-        for idx, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(f"Channel {channels[idx].url} failed after retries: {result}")
-            else:
-                all_configs.extend(result)
-        return all_configs
+        unique_configs = list(dict.fromkeys(configs))
+        
+        # Группируем конфиги по host:port:use_tls для параллельной проверки
+        endpoint_map: Dict[Tuple[str, int, bool], List[str]] = {}
+        parsed_map: Dict[str, Optional[Dict]] = {}
+        for cfg in unique_configs:
+            parsed = self._extract_parsed(cfg)
+            parsed_map[cfg] = parsed
+            info = self._extract_server_info(cfg, parsed)
+            if info:
+                endpoint_map.setdefault(info, []).append(cfg)
 
-    async def fetch_all(self) -> List[str]:
-        """Собирает конфиги со всех каналов."""
-        enabled = self.config.get_enabled_channels()
-        if not enabled:
-            logger.warning("No enabled channels found.")
-            return []
+        # Предварительно прогреваем TCP-кеш для всех эндпоинтов
+        warm_tasks = []
+        for host, port, use_tls in endpoint_map.keys():
+            warm_tasks.append(self._limiter.run(host, self._tcp_latency(host, port, use_tls)))
+        if warm_tasks:
+            await asyncio.gather(*warm_tasks, return_exceptions=True)
 
-        chunk_size = 200
-        chunks = [enabled[i:i+chunk_size] for i in range(0, len(enabled), chunk_size)]
-        logger.info(f"Splitting {len(enabled)} channels into {len(chunks)} chunks of {chunk_size}")
+        sem = asyncio.Semaphore(self.max_workers * 2)
 
-        # Создаём несколько фетчеров
-        fetchers = [AsyncConfigFetcher(self.config, max_concurrent=self.max_concurrent) for _ in chunks]
-        tasks = [fetcher.fetch_chunk(chunk) for fetcher, chunk in zip(fetchers, chunks)]
+        async def check_one(cfg: str):
+            async with sem:
+                return await self.check_with_alternative_sni(cfg)
 
-        chunk_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        all_configs: List[str] = []
-        for idx, res in enumerate(chunk_results):
+        gathered = await asyncio.gather(*(check_one(cfg) for cfg in unique_configs), return_exceptions=True)
+        unique_results: Dict[str, Dict] = {}
+        for idx, res in enumerate(gathered):
+            cfg = unique_configs[idx]
             if isinstance(res, Exception):
-                logger.error(f"Chunk {idx} failed: {res}")
+                unique_results[cfg] = {
+                    'config': cfg,
+                    'valid': False,
+                    'latency': -1.0,
+                    'success': False,
+                    'error': str(res),
+                }
             else:
-                all_configs.extend(res)
-
-        if all_configs:
-            all_configs = self.balance_protocols(sorted(set(all_configs)))
-        return all_configs
+                unique_results[cfg] = res
+        return [unique_results[cfg] for cfg in configs]
 
     async def close(self) -> None:
         """Закрывает все ресурсы."""
+        self._cache.clear()
+        self._parsed_cache.clear()
+        self._tcp_cache.clear()
         try:
-            pool = SessionPool()
-            await pool.close_all()
-            self._parsing_cache.clear()
-        except Exception as e:
-            logger.error(f"Error closing fetcher: {e}")
+            await self._session_pool.close_all()
+        except Exception:
+            pass
+
+    def filter_by_latency(self, results: List[Dict], max_latency: float = None) -> List[str]:
+        """Фильтрует конфиги по задержке."""
+        if max_latency is None:
+            max_latency = self.max_latency
+        return [
+            r['config'] for r in results
+            if r.get('valid', False) and 0 <= r.get('latency', -1) <= max_latency
+        ]
+
+    def clear_cache(self) -> None:
+        """Очищает кеш."""
+        self._cache.clear()
+        logger.info("Cleared check cache")
+
+    async def test_with_multiple_sni(self, config: str, sni_list: List[str]) -> Dict:
+        """Тестирует конфиг с несколькими SNI."""
+        parsed = self._extract_parsed(config)
+        if not parsed:
+            return {'error': 'parse_failed'}
+        host = parsed.get('add') or parsed.get('address')
+        use_tls = parsed.get('security') in ('tls', 'reality') or parsed.get('tls') in ('tls', 'reality')
+        if not host or not use_tls:
+            return {'error': 'no_tls'}
+
+        results = {}
+        for sni in sni_list:
+            res = await self._sni_probe.probe_check(host, sni)
+            results[sni] = {
+                'success': res.get('success', False),
+                'latency': res.get('latency', -1.0),
+                'error': res.get('error'),
+            }
+        return results
 
 
-class ConfigFetcher:
-    """Класс для обратной совместимости."""
-    def __init__(self, config: ProxyConfig):
-        self.config = config
-        self.validator = ConfigValidator()
-        self.protocol_counts: Dict[str, int] = {}
-        self.seen_configs: Set[str] = set()
-        self.channel_protocol_counts: Dict[str, Dict[str, int]] = {}
-
-    def fetch_all_configs(self) -> List[str]:
-        """Собирает все конфиги (синхронный интерфейс)."""
-        import asyncio
-        fetcher = AsyncConfigFetcher(self.config)
-        try:
-            return asyncio.run(fetcher.fetch_all())
-        finally:
-            asyncio.run(fetcher.close())
+ActiveChecker = CachedActiveChecker
