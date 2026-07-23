@@ -1,24 +1,24 @@
 # ============================================================================
-# Файл: src/user_settings.py (полностью обновлён с Pydantic и валидацией)
+# Файл: src/user_settings.py (полностью обновлён с Pydantic v2)
 # ============================================================================
 #!/usr/bin/env python3
 
 """
-Файл пользовательских настроек для Proxy-Hunter с валидацией через Pydantic.
+Файл пользовательских настроек для Proxy-Hunter с валидацией через Pydantic v2.
 Все параметры сгруппированы по блокам и снабжены комментариями и дефолтными значениями.
 """
 
 import os
 import logging
 from typing import List, Dict, Optional, Any
-from pydantic import BaseModel, Field, validator, root_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
 # ============================================================================
-# БЛОК: МОДЕЛИ НАСТРОЕК (Pydantic)
+# БЛОК: МОДЕЛИ НАСТРОЕК (Pydantic v2)
 # ============================================================================
 
 class NetworkSettings(BaseModel):
@@ -54,6 +54,14 @@ class ScoringSettings(BaseModel):
         description="Веса для расчёта итогового балла"
     )
     decay_period_hours: float = Field(24.0, ge=1.0, le=720.0, description="Период полураспада для истории (часы)")
+
+    @field_validator('score_weights')
+    def validate_score_weights(cls, v: Dict[str, float]) -> Dict[str, float]:
+        """Проверяет, что сумма весов равна 1.0."""
+        total = sum(v.values())
+        if not (0.99 <= total <= 1.01):
+            raise ValueError(f"Сумма весов должна быть равна 1.0, текущая: {total}")
+        return v
 
 
 class ChannelSettings(BaseModel):
@@ -160,16 +168,10 @@ class Settings(BaseModel):
     protocols: ProtocolSettings = Field(default_factory=ProtocolSettings)
     advanced: AdvancedSettings = Field(default_factory=AdvancedSettings)
 
-    @validator("score_weights")
-    def validate_score_weights(cls, v: Dict[str, float]) -> Dict[str, float]:
-        total = sum(v.values())
-        if not (0.99 <= total <= 1.01):
-            raise ValueError(f"Сумма весов должна быть равна 1.0, текущая: {total}")
-        return v
-
-    @root_validator
+    @model_validator(mode='after')
     def validate_all(cls, values: Dict[str, Any]) -> Dict[str, Any]:
-        if values.get("network").active_checker_workers > 200:
+        """Валидация всех настроек после инициализации."""
+        if values.network.active_checker_workers > 200:
             logger.warning("ACTIVE_CHECKER_WORKERS > 200 может вызвать перегрузку сети")
         return values
 
@@ -331,7 +333,7 @@ def load_settings() -> Settings:
     )
 
     # Валидируем настройки
-    settings.validate()
+    settings.model_validate(settings)
     return settings
 
 
