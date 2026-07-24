@@ -186,6 +186,8 @@ def parse_config_once(raw: str) -> Optional[ParsedConfig]:
 class OptimizedPipeline:
     def __init__(self) -> None:
         self.config = ProxyConfig()
+        # Добавляем логирование количества каналов
+        logger.info(f"Initialized ProxyConfig with {len(self.config.SOURCE_URLS)} channels")
         self.region = self.config.region
         self.validator = ConfigValidator()
         self.deduplicator = DeepDeduplicator()
@@ -415,7 +417,7 @@ class OptimizedPipeline:
                 f"recovering={summary.get('recovering', 0)}, "
                 f"inactive={summary.get('inactive', 0)} (total {summary.get('total', 0)})"
             )
-            # ДОБАВЛЕНО: логирование причин отключения
+            # Логирование причин отключения
             for ch in self.config.SOURCE_URLS:
                 if not ch.enabled:
                     state = self.channel_analyzer.get_channel_state(ch.url)
