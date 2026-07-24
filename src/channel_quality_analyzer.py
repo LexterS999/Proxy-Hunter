@@ -8,6 +8,9 @@
 - Добавлено логирование для отладки
 - Состояние канала кешируется в рамках refresh-цикла
 - Побочные DB-операции выполняются максимум один раз за цикл
+- Используется адаптивный порог здоровья (перцентиль)
+- Увеличен HISTORY_DAYS до 14 дней
+- grace_remaining при инициализации удвоен
 """
 
 import logging
@@ -64,6 +67,9 @@ CHANNEL_WHITELIST = getattr(settings.channels, 'channel_whitelist', [])
 GRACE_PERIOD_RUNS = max(3, getattr(settings.advanced, 'grace_period_runs', 3))
 ADAPTIVE_THRESHOLD_PERCENTILE = max(5, min(50, getattr(settings.advanced, 'adaptive_threshold_percentile', 20)))
 MIN_RECORDS_FOR_ADAPTIVE = max(3, getattr(settings.advanced, 'min_records_for_adaptive', 10))
+
+# Увеличиваем HISTORY_DAYS до 14 (было 7)
+HISTORY_DAYS = 14
 
 # Импортируем БД безопасно
 _db = None
@@ -129,7 +135,7 @@ class ChannelQualityAnalyzer:
         self._mutated_urls = set()
         self._known_channels = set()
 
-        # Загружаем историю каналов
+        # Загружаем историю каналов (используем HISTORY_DAYS = 14)
         for record in self._get_all_channel_history(days=HISTORY_DAYS):
             url = record['url']
             self._known_channels.add(url)
@@ -212,8 +218,10 @@ class ChannelQualityAnalyzer:
             return
         try:
             if action == 'init':
-                self.db.init_channel_grace_state(url, self._grace_period_runs)
-                self._grace_cache[url] = {'grace_remaining': self._grace_period_runs, 'last_bad_run': None}
+                # Удваиваем grace_remaining при инициализации
+                doubled_grace = self._grace_period_runs * 2
+                self.db.init_channel_grace_state(url, doubled_grace)
+                self._grace_cache[url] = {'grace_remaining': doubled_grace, 'last_bad_run': None}
             elif action == 'decrement':
                 self.db.decrement_channel_grace(url)
                 state = self._grace_cache.setdefault(url, {'grace_remaining': self._grace_period_runs, 'last_bad_run': None})
@@ -226,15 +234,20 @@ class ChannelQualityAnalyzer:
             logger.error(f"Failed to apply grace action {action} for {url}: {e}")
 
     def _get_channel_state(self, url: str, history: List[Dict], grace_state: Optional[Dict], adaptive_threshold: float) -> str:
-        """Определяет состояние канала."""
+        """Определяет состояние канала с учётом адаптивного порога и скользящего среднего."""
         if url in self._state_cache:
             return self._state_cache[url]
 
-        # === НОВЫЕ КАНАЛЫ (нет в истории) считаем активными === 
+        # НОВЫЕ КАНАЛЫ (нет в истории) – даём grace-период
         if url not in self._known_channels:
-            logger.debug(f"Channel {url} is new (not in history), marking as active")
-            self._state_cache[url] = 'active'
-            return 'active'
+            logger.debug(f"Channel {url} is new (not in history), applying grace period")
+            if grace_state is None:
+                self._apply_grace_once(url, 'init')
+                self._state_cache[url] = 'recovering'
+                return 'recovering'
+            else:
+                # Если уже есть состояние, считаем его
+                pass
 
         # Белый список
         if url in self._whitelist or self._is_first_run:
@@ -242,21 +255,37 @@ class ChannelQualityAnalyzer:
             self._state_cache[url] = state
             return state
 
-        # Если нет валидных оценок, но канал новый (в известных, но без оценок)
+        # Если нет валидных оценок, но канал известен – даём шанс
         valid_scores = [h['score'] for h in history if h.get('score', 0) > 0]
         if not valid_scores:
-            # Даём шанс новым каналам
             if self._is_first_run:
                 state = 'active'
             else:
-                state = 'inactive'
+                # Используем скользящее среднее за последние 5 запусков (если есть)
+                recent_scores = [h['score'] for h in history[-5:] if h.get('score', 0) > 0]
+                if recent_scores:
+                    avg_recent = sum(recent_scores) / len(recent_scores)
+                    if avg_recent >= adaptive_threshold:
+                        state = 'active'
+                    else:
+                        state = 'inactive'
+                else:
+                    state = 'inactive'
             self._state_cache[url] = state
             return state
 
-        avg_score = self._calculate_weighted_score(valid_scores)
-        
+        # Вычисляем скользящее среднее за последние 5 запусков
+        recent_scores = [h['score'] for h in history[-5:] if h.get('score', 0) > 0]
+        if recent_scores:
+            avg_recent = sum(recent_scores) / len(recent_scores)
+        else:
+            avg_recent = 0.0
+
+        # Используем адаптивный порог
+        threshold = self._adaptive_threshold_cache or HEALTH_THRESHOLD
+
         # Если средний score выше порога - активный
-        if avg_score >= adaptive_threshold:
+        if avg_recent >= threshold:
             state = 'active'
             self._state_cache[url] = state
             return state
@@ -282,9 +311,9 @@ class ChannelQualityAnalyzer:
             self._state_cache[url] = state
             return state
 
-        recent_scores = valid_scores[-recent_count:]
-        slope = self._compute_trend(recent_scores)
-        threshold_trend = RECOVERING_TREND_THRESHOLD * max(1.0, avg_score)
+        recent_trend = valid_scores[-recent_count:]
+        slope = self._compute_trend(recent_trend)
+        threshold_trend = RECOVERING_TREND_THRESHOLD * max(1.0, avg_recent)
         if slope > threshold_trend:
             self._apply_grace_once(url, 'reset')
             state = 'recovering'
@@ -384,3 +413,18 @@ class ChannelQualityAnalyzer:
             self._grace_cache.pop(url, None)
             self._known_channels.discard(url)
         logger.info(f"Reset states for {len(channel_urls)} channels")
+
+    def predict_channel_activity(self, url: str) -> float:
+        """
+        Заглушка для ML-предсказания активности. В будущем можно обучить модель.
+        Пока возвращает 0.5 (нейтрально).
+        """
+        # Можно добавить простую эвристику: если за последние 7 дней были конфиги, то вероятность выше
+        history = self._history_cache.get(url, [])
+        recent = [h for h in history if (datetime.now() - datetime.fromisoformat(h['timestamp'])).days < 7]
+        if len(recent) >= 2:
+            return 0.7
+        elif len(recent) == 1:
+            return 0.5
+        else:
+            return 0.3
