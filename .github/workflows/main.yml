@@ -6,7 +6,6 @@ on:
   workflow_dispatch:
 
 env:
-  # === Параметры, которые можно переопределить через GitHub Secrets ===
   PROXY_USE_MAXIMUM_POWER: ${{ secrets.PROXY_USE_MAXIMUM_POWER || 'true' }}
   PROXY_SPECIFIC_CONFIG_COUNT: ${{ secrets.PROXY_SPECIFIC_CONFIG_COUNT || '5000' }}
   PROXY_ARCHIVE_MAX_AGE_DAYS: ${{ secrets.PROXY_ARCHIVE_MAX_AGE_DAYS || '14' }}
@@ -22,9 +21,6 @@ env:
   PROXY_CHANNEL_MIN_CONFIGS: ${{ secrets.PROXY_CHANNEL_MIN_CONFIGS || '5' }}
   PROXY_CHANNEL_HISTORY_DAYS: ${{ secrets.PROXY_CHANNEL_HISTORY_DAYS || '14' }}
   PROXY_ADAPTIVE_THRESHOLD_PERCENTILE: ${{ secrets.PROXY_ADAPTIVE_THRESHOLD_PERCENTILE || '20' }}
-  # === Логирование ===
-  LOG_LEVEL: ${{ secrets.LOG_LEVEL || 'DEBUG' }}   # можно переопределить на INFO
-  # === Конец параметров ===
 
 jobs:
   run-pipeline:
@@ -69,7 +65,6 @@ jobs:
         run: |
           mkdir -p configs logs assets bloom_shards
 
-      # ===== Кэширование SQLite =====
       - name: Cache SQLite database
         uses: actions/cache@v4
         with:
@@ -78,7 +73,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-history-db-
 
-      # ===== Кэширование Bloom shards =====
       - name: Cache Bloom shards
         uses: actions/cache@v4
         with:
@@ -87,7 +81,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-bloom-shards-
 
-      # ===== Кэширование GeoLite2 ASN базы =====
       - name: Cache GeoLite2 ASN database
         id: cache-geolite
         uses: actions/cache@v4
@@ -97,14 +90,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-geolite2-asn-
 
-      # ===== Скачивание GeoLite2 (только если нет в кэше) =====
       - name: Download GeoLite2 ASN database (optional)
         if: steps.cache-geolite.outputs.cache-hit != 'true'
         run: |
           touch configs/GeoLite2-ASN.mmdb
           echo "⚠️ GeoLite2 база не установлена. Будет использован встроенный список датацентров."
 
-      # ===== Подготовка файлов =====
       - name: Ensure required files exist
         run: |
           touch configs/output_archive.txt
@@ -132,34 +123,16 @@ jobs:
         run: |
           bash install.sh --install-xray-only
 
-      # ===== Основной запуск (с полным выводом в реальном времени) =====
       - name: Run optimized pipeline
         id: pipeline
         continue-on-error: true
         env:
           PYTHONUNBUFFERED: 1
-          LOG_LEVEL: ${{ env.LOG_LEVEL }}
+          LOG_LEVEL: INFO
         run: |
-          # Используем stdbuf для отключения буферизации вывода
-          stdbuf -oL -eL python -u src/pipeline_optimized.py 2>&1 | tee pipeline_debug.log
+          set -x
+          python -u src/pipeline_optimized.py 2>&1 | tee pipeline_debug.log
 
-      # ===== Вывод полного лога после выполнения =====
-      - name: Display full log
-        if: always()
-        run: |
-          echo "========================================"
-          echo "📜 FULL PIPELINE LOG (begin)"
-          echo "========================================"
-          if [ -f "pipeline_debug.log" ]; then
-            cat pipeline_debug.log
-          else
-            echo "⚠️ Log file not found!"
-          fi
-          echo "========================================"
-          echo "📜 FULL PIPELINE LOG (end)"
-          echo "========================================"
-
-      # ===== Вакуумирование SQLite (сжатие) =====
       - name: Vacuum SQLite database
         if: always()
         run: |
@@ -176,84 +149,8 @@ jobs:
               print('ℹ️ history.db not found, skipping vacuum.')
           "
 
-      # ===== Удаление неактивных каналов =====
-      - name: Remove inactive channels from custom_channels.txt
-        run: |
-          python -c "
-          import sqlite3
-          import os
-          import re
-          from urllib.parse import urlparse
+      # Шаг "Remove inactive channels" УДАЛЁН
 
-          DB_PATH = 'configs/history.db'
-
-          def normalize_url(url):
-              url = url.strip()
-              if not url:
-                  return ''
-              if not url.startswith('http'):
-                  url = 'https://t.me/s/' + url.lstrip('/')
-              parsed = urlparse(url)
-              if parsed.scheme and parsed.netloc:
-                  netloc = parsed.netloc.replace('www.', '')
-                  path = parsed.path.rstrip('/')
-                  return f'{parsed.scheme}://{netloc}{path}'
-              return url
-
-          if not os.path.exists(DB_PATH):
-              print('history.db not found, skipping removal (first run)')
-              exit(0)
-
-          try:
-              conn = sqlite3.connect(DB_PATH)
-              cursor = conn.cursor()
-              cursor.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND name='channels'\")
-              if not cursor.fetchone():
-                  print('Table channels not found, skipping removal')
-                  conn.close()
-                  exit(0)
-              cursor.execute('SELECT url FROM channels WHERE enabled = 0')
-              rows = cursor.fetchall()
-              inactive_urls = {normalize_url(row[0]) for row in rows}
-              conn.close()
-          except Exception as e:
-              print(f'Could not read SQLite: {e}')
-              exit(0)
-
-          if not inactive_urls:
-              print('No inactive channels found')
-              exit(0)
-
-          print(f'Found {len(inactive_urls)} inactive channels')
-
-          try:
-              with open('custom_channels.txt', 'r') as f:
-                  lines = f.readlines()
-          except FileNotFoundError:
-              lines = []
-
-          filtered = []
-          removed_count = 0
-          for line in lines:
-              line = line.strip()
-              if not line or line.startswith('#'):
-                  filtered.append(line)
-                  continue
-              norm = normalize_url(line)
-              if norm in inactive_urls:
-                  removed_count += 1
-                  print(f'Removing: {line}')
-              else:
-                  filtered.append(line)
-
-          with open('custom_channels.txt', 'w') as f:
-              for line in filtered:
-                  f.write(line + '\n' if line else '\n')
-
-          print(f'Removed {removed_count} inactive channels')
-          "
-
-      # ===== Проверка выходных файлов =====
       - name: Check output files
         id: check_output
         run: |
@@ -291,7 +188,6 @@ jobs:
             echo "regional_weights_exists=false" >> $GITHUB_OUTPUT
           fi
 
-      # ===== Краткая статистика =====
       - name: Show quality summary
         if: steps.check_output.outputs.history_db_exists == 'true'
         run: |
@@ -336,7 +232,6 @@ jobs:
               print(f'  ⚠️ Could not read history: {e}')
           "
 
-      # ===== Статус шага pipeline =====
       - name: Show pipeline step status
         run: |
           echo "Pipeline step outcome: ${{ steps.pipeline.outcome }}"
@@ -345,7 +240,12 @@ jobs:
             echo "   and the 'pipeline-debug-log' artifact for details."
           fi
 
-      # ===== Загрузка артефактов =====
+      - name: Show last 50 lines of log
+        if: always()
+        run: |
+          echo "=== Последние 50 строк лога ==="
+          tail -50 pipeline_debug.log || true
+
       - name: Upload all artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -362,7 +262,6 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
-      # ===== Коммит изменений в репозиторий =====
       - name: Commit output to repo
         if: steps.check_output.outputs.archive_exists == 'true'
         run: |
@@ -383,7 +282,6 @@ jobs:
             echo "✅ Committed updated files to repository"
           fi
 
-      # ===== Логи при ошибке =====
       - name: Upload logs (if pipeline failed)
         if: always() && steps.pipeline.outcome == 'failure'
         uses: actions/upload-artifact@v4
@@ -391,18 +289,17 @@ jobs:
           name: pipeline-debug-log
           path: |
             pipeline_debug.log
+            pipeline_debug.log.*
             logs/
           retention-days: 7
           if-no-files-found: warn
 
-      # ===== Принудительный провал, если pipeline не удался =====
       - name: Fail job if pipeline failed
         if: steps.pipeline.outcome == 'failure'
         run: |
           echo "❌ 'Run optimized pipeline' step failed. Failing the job after diagnostics were uploaded."
           exit 1
 
-      # ===== Очистка старых логов =====
       - name: Cleanup old artifacts (optional)
         if: always()
         run: |
