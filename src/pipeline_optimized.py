@@ -1,24 +1,8 @@
 #!/usr/bin/env python3
 
 """
-Оптимизированный пайплайн Proxy-Hunter с:
-- Улучшенной оценкой
-- Асинхронной активной проверкой
-- Кешированием
-- Graceful shutdown
-- Autoclose для всех асинхронных ресурсов
-- Transient error handling
-- Использованием aiofiles для всех файловых операций
-
-Добавлены:
-- SNI Probe для тестирования с несколькими SNI
-- Региональный скоринг с бонусами/штрафами
-- Сбор статистики локальных проверок
-- Интеграция RealitySNIHunter
-- Автоматическое обновление весов
-- Детекция датацентров (штраф/бонус)
-- Фильтрация по возрасту профилей
-- Красивый итоговый вывод статистики
+Оптимизированный пайплайн Proxy-Hunter с детальным логированием.
+Каждый этап помечен отдельным маркером для удобства чтения в GitHub Actions.
 """
 
 import sys
@@ -186,8 +170,7 @@ def parse_config_once(raw: str) -> Optional[ParsedConfig]:
 class OptimizedPipeline:
     def __init__(self) -> None:
         self.config = ProxyConfig()
-        # Добавляем логирование количества каналов
-        logger.info(f"Initialized ProxyConfig with {len(self.config.SOURCE_URLS)} channels")
+        logger.info(f"=== ИНИЦИАЛИЗАЦИЯ: загружено {len(self.config.SOURCE_URLS)} каналов из конфига ===")
         self.region = self.config.region
         self.validator = ConfigValidator()
         self.deduplicator = DeepDeduplicator()
@@ -403,6 +386,7 @@ class OptimizedPipeline:
         try:
             self.channel_analyzer = ChannelQualityAnalyzer()
             urls = [ch.url for ch in self.config.SOURCE_URLS]
+            logger.info("=== ОБНОВЛЕНИЕ ЗДОРОВЬЯ КАНАЛОВ ===")
             for ch in self.config.SOURCE_URLS:
                 state = self.channel_analyzer.get_channel_state(ch.url)
                 if state == 'inactive':
@@ -417,7 +401,6 @@ class OptimizedPipeline:
                 f"recovering={summary.get('recovering', 0)}, "
                 f"inactive={summary.get('inactive', 0)} (total {summary.get('total', 0)})"
             )
-            # Логирование причин отключения
             for ch in self.config.SOURCE_URLS:
                 if not ch.enabled:
                     state = self.channel_analyzer.get_channel_state(ch.url)
@@ -502,7 +485,16 @@ class OptimizedPipeline:
             logger.info("🚀 Starting Proxy-Hunter Pipeline (optimized, async, SQLite)")
             logger.info("=" * 60)
 
-            logger.info("📡 Fetching configurations...")
+            # ===== ШАГ 1: ПОЛУЧЕНИЕ КАНАЛОВ =====
+            logger.info("=== ШАГ 1: ПОЛУЧЕНИЕ СПИСКА КАНАЛОВ ===")
+            logger.info(f"Всего каналов в конфиге: {len(self.config.SOURCE_URLS)}")
+            for idx, ch in enumerate(self.config.SOURCE_URLS[:5]):
+                logger.info(f"  {idx+1}. {ch.url} (включён: {ch.enabled})")
+            if len(self.config.SOURCE_URLS) > 5:
+                logger.info(f"  ... и ещё {len(self.config.SOURCE_URLS)-5} каналов")
+
+            # ===== ШАГ 2: СБОР КОНФИГОВ =====
+            logger.info("=== ШАГ 2: ЗАПУСК СБОРА КОНФИГОВ ===")
             fetcher = AsyncConfigFetcher(self.config)
             try:
                 raw_configs = await fetcher.fetch_all()
@@ -540,7 +532,8 @@ class OptimizedPipeline:
                 return False
             logger.info(f"✅ Raw configs: {len(raw_configs)}")
 
-            logger.info("🔍 Validating and extracting server info...")
+            # ===== ШАГ 3: ПАРСИНГ =====
+            logger.info("=== ШАГ 3: ПАРСИНГ И ВАЛИДАЦИЯ ===")
             parsed_cache = await self._load_parsed_cache_async()
             valid_configs = []
             parse_stats = {'strict': 0, 'heuristic': 0, 'failed': 0}
@@ -579,7 +572,8 @@ class OptimizedPipeline:
                 await fetcher.close()
                 return False
 
-            logger.info("🔍 Applying SNI filtering (Buildcage emulation)...")
+            # ===== ШАГ 4: SNI-ФИЛЬТРАЦИЯ =====
+            logger.info("=== ШАГ 4: SNI-ФИЛЬТРАЦИЯ ===")
             filtered_by_sni = []
             for cfg in valid_configs:
                 parsed = self._get_or_parse_config(cfg)
@@ -590,7 +584,8 @@ class OptimizedPipeline:
                 logger.warning("No configs passed SNI filter, using all valid configs")
                 filtered_by_sni = valid_configs
 
-            logger.info("⚡ Passive scoring profiles...")
+            # ===== ШАГ 5: ПАССИВНЫЙ СКОРИНГ =====
+            logger.info("=== ШАГ 5: ПАССИВНЫЙ СКОРИНГ ПРОФИЛЕЙ ===")
             scored_configs = []
             with tqdm(total=len(filtered_by_sni), desc="Scoring configs",
                       file=sys.stderr, mininterval=0.5, ncols=80, leave=False) as pbar:
@@ -641,7 +636,8 @@ class OptimizedPipeline:
                 await fetcher.close()
                 return False
 
-            logger.info("🧹 Deep deduplication before active probing...")
+            # ===== ШАГ 6: ДЕДУПЛИКАЦИЯ ДО АКТИВНОЙ ПРОВЕРКИ =====
+            logger.info("=== ШАГ 6: ДЕДУПЛИКАЦИЯ ПЕРЕД ПРОВЕРКОЙ ===")
             quality_scores = {item['config']: item['score'] for item in filtered}
             deduped_candidates = await self.deduplicator.deduplicate_configs_async(
                 [item['config'] for item in filtered],
@@ -655,7 +651,8 @@ class OptimizedPipeline:
                 await fetcher.close()
                 return False
 
-            logger.info("🔌 Active checking on top passive candidates...")
+            # ===== ШАГ 7: АКТИВНАЯ ПРОВЕРКА =====
+            logger.info("=== ШАГ 7: АКТИВНАЯ ПРОВЕРКА (TCP/HTTP) ===")
             if self.checker_cache is None:
                 self.checker_cache = ActiveChecker(timeout=TCP_TIMEOUT, max_workers=ACTIVE_CHECKER_WORKERS)
             probe_shortlist = self._build_probe_shortlist(deduped_candidates, quality_scores)
@@ -733,6 +730,8 @@ class OptimizedPipeline:
                 logger.warning("No configs confirmed by active checks; using strongest passive fallbacks.")
                 deduped = sorted(deduped_candidates, key=lambda c: quality_scores.get(c, 0.0), reverse=True)[:100]
 
+            # ===== ШАГ 8: ФИЛЬТРАЦИЯ ПО ВОЗРАСТУ =====
+            logger.info("=== ШАГ 8: ФИЛЬТРАЦИЯ ПО ВОЗРАСТУ ===")
             logger.info(f"⏳ Filtering configs by age (archive: {ARCHIVE_MAX_AGE_DAYS} days, simple: {SIMPLE_MAX_AGE_DAYS} days)")
             archive_configs = self._filter_by_age_with_score(deduped, ARCHIVE_MAX_AGE_DAYS)
             simple_configs = self._filter_by_age_with_score(deduped, SIMPLE_MAX_AGE_DAYS)
@@ -751,7 +750,8 @@ class OptimizedPipeline:
             archive_all = [c for c in archive_sorted if quality_scores.get(c, 0) > 0]
             logger.info(f"   Archive output (score>0): {len(archive_all)} configs")
 
-            logger.info("💾 Archiving logic (with name mapping)...")
+            # ===== ШАГ 9: АРХИВАЦИЯ =====
+            logger.info("=== ШАГ 9: АРХИВАЦИЯ С ИМЕНАМИ ===")
             name_mapping = await self._load_name_mapping_async()
             for cfg in archive_all:
                 key = self._get_config_key(cfg)
@@ -791,6 +791,7 @@ class OptimizedPipeline:
             self.db.add_run(run_stats)
             self.db.cleanup_old_data()
             
+            # Вывод финальной статистики
             print_summary(run_stats, len(merged_archive), len(simple_top))
             
             logger.info(f"✅ Pipeline completed in {time.time() - start_time:.2f} seconds")
