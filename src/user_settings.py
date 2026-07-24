@@ -79,11 +79,11 @@ class ChannelSettings(BaseModel):
     custom_channels_file: str = Field("custom_channels.txt", description="Файл с пользовательскими каналами")
     use_maximum_power: bool = Field(True, description="Собирать максимум конфигов")
     specific_config_count: int = Field(5000, ge=1, le=50000, description="Целевое количество конфигов")
-    channel_health_threshold: float = Field(20.0, ge=0.0, le=100.0, description="Порог здоровья канала")  # было 30
-    channel_min_configs: int = Field(5, ge=1, le=100, description="Минимальное число конфигов для канала")  # было 1
+    channel_health_threshold: float = Field(20.0, ge=0.0, le=100.0, description="Порог здоровья канала")
+    channel_min_configs: int = Field(5, ge=1, le=100, description="Минимальное число конфигов для канала")
     channel_min_valid_ratio: float = Field(0.01, ge=0.0, le=1.0, description="Минимальная доля валидных конфигов")
     channel_min_protocols: int = Field(1, ge=1, le=10, description="Минимальное число протоколов в канале")
-    channel_history_days: int = Field(7, ge=3, le=30, description="Количество дней истории для анализа канала")
+    channel_history_days: int = Field(14, ge=3, le=30, description="Количество дней истории для анализа канала")
     channel_recovering_trend_threshold: float = Field(0.1, ge=0.01, le=0.5, description="Порог тренда для восстановления канала")
     channel_min_recent_days_for_trend: int = Field(2, ge=1, le=7, description="Минимальное число дней для расчёта тренда")
     channel_whitelist: List[str] = Field(default=[], description="Белый список каналов")
@@ -151,7 +151,7 @@ class AdvancedSettings(BaseModel):
     anomaly_z_score_threshold: float = Field(2.5, ge=1.0, le=5.0, description="Порог Z-скора для аномалий")
     anomaly_iqr_multiplier: float = Field(1.5, ge=0.5, le=3.0, description="Множитель IQR для аномалий")
     anomaly_drop_threshold: float = Field(0.5, ge=0.1, le=0.9, description="Порог падения скора для аномалий")
-    grace_period_runs: int = Field(7, ge=1, le=20, description="Количество запусков для карантина канала")  # было 3
+    grace_period_runs: int = Field(7, ge=1, le=20, description="Количество запусков для карантина канала")
     adaptive_threshold_percentile: int = Field(20, ge=5, le=50, description="Процентиль для адаптивного порога")
     min_records_for_adaptive: int = Field(10, ge=3, le=50, description="Минимальное число записей для адаптивного порога")
 
@@ -179,16 +179,30 @@ class Settings(BaseModel):
 # ============================================================================
 
 def _load_channels_from_file(file_path: str) -> List[str]:
+    """Загружает каналы из файла, возвращает список URL."""
     channels: List[str] = []
-    if Path(file_path).exists():
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#") and line.startswith("https://t.me/s/"):
-                        channels.append(line)
-        except Exception as e:
-            logger.warning(f"Не удалось загрузить каналы из {file_path}: {e}")
+    if not Path(file_path).exists():
+        logger.warning(f"File {file_path} not found.")
+        return channels
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                # Нормализуем: если строка не начинается с http, добавляем https://t.me/s/
+                if not line.startswith(("http://", "https://")):
+                    if line.startswith("t.me/s/"):
+                        line = "https://" + line
+                    else:
+                        line = "https://t.me/s/" + line.lstrip("/")
+                if line.startswith("https://t.me/s/"):
+                    channels.append(line)
+                else:
+                    logger.debug(f"Skipping non-telegram channel: {line}")
+        logger.info(f"Loaded {len(channels)} channels from {file_path}")
+    except Exception as e:
+        logger.error(f"Failed to load channels from {file_path}: {e}")
     return channels
 
 
