@@ -65,10 +65,7 @@ try:
     from logger_utils import print_summary
     from user_settings import get_settings, get_settings as user_get_settings
     
-    # Получаем настройки
     settings = user_get_settings()
-    
-    # Импортируем переменные для обратной совместимости
     from user_settings import (
         ARCHIVE_MAX_AGE_DAYS,
         SIMPLE_MAX_AGE_DAYS,
@@ -84,7 +81,6 @@ try:
         CHANNEL_HEALTH_THRESHOLD,
     )
 except ImportError as e:
-    # Фоллбек, если какие-то модули недоступны
     logger = logging.getLogger(__name__)
     logger.error(f"Failed to import modules: {e}")
     sys.exit(1)
@@ -102,7 +98,6 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ParsedConfig:
-    """Распарсенная конфигурация."""
     raw: str
     protocol: str
     server: str
@@ -124,7 +119,6 @@ class ParsedConfig:
 
     @property
     def dedup_key(self) -> str:
-        """Ключ для дедупликации (учитывает протокол)."""
         return f"{self.server}:{self.port}:{self.protocol}:{self.credential}"
 
     @property
@@ -139,7 +133,6 @@ class ParsedConfig:
 
 @lru_cache(maxsize=10000)
 def parse_config_once(raw: str) -> Optional[ParsedConfig]:
-    """Парсит конфиг один раз (кешируется)."""
     try:
         data, method = FallbackParser.parse_with_stats(raw)
         if not data:
@@ -191,7 +184,6 @@ def parse_config_once(raw: str) -> Optional[ParsedConfig]:
 
 
 class OptimizedPipeline:
-    """Оптимизированный пайплайн с autoclose и обработкой ошибок."""
     def __init__(self) -> None:
         self.config = ProxyConfig()
         self.region = self.config.region
@@ -213,7 +205,6 @@ class OptimizedPipeline:
         self._parsed_cache: Dict[str, ParsedConfig] = {}
         self._session_pool = SessionPool()
         
-        # Новые компоненты
         self.sni_probe = SNIProbe(timeout=5.0)
         self.reality_hunter = RealitySNIHunter(xray_core_path="xray", timeout=5.0)
         self.regional_scorer = RegionalScorer(region=self.region)
@@ -225,7 +216,6 @@ class OptimizedPipeline:
         self._setup_signal_handlers()
 
     def _check_dependencies(self) -> None:
-        """Проверяет наличие зависимостей."""
         missing: List[str] = []
         try:
             import aiohttp
@@ -261,7 +251,6 @@ class OptimizedPipeline:
             sys.exit(1)
 
     def _setup_signal_handlers(self) -> None:
-        """Настраивает обработчики сигналов для graceful shutdown."""
         def handler(sig: int, frame) -> None:
             logger.info(f"Received signal {sig}, initiating graceful shutdown...")
             self._shutdown_requested = True
@@ -269,11 +258,9 @@ class OptimizedPipeline:
         signal.signal(signal.SIGTERM, handler)
 
     def _get_cache_key(self, config: str) -> str:
-        """Возвращает кеш-ключ для конфига."""
         return hashlib.md5(config.encode()).hexdigest()
 
     def _get_or_parse_config(self, raw: str) -> Optional[ParsedConfig]:
-        """Возвращает распарсенный конфиг из кеша или парсит заново."""
         cache_key = self._get_cache_key(raw)
         if cache_key in self._parsed_cache:
             return self._parsed_cache[cache_key]
@@ -283,7 +270,6 @@ class OptimizedPipeline:
         return parsed
 
     async def _load_parsed_cache_async(self) -> Dict:
-        """Загружает кеш парсинга асинхронно."""
         if os.path.exists(self.parsed_cache_file):
             try:
                 async with aiofiles.open(self.parsed_cache_file, 'r') as f:
@@ -295,7 +281,6 @@ class OptimizedPipeline:
         return {}
 
     async def _save_parsed_cache_async(self, cache: Dict) -> None:
-        """Сохраняет кеш парсинга асинхронно."""
         try:
             Path(self.parsed_cache_file).parent.mkdir(parents=True, exist_ok=True)
             async with aiofiles.open(self.parsed_cache_file, 'w') as f:
@@ -304,7 +289,6 @@ class OptimizedPipeline:
             logger.warning(f"Failed to save parsed cache: {e}")
 
     async def _load_name_mapping_async(self) -> Dict[str, str]:
-        """Загружает маппинг имён асинхронно."""
         if os.path.exists(self.name_mapping_file):
             try:
                 async with aiofiles.open(self.name_mapping_file, 'r', encoding='utf-8') as f:
@@ -315,7 +299,6 @@ class OptimizedPipeline:
         return {}
 
     async def _save_name_mapping_async(self, mapping: Dict[str, str]) -> None:
-        """Сохраняет маппинг имён асинхронно."""
         try:
             Path(self.name_mapping_file).parent.mkdir(parents=True, exist_ok=True)
             async with aiofiles.open(self.name_mapping_file, 'w', encoding='utf-8') as f:
@@ -324,14 +307,12 @@ class OptimizedPipeline:
             logger.error(f"Failed to save name mapping: {e}")
 
     def _get_config_key(self, config: str) -> str:
-        """Возвращает ключ для конфига (учитывает протокол)."""
         parsed = self._get_or_parse_config(config)
         if parsed:
             return hashlib.md5(parsed.dedup_key.encode()).hexdigest()
         return hashlib.md5(config.encode()).hexdigest()
 
     def _generate_name(self, config: str) -> str:
-        """Генерирует имя для конфига."""
         try:
             protocol = config.split('://')[0].upper()
             key = self._get_config_key(config)
@@ -340,7 +321,6 @@ class OptimizedPipeline:
             return f"config-{hashlib.md5(config.encode()).hexdigest()[:8]}"
 
     async def _load_archive_async(self) -> List[str]:
-        """Загружает архив конфигов асинхронно."""
         if not os.path.exists(self.output_file):
             return []
         try:
@@ -352,7 +332,6 @@ class OptimizedPipeline:
             return []
 
     async def _save_archive_with_names_async(self, configs: List[str], mapping: Dict[str, str]) -> None:
-        """Сохраняет архив с именами асинхронно."""
         for cfg in configs:
             key = self._get_config_key(cfg)
             if key not in mapping:
@@ -378,7 +357,6 @@ class OptimizedPipeline:
             logger.error(f"Failed to save archive: {e}")
 
     async def _save_simple_async(self, configs: List[str], mapping: Dict[str, str]) -> None:
-        """Сохраняет простой вывод асинхронно."""
         lines = []
         for cfg in configs:
             key = self._get_config_key(cfg)
@@ -399,7 +377,6 @@ class OptimizedPipeline:
             logger.error(f"Failed to save simple output: {e}")
 
     def _save_channel_stats(self, run_id: int) -> None:
-        """Сохраняет статистику каналов."""
         try:
             for ch in self.config.SOURCE_URLS:
                 m = ch.metrics
@@ -421,7 +398,6 @@ class OptimizedPipeline:
             logger.error(f"Failed to save channel stats: {e}")
 
     def _refresh_channel_health(self) -> None:
-        """Обновляет состояние здоровья каналов."""
         try:
             self.channel_analyzer = ChannelQualityAnalyzer()
             urls = [ch.url for ch in self.config.SOURCE_URLS]
@@ -439,11 +415,15 @@ class OptimizedPipeline:
                 f"recovering={summary.get('recovering', 0)}, "
                 f"inactive={summary.get('inactive', 0)} (total {summary.get('total', 0)})"
             )
+            # ДОБАВЛЕНО: логирование причин отключения
+            for ch in self.config.SOURCE_URLS:
+                if not ch.enabled:
+                    state = self.channel_analyzer.get_channel_state(ch.url)
+                    logger.info(f"Channel {ch.url} disabled, reason: state={state}, score={ch.metrics.overall_score}")
         except Exception as e:
             logger.warning(f"Failed to refresh channel health: {e}")
 
     def _filter_by_age_with_score(self, configs: List[str], max_age_days: int, score_threshold: int = 80) -> List[str]:
-        """Фильтрует конфиги по возрасту и скора."""
         if max_age_days <= 0:
             return []
         cutoff = datetime.now() - timedelta(days=max_age_days)
@@ -467,7 +447,6 @@ class OptimizedPipeline:
         return filtered
 
     def _build_probe_shortlist(self, configs: List[str], quality_scores: Dict[str, float]) -> List[str]:
-        """Создаёт короткий список для проверки."""
         if not configs:
             return []
         probe_budget = max(250, ACTIVE_CHECKER_WORKERS * 6)
@@ -501,7 +480,6 @@ class OptimizedPipeline:
         return shortlist
 
     async def save_state(self) -> None:
-        """Сохраняет состояние перед выключением."""
         logger.info("Saving state before shutdown...")
         try:
             if hasattr(self.deduplicator, '_bloom'):
@@ -515,7 +493,6 @@ class OptimizedPipeline:
         logger.info("State saved.")
 
     async def run(self) -> bool:
-        """Запускает пайплайн."""
         start_time = time.time()
         fetcher = None
         try:
@@ -523,7 +500,6 @@ class OptimizedPipeline:
             logger.info("🚀 Starting Proxy-Hunter Pipeline (optimized, async, SQLite)")
             logger.info("=" * 60)
 
-            # Шаг 1: Сбор
             logger.info("📡 Fetching configurations...")
             fetcher = AsyncConfigFetcher(self.config)
             try:
@@ -562,7 +538,6 @@ class OptimizedPipeline:
                 return False
             logger.info(f"✅ Raw configs: {len(raw_configs)}")
 
-            # Шаг 2: Парсинг и валидация
             logger.info("🔍 Validating and extracting server info...")
             parsed_cache = await self._load_parsed_cache_async()
             valid_configs = []
@@ -602,7 +577,6 @@ class OptimizedPipeline:
                 await fetcher.close()
                 return False
 
-            # Шаг 2.1: SNI-фильтрация
             logger.info("🔍 Applying SNI filtering (Buildcage emulation)...")
             filtered_by_sni = []
             for cfg in valid_configs:
@@ -614,7 +588,6 @@ class OptimizedPipeline:
                 logger.warning("No configs passed SNI filter, using all valid configs")
                 filtered_by_sni = valid_configs
 
-            # Шаг 3: Пассивная оценка
             logger.info("⚡ Passive scoring profiles...")
             scored_configs = []
             with tqdm(total=len(filtered_by_sni), desc="Scoring configs",
@@ -666,7 +639,6 @@ class OptimizedPipeline:
                 await fetcher.close()
                 return False
 
-            # Шаг 4: Дедупликация до активной проверки
             logger.info("🧹 Deep deduplication before active probing...")
             quality_scores = {item['config']: item['score'] for item in filtered}
             deduped_candidates = await self.deduplicator.deduplicate_configs_async(
@@ -681,7 +653,6 @@ class OptimizedPipeline:
                 await fetcher.close()
                 return False
 
-            # Шаг 5: Активная проверка
             logger.info("🔌 Active checking on top passive candidates...")
             if self.checker_cache is None:
                 self.checker_cache = ActiveChecker(timeout=TCP_TIMEOUT, max_workers=ACTIVE_CHECKER_WORKERS)
@@ -760,7 +731,6 @@ class OptimizedPipeline:
                 logger.warning("No configs confirmed by active checks; using strongest passive fallbacks.")
                 deduped = sorted(deduped_candidates, key=lambda c: quality_scores.get(c, 0.0), reverse=True)[:100]
 
-            # Шаг 6: Фильтрация по возрасту
             logger.info(f"⏳ Filtering configs by age (archive: {ARCHIVE_MAX_AGE_DAYS} days, simple: {SIMPLE_MAX_AGE_DAYS} days)")
             archive_configs = self._filter_by_age_with_score(deduped, ARCHIVE_MAX_AGE_DAYS)
             simple_configs = self._filter_by_age_with_score(deduped, SIMPLE_MAX_AGE_DAYS)
@@ -779,7 +749,6 @@ class OptimizedPipeline:
             archive_all = [c for c in archive_sorted if quality_scores.get(c, 0) > 0]
             logger.info(f"   Archive output (score>0): {len(archive_all)} configs")
 
-            # Шаг 7: Архивация с именами
             logger.info("💾 Archiving logic (with name mapping)...")
             name_mapping = await self._load_name_mapping_async()
             for cfg in archive_all:
@@ -800,20 +769,16 @@ class OptimizedPipeline:
                     merged_archive.append(cfg)
                     seen_keys.add(key)
 
-            # Сохраняем результаты
             await self._save_archive_with_names_async(merged_archive, name_mapping)
             await self._save_simple_async(simple_top, name_mapping)
 
-            # Обновляем веса
             self.weight_updater.update_weights(quality_scores)
 
-            # Выводим статистику
             run_stats['total_valid'] = len(valid_configs)
             run_stats['total_final'] = len(deduped)
             run_stats['avg_score'] = sum(quality_scores.values()) / len(quality_scores) if quality_scores else 0.0
             run_stats['success_rate'] = sum(1 for r in probe_results if r.get('success')) / len(probe_results) if probe_results else 0.0
             
-            # Рассчитываем перцентили задержки
             latencies = [r.get('latency', -1) for r in probe_results if r.get('latency', -1) > 0]
             if latencies:
                 import numpy as np
@@ -821,13 +786,9 @@ class OptimizedPipeline:
                 run_stats['p95_latency'] = float(np.percentile(latencies, 95))
                 run_stats['p99_latency'] = float(np.percentile(latencies, 99))
             
-            # Сохраняем статистику запуска
             self.db.add_run(run_stats)
-            
-            # Очищаем старые данные
             self.db.cleanup_old_data()
             
-            # Выводим итоговую статистику
             print_summary(run_stats, len(merged_archive), len(simple_top))
             
             logger.info(f"✅ Pipeline completed in {time.time() - start_time:.2f} seconds")
@@ -838,7 +799,6 @@ class OptimizedPipeline:
             logger.error(traceback.format_exc())
             return False
         finally:
-            # Autoclose для всех ресурсов
             try:
                 if fetcher:
                     await fetcher.close()
