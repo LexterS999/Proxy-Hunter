@@ -47,9 +47,7 @@ try:
     from weight_updater import WeightUpdater
     from datacenter_detector import is_datacenter_ip
     from logger_utils import print_summary
-    from user_settings import get_settings, get_settings as user_get_settings
-    
-    settings = user_get_settings()
+    from user_settings import get_settings
     from user_settings import (
         ARCHIVE_MAX_AGE_DAYS,
         SIMPLE_MAX_AGE_DAYS,
@@ -65,12 +63,17 @@ try:
         CHANNEL_HEALTH_THRESHOLD,
     )
 except ImportError as e:
+    # Настройка логирования до того, как всё загрузится
+    logging.basicConfig(level=logging.DEBUG,
+                        format='%(asctime)s - %(levelname)s - %(message)s')
     logger = logging.getLogger(__name__)
     logger.error(f"Failed to import modules: {e}")
     sys.exit(1)
 
-# Настройка логирования
-log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
+# ============================================================================
+# НАСТРОЙКА ЛОГИРОВАНИЯ (ПОЛНЫЙ ВЫВОД)
+# ============================================================================
+log_level = os.getenv('LOG_LEVEL', 'DEBUG').upper()  # по умолчанию DEBUG
 logging.basicConfig(
     level=logging.DEBUG if log_level == 'DEBUG' else logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -79,6 +82,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Дополнительно включаем логирование отладки для всех модулей
+logging.getLogger('aiohttp').setLevel(logging.WARNING)
+logging.getLogger('asyncio').setLevel(logging.WARNING)
 
 @dataclass
 class ParsedConfig:
@@ -113,7 +119,6 @@ class ParsedConfig:
         else:
             prefix = self.server
         return f"{self.protocol}:{prefix}"
-
 
 @lru_cache(maxsize=10000)
 def parse_config_once(raw: str) -> Optional[ParsedConfig]:
@@ -166,7 +171,6 @@ def parse_config_once(raw: str) -> Optional[ParsedConfig]:
         logger.debug(f"parse_config_once failed for {raw[:50]}...: {e}")
         return None
 
-
 class OptimizedPipeline:
     def __init__(self) -> None:
         self.config = ProxyConfig()
@@ -199,6 +203,9 @@ class OptimizedPipeline:
 
         self._check_dependencies()
         self._setup_signal_handlers()
+
+        # Дополнительное логирование для отладки
+        logger.debug("Pipeline инициализирован с регионом %s", self.region)
 
     def _check_dependencies(self) -> None:
         missing: List[str] = []
@@ -811,8 +818,5 @@ class OptimizedPipeline:
             except Exception as e:
                 logger.error(f"Error during cleanup: {e}")
 
-
 if __name__ == "__main__":
-    pipeline = OptimizedPipeline()
-    success = asyncio.run(pipeline.run())
-    sys.exit(0 if success else 1)
+   
