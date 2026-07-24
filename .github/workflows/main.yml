@@ -17,8 +17,11 @@ env:
   PROXY_ACTIVE_CHECKER_WORKERS: ${{ secrets.PROXY_ACTIVE_CHECKER_WORKERS || '100' }}
   PROXY_PER_HOST_LIMIT: ${{ secrets.PROXY_PER_HOST_LIMIT || '10' }}
   PROXY_SCORE_MIN_THRESHOLD: ${{ secrets.PROXY_SCORE_MIN_THRESHOLD || '30.0' }}
-  PROXY_CHANNEL_HEALTH_THRESHOLD: ${{ secrets.PROXY_CHANNEL_HEALTH_THRESHOLD || '30.0' }}
-  PROXY_GRACE_PERIOD_RUNS: ${{ secrets.PROXY_GRACE_PERIOD_RUNS || '5' }}
+  # === Новые / обновлённые параметры ===
+  PROXY_CHANNEL_HEALTH_THRESHOLD: ${{ secrets.PROXY_CHANNEL_HEALTH_THRESHOLD || '20.0' }}  # было 30
+  PROXY_GRACE_PERIOD_RUNS: ${{ secrets.PROXY_GRACE_PERIOD_RUNS || '7' }}                # было 5
+  PROXY_CHANNEL_MIN_CONFIGS: ${{ secrets.PROXY_CHANNEL_MIN_CONFIGS || '5' }}            # добавлено
+  PROXY_CHANNEL_HISTORY_DAYS: ${{ secrets.PROXY_CHANNEL_HISTORY_DAYS || '14' }}         # добавлено
   PROXY_ADAPTIVE_THRESHOLD_PERCENTILE: ${{ secrets.PROXY_ADAPTIVE_THRESHOLD_PERCENTILE || '20' }}
   # === Конец параметров ===
 
@@ -268,6 +271,12 @@ jobs:
           else
             echo "parsed_cache_exists=false" >> $GITHUB_OUTPUT
           fi
+          if [ -f "configs/regional_weights.json" ]; then
+            echo "regional_weights_exists=true" >> $GITHUB_OUTPUT
+            echo "✅ regional_weights.json exists"
+          else
+            echo "regional_weights_exists=false" >> $GITHUB_OUTPUT
+          fi
 
       # ===== Краткая статистика =====
       - name: Show quality summary
@@ -302,6 +311,12 @@ jobs:
                       print('  Protocols:')
                       for p, count in protocols.items():
                           print(f'    {p}: {count}')
+                  # Дополнительно: количество активных каналов из таблицы channels
+                  cursor.execute('SELECT COUNT(*) FROM channels WHERE enabled = 1')
+                  active_channels = cursor.fetchone()[0]
+                  cursor.execute('SELECT COUNT(*) FROM channels')
+                  total_channels = cursor.fetchone()[0]
+                  print(f'  Active channels: {active_channels} / {total_channels}')
               else:
                   print('  No history data yet')
               conn.close()
