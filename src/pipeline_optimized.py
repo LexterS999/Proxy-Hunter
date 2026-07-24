@@ -86,6 +86,7 @@ logger = logging.getLogger(__name__)
 logging.getLogger('aiohttp').setLevel(logging.WARNING)
 logging.getLogger('asyncio').setLevel(logging.WARNING)
 
+
 @dataclass
 class ParsedConfig:
     raw: str
@@ -119,6 +120,7 @@ class ParsedConfig:
         else:
             prefix = self.server
         return f"{self.protocol}:{prefix}"
+
 
 @lru_cache(maxsize=10000)
 def parse_config_once(raw: str) -> Optional[ParsedConfig]:
@@ -170,6 +172,7 @@ def parse_config_once(raw: str) -> Optional[ParsedConfig]:
     except Exception as e:
         logger.debug(f"parse_config_once failed for {raw[:50]}...: {e}")
         return None
+
 
 class OptimizedPipeline:
     def __init__(self) -> None:
@@ -610,4 +613,216 @@ class OptimizedPipeline:
                             base_score = max(0, min(100, base_score))
                             scored_configs.append({
                                 'config': cfg,
-                                'score':
+                                'score': round(base_score, 2),
+                                'stability': score_info['stability'],
+                                'lifetime': score_info['lifetime'],
+                                'is_datacenter': dc,
+                                'server_type': 'datacenter' if dc else 'vps',
+                                'parsed': parsed.parsed_data,
+                            })
+                    except Exception as e:
+                        logger.error(f"Scoring error for config {idx}: {e}")
+                    pbar.update(1)
+
+            if self._shutdown_requested:
+                await self.save_state()
+                await fetcher.close()
+                return False
+            logger.info(f"✅ Passively scored {len(scored_configs)} configs")
+
+            if not scored_configs:
+                logger.error("No configs scored.")
+                await fetcher.close()
+                return False
+
+            filtered = [item for item in scored_configs if item['score'] >= SCORE_MIN_THRESHOLD]
+            logger.info(f"✅ After min_score filter: {len(filtered)}")
+            if not filtered:
+                logger.warning("No configs passed min_score filter, lowering threshold...")
+                filtered = list(scored_configs)
+                logger.info(f"✅ After lowered filter: {len(filtered)}")
+            if self._shutdown_requested or not filtered:
+                await self.save_state()
+                await fetcher.close()
+                return False
+
+            # ===== ШАГ 6: ДЕДУПЛИКАЦИЯ ДО АКТИВНОЙ ПРОВЕРКИ =====
+            logger.info("=== ШАГ 6: ДЕДУПЛИКАЦИЯ ПЕРЕД ПРОВЕРКОЙ ===")
+            quality_scores = {item['config']: item['score'] for item in filtered}
+            deduped_candidates = await self.deduplicator.deduplicate_configs_async(
+                [item['config'] for item in filtered],
+                quality_scores,
+            )
+            logger.info(f"✅ After pre-probe dedup: {len(deduped_candidates)}")
+
+            if self._shutdown_requested or not deduped_candidates:
+                if self._shutdown_requested:
+                    await self.save_state()
+                await fetcher.close()
+                return False
+
+            # ===== ШАГ 7: АКТИВНАЯ ПРОВЕРКА =====
+            logger.info("=== ШАГ 7: АКТИВНАЯ ПРОВЕРКА (TCP/HTTP) ===")
+            if self.checker_cache is None:
+                self.checker_cache = ActiveChecker(timeout=TCP_TIMEOUT, max_workers=ACTIVE_CHECKER_WORKERS)
+            probe_shortlist = self._build_probe_shortlist(deduped_candidates, quality_scores)
+            logger.info(f"   Probe shortlist: {len(probe_shortlist)} / {len(deduped_candidates)}")
+            try:
+                probe_results = await self.checker_cache.check_batch(probe_shortlist)
+            except Exception as e:
+                logger.error(f"Active checking failed: {e}")
+                await self.save_state()
+                await fetcher.close()
+                return False
+            
+            probe_map = {item['config']: item for item in probe_results}
+
+            probe_records = []
+            good_configs = []
+            strict_passive_floor = max(60.0, SCORE_MIN_THRESHOLD + 20.0)
+            for cfg in deduped_candidates:
+                parsed = self._get_or_parse_config(cfg)
+                if not parsed or not parsed.parsed_data:
+                    continue
+                base_score = quality_scores.get(cfg, 0.0)
+                probe = probe_map.get(cfg)
+                if probe is None:
+                    if base_score >= strict_passive_floor:
+                        good_configs.append(cfg)
+                    continue
+
+                success = bool(probe.get('success'))
+                latency = max(0.0, float(probe.get('latency', 0.0) or 0.0))
+                committed = self.scorer.score_profile(
+                    cfg,
+                    parsed.parsed_data,
+                    success=success,
+                    latency=latency,
+                    sni_used=probe.get('sni_override') or parsed.parsed_data.get('sni'),
+                    host_used=parsed.parsed_data.get('host'),
+                )
+                self.scorer.record_local_result(cfg, parsed.parsed_data, success, latency)
+
+                final_score = committed['score']
+                if success:
+                    latency_factor = max(0.90, min(1.12, 1200.0 / max(latency, 150.0))) if latency > 0 else 1.0
+                    final_score = max(final_score, min(100.0, final_score * latency_factor))
+                    good_configs.append(cfg)
+                else:
+                    final_score = min(final_score, base_score * 0.65)
+                quality_scores[cfg] = round(max(0.0, min(100.0, final_score)), 2)
+
+                profile_key = self.scorer.get_profile_key(cfg, parsed.parsed_data)
+                probe_records.append({
+                    'profile_key': profile_key,
+                    'timestamp': datetime.now().isoformat(),
+                    'success': success,
+                    'latency': latency,
+                    'protocol': parsed.protocol,
+                    'transport': parsed.parsed_data.get('type', parsed.parsed_data.get('net', 'tcp')),
+                    'sni_used': probe.get('sni_override') or parsed.parsed_data.get('sni'),
+                    'host_used': parsed.parsed_data.get('host'),
+                    'path_used': parsed.parsed_data.get('path'),
+                    'attempt_number': probe.get('attempt_number', 1),
+                    'total_attempts': probe.get('total_attempts', 1),
+                    'error': probe.get('error'),
+                })
+
+            if probe_records:
+                try:
+                    self.db.add_probe_results_batch(probe_records)
+                except Exception as e:
+                    logger.error(f"Failed to save probe records: {e}")
+
+            deduped = list(dict.fromkeys(good_configs))
+            logger.info(f"✅ Selected after hybrid validation: {len(deduped)}")
+            if not deduped:
+                logger.warning("No configs confirmed by active checks; using strongest passive fallbacks.")
+                deduped = sorted(deduped_candidates, key=lambda c: quality_scores.get(c, 0.0), reverse=True)[:100]
+
+            # ===== ШАГ 8: ФИЛЬТРАЦИЯ ПО ВОЗРАСТУ =====
+            logger.info("=== ШАГ 8: ФИЛЬТРАЦИЯ ПО ВОЗРАСТУ ===")
+            logger.info(f"⏳ Filtering configs by age (archive: {ARCHIVE_MAX_AGE_DAYS} days, simple: {SIMPLE_MAX_AGE_DAYS} days)")
+            archive_configs = self._filter_by_age_with_score(deduped, ARCHIVE_MAX_AGE_DAYS)
+            simple_configs = self._filter_by_age_with_score(deduped, SIMPLE_MAX_AGE_DAYS)
+            logger.info(f"   Archive configs: {len(archive_configs)}")
+            logger.info(f"   Simple configs: {len(simple_configs)}")
+
+            old_archive = await self._load_archive_async()
+            old_archive_filtered = self._filter_by_age_with_score(old_archive, ARCHIVE_MAX_AGE_DAYS)
+            logger.info(f"   Old archive filtered: {len(old_archive)} -> {len(old_archive_filtered)}")
+
+            sorted_by_score = sorted(simple_configs, key=lambda c: quality_scores.get(c, 0), reverse=True)
+            simple_top = [c for c in sorted_by_score if quality_scores.get(c, 0) > 50][:100]
+            logger.info(f"   Simple output (top-100, score>50): {len(simple_top)} configs")
+
+            archive_sorted = sorted(archive_configs, key=lambda c: (quality_scores.get(c, 0), self._get_config_key(c)), reverse=True)
+            archive_all = [c for c in archive_sorted if quality_scores.get(c, 0) > 0]
+            logger.info(f"   Archive output (score>0): {len(archive_all)} configs")
+
+            # ===== ШАГ 9: АРХИВАЦИЯ =====
+            logger.info("=== ШАГ 9: АРХИВАЦИЯ С ИМЕНАМИ ===")
+            name_mapping = await self._load_name_mapping_async()
+            for cfg in archive_all:
+                key = self._get_config_key(cfg)
+                if key not in name_mapping:
+                    name_mapping[key] = self._generate_name(cfg)
+
+            merged_archive = []
+            seen_keys = set()
+            for cfg in old_archive_filtered:
+                key = self._get_config_key(cfg)
+                if key not in seen_keys:
+                    merged_archive.append(cfg)
+                    seen_keys.add(key)
+            for cfg in archive_all:
+                key = self._get_config_key(cfg)
+                if key not in seen_keys:
+                    merged_archive.append(cfg)
+                    seen_keys.add(key)
+
+            await self._save_archive_with_names_async(merged_archive, name_mapping)
+            await self._save_simple_async(simple_top, name_mapping)
+
+            self.weight_updater.update_weights(quality_scores)
+
+            run_stats['total_valid'] = len(valid_configs)
+            run_stats['total_final'] = len(deduped)
+            run_stats['avg_score'] = sum(quality_scores.values()) / len(quality_scores) if quality_scores else 0.0
+            run_stats['success_rate'] = sum(1 for r in probe_results if r.get('success')) / len(probe_results) if probe_results else 0.0
+            
+            latencies = [r.get('latency', -1) for r in probe_results if r.get('latency', -1) > 0]
+            if latencies:
+                import numpy as np
+                run_stats['p50_latency'] = float(np.percentile(latencies, 50))
+                run_stats['p95_latency'] = float(np.percentile(latencies, 95))
+                run_stats['p99_latency'] = float(np.percentile(latencies, 99))
+            
+            self.db.add_run(run_stats)
+            self.db.cleanup_old_data()
+            
+            # Вывод финальной статистики
+            print_summary(run_stats, len(merged_archive), len(simple_top))
+            
+            logger.info(f"✅ Pipeline completed in {time.time() - start_time:.2f} seconds")
+            return True
+
+        except Exception as e:
+            logger.error(f"Pipeline failed: {e}")
+            logger.error(traceback.format_exc())
+            return False
+        finally:
+            try:
+                if fetcher:
+                    await fetcher.close()
+                if self.checker_cache:
+                    await self.checker_cache.close()
+                await self.save_state()
+            except Exception as e:
+                logger.error(f"Error during cleanup: {e}")
+
+
+if __name__ == "__main__":
+    pipeline = OptimizedPipeline()
+    success = asyncio.run(pipeline.run())
+    sys.exit(0 if success else 1)
