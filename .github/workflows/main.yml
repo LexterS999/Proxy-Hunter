@@ -6,6 +6,9 @@ on:
   workflow_dispatch:
 
 env:
+  # Полное логирование (фикс регрессии: раньше свёрнуто в INFO и было видно только при failure)
+  LOG_LEVEL: DEBUG
+  PYTHONUNBUFFERED: "1"
   PROXY_USE_MAXIMUM_POWER: ${{ secrets.PROXY_USE_MAXIMUM_POWER || 'true' }}
   PROXY_SPECIFIC_CONFIG_COUNT: ${{ secrets.PROXY_SPECIFIC_CONFIG_COUNT || '5000' }}
   PROXY_ARCHIVE_MAX_AGE_DAYS: ${{ secrets.PROXY_ARCHIVE_MAX_AGE_DAYS || '14' }}
@@ -282,8 +285,8 @@ jobs:
             echo "✅ Committed updated files to repository"
           fi
 
-      - name: Upload logs (if pipeline failed)
-        if: always() && steps.pipeline.outcome == 'failure'
+      - name: Upload full logs (always — даже на success)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: pipeline-debug-log
