@@ -57,7 +57,6 @@ class ScoringSettings(BaseModel):
 
     @field_validator('score_weights')
     def validate_score_weights(cls, v: Dict[str, float]) -> Dict[str, float]:
-        """Проверяет, что сумма весов равна 1.0."""
         total = sum(v.values())
         if not (0.99 <= total <= 1.01):
             raise ValueError(f"Сумма весов должна быть равна 1.0, текущая: {total}")
@@ -80,8 +79,8 @@ class ChannelSettings(BaseModel):
     custom_channels_file: str = Field("custom_channels.txt", description="Файл с пользовательскими каналами")
     use_maximum_power: bool = Field(True, description="Собирать максимум конфигов")
     specific_config_count: int = Field(5000, ge=1, le=50000, description="Целевое количество конфигов")
-    channel_health_threshold: float = Field(30.0, ge=0.0, le=100.0, description="Порог здоровья канала")
-    channel_min_configs: int = Field(1, ge=1, le=100, description="Минимальное число конфигов для канала")
+    channel_health_threshold: float = Field(20.0, ge=0.0, le=100.0, description="Порог здоровья канала")  # было 30
+    channel_min_configs: int = Field(5, ge=1, le=100, description="Минимальное число конфигов для канала")  # было 1
     channel_min_valid_ratio: float = Field(0.01, ge=0.0, le=1.0, description="Минимальная доля валидных конфигов")
     channel_min_protocols: int = Field(1, ge=1, le=10, description="Минимальное число протоколов в канале")
     channel_history_days: int = Field(7, ge=3, le=30, description="Количество дней истории для анализа канала")
@@ -152,7 +151,7 @@ class AdvancedSettings(BaseModel):
     anomaly_z_score_threshold: float = Field(2.5, ge=1.0, le=5.0, description="Порог Z-скора для аномалий")
     anomaly_iqr_multiplier: float = Field(1.5, ge=0.5, le=3.0, description="Множитель IQR для аномалий")
     anomaly_drop_threshold: float = Field(0.5, ge=0.1, le=0.9, description="Порог падения скора для аномалий")
-    grace_period_runs: int = Field(3, ge=1, le=20, description="Количество запусков для карантина канала")
+    grace_period_runs: int = Field(7, ge=1, le=20, description="Количество запусков для карантина канала")  # было 3
     adaptive_threshold_percentile: int = Field(20, ge=5, le=50, description="Процентиль для адаптивного порога")
     min_records_for_adaptive: int = Field(10, ge=3, le=50, description="Минимальное число записей для адаптивного порога")
 
@@ -170,7 +169,6 @@ class Settings(BaseModel):
 
     @model_validator(mode='after')
     def validate_all(cls, values: Dict[str, Any]) -> Dict[str, Any]:
-        """Валидация всех настроек после инициализации."""
         if values.network.active_checker_workers > 200:
             logger.warning("ACTIVE_CHECKER_WORKERS > 200 может вызвать перегрузку сети")
         return values
@@ -181,7 +179,6 @@ class Settings(BaseModel):
 # ============================================================================
 
 def _load_channels_from_file(file_path: str) -> List[str]:
-    """Загружает каналы из файла."""
     channels: List[str] = []
     if Path(file_path).exists():
         try:
@@ -196,7 +193,6 @@ def _load_channels_from_file(file_path: str) -> List[str]:
 
 
 def _get_env_value(key: str, default: Any, field_type: type) -> Any:
-    """Получает значение из переменной окружения с валидацией."""
     env_value = os.getenv(key)
     if env_value is None:
         return default
@@ -215,11 +211,7 @@ def _get_env_value(key: str, default: Any, field_type: type) -> Any:
 
 
 def load_settings() -> Settings:
-    """Загружает настройки из переменных окружения и файлов."""
-    # Загружаем каналы ИСКЛЮЧИТЕЛЬНО из custom_channels.txt
     custom_channels = _load_channels_from_file("custom_channels.txt")
-    
-    # Если файл пустой или не существует, используем дефолтные каналы
     if not custom_channels:
         logger.warning("custom_channels.txt is empty or not found. Using default channels.")
         custom_channels = [
@@ -230,162 +222,73 @@ def load_settings() -> Settings:
             "https://t.me/s/MiTiVPN",
             "https://t.me/s/WangCai2",
         ]
-    
-    # Создаём базовые настройки
+
     settings = Settings(
         channels=ChannelSettings(source_urls=custom_channels),
     )
 
     # Переопределяем настройки из переменных окружения
-    # Сетевые настройки
-    settings.network.tcp_timeout = _get_env_value(
-        "PROXY_CHECK_TCP_TIMEOUT", settings.network.tcp_timeout, float
-    )
-    settings.network.http_timeout = _get_env_value(
-        "PROXY_CHECK_HTTP_TIMEOUT", settings.network.http_timeout, float
-    )
-    settings.network.max_latency_ms = _get_env_value(
-        "PROXY_MAX_LATENCY_MS", settings.network.max_latency_ms, float
-    )
-    settings.network.active_checker_workers = _get_env_value(
-        "PROXY_ACTIVE_CHECKER_WORKERS", settings.network.active_checker_workers, int
-    )
-    settings.network.per_host_limit = _get_env_value(
-        "PROXY_PER_HOST_LIMIT", settings.network.per_host_limit, int
-    )
-    settings.network.telegram_calls_per_second = _get_env_value(
-        "PROXY_TELEGRAM_CALLS_PER_SECOND", settings.network.telegram_calls_per_second, float
-    )
-    settings.network.max_response_size_bytes = _get_env_value(
-        "PROXY_MAX_RESPONSE_SIZE_BYTES", settings.network.max_response_size_bytes, int
-    )
+    settings.network.tcp_timeout = _get_env_value("PROXY_CHECK_TCP_TIMEOUT", settings.network.tcp_timeout, float)
+    settings.network.http_timeout = _get_env_value("PROXY_CHECK_HTTP_TIMEOUT", settings.network.http_timeout, float)
+    settings.network.max_latency_ms = _get_env_value("PROXY_MAX_LATENCY_MS", settings.network.max_latency_ms, float)
+    settings.network.active_checker_workers = _get_env_value("PROXY_ACTIVE_CHECKER_WORKERS", settings.network.active_checker_workers, int)
+    settings.network.per_host_limit = _get_env_value("PROXY_PER_HOST_LIMIT", settings.network.per_host_limit, int)
+    settings.network.telegram_calls_per_second = _get_env_value("PROXY_TELEGRAM_CALLS_PER_SECOND", settings.network.telegram_calls_per_second, float)
+    settings.network.max_response_size_bytes = _get_env_value("PROXY_MAX_RESPONSE_SIZE_BYTES", settings.network.max_response_size_bytes, int)
 
-    # Настройки повторных попыток
-    settings.retry.channel_retry_attempts = _get_env_value(
-        "PROXY_CHANNEL_RETRY_ATTEMPTS", settings.retry.channel_retry_attempts, int
-    )
-    settings.retry.channel_retry_base_delay = _get_env_value(
-        "PROXY_CHANNEL_RETRY_BASE_DELAY", settings.retry.channel_retry_base_delay, float
-    )
-    settings.retry.channel_retry_max_delay = _get_env_value(
-        "PROXY_CHANNEL_RETRY_MAX_DELAY", settings.retry.channel_retry_max_delay, float
-    )
-    settings.retry.channel_retry_deadline = _get_env_value(
-        "PROXY_CHANNEL_RETRY_DEADLINE", settings.retry.channel_retry_deadline, float
-    )
+    settings.retry.channel_retry_attempts = _get_env_value("PROXY_CHANNEL_RETRY_ATTEMPTS", settings.retry.channel_retry_attempts, int)
+    settings.retry.channel_retry_base_delay = _get_env_value("PROXY_CHANNEL_RETRY_BASE_DELAY", settings.retry.channel_retry_base_delay, float)
+    settings.retry.channel_retry_max_delay = _get_env_value("PROXY_CHANNEL_RETRY_MAX_DELAY", settings.retry.channel_retry_max_delay, float)
+    settings.retry.channel_retry_deadline = _get_env_value("PROXY_CHANNEL_RETRY_DEADLINE", settings.retry.channel_retry_deadline, float)
 
-    # Настройки скоринга
-    settings.scoring.score_min_threshold = _get_env_value(
-        "PROXY_SCORE_MIN_THRESHOLD", settings.scoring.score_min_threshold, float
-    )
-    settings.scoring.decay_period_hours = _get_env_value(
-        "PROXY_DECAY_PERIOD_HOURS", settings.scoring.decay_period_hours, float
-    )
+    settings.scoring.score_min_threshold = _get_env_value("PROXY_SCORE_MIN_THRESHOLD", settings.scoring.score_min_threshold, float)
+    settings.scoring.decay_period_hours = _get_env_value("PROXY_DECAY_PERIOD_HOURS", settings.scoring.decay_period_hours, float)
 
-    # Настройки каналов
-    settings.channels.use_maximum_power = _get_env_value(
-        "PROXY_USE_MAXIMUM_POWER", settings.channels.use_maximum_power, bool
-    )
-    settings.channels.specific_config_count = _get_env_value(
-        "PROXY_SPECIFIC_CONFIG_COUNT", settings.channels.specific_config_count, int
-    )
-    settings.channels.channel_health_threshold = _get_env_value(
-        "PROXY_CHANNEL_HEALTH_THRESHOLD", settings.channels.channel_health_threshold, float
-    )
-    # Уменьшаем минимальное количество конфигов для канала, чтобы новые каналы не отключались
-    settings.channels.channel_min_configs = _get_env_value(
-        "PROXY_CHANNEL_MIN_CONFIGS", 1, int
-    )
-    settings.channels.channel_min_valid_ratio = _get_env_value(
-        "PROXY_CHANNEL_MIN_VALID_RATIO", 0.01, float
-    )
-    settings.channels.channel_min_protocols = _get_env_value(
-        "PROXY_CHANNEL_MIN_PROTOCOLS", 1, int
-    )
-    settings.channels.channel_history_days = _get_env_value(
-        "PROXY_CHANNEL_HISTORY_DAYS", settings.channels.channel_history_days, int
-    )
-    settings.channels.channel_recovering_trend_threshold = _get_env_value(
-        "PROXY_CHANNEL_RECOVERING_TREND_THRESHOLD", settings.channels.channel_recovering_trend_threshold, float
-    )
-    settings.channels.channel_min_recent_days_for_trend = _get_env_value(
-        "PROXY_CHANNEL_MIN_RECENT_DAYS_FOR_TREND", settings.channels.channel_min_recent_days_for_trend, int
-    )
-    settings.channels.max_config_age_days = _get_env_value(
-        "PROXY_MAX_CONFIG_AGE_DAYS", settings.channels.max_config_age_days, int
-    )
-    settings.channels.archive_max_age_days = _get_env_value(
-        "PROXY_ARCHIVE_MAX_AGE_DAYS", settings.channels.archive_max_age_days, int
-    )
-    settings.channels.simple_max_age_days = _get_env_value(
-        "PROXY_SIMPLE_MAX_AGE_DAYS", settings.channels.simple_max_age_days, int
-    )
+    settings.channels.use_maximum_power = _get_env_value("PROXY_USE_MAXIMUM_POWER", settings.channels.use_maximum_power, bool)
+    settings.channels.specific_config_count = _get_env_value("PROXY_SPECIFIC_CONFIG_COUNT", settings.channels.specific_config_count, int)
+    settings.channels.channel_health_threshold = _get_env_value("PROXY_CHANNEL_HEALTH_THRESHOLD", settings.channels.channel_health_threshold, float)
+    settings.channels.channel_min_configs = _get_env_value("PROXY_CHANNEL_MIN_CONFIGS", settings.channels.channel_min_configs, int)
+    settings.channels.channel_min_valid_ratio = _get_env_value("PROXY_CHANNEL_MIN_VALID_RATIO", settings.channels.channel_min_valid_ratio, float)
+    settings.channels.channel_min_protocols = _get_env_value("PROXY_CHANNEL_MIN_PROTOCOLS", settings.channels.channel_min_protocols, int)
+    settings.channels.channel_history_days = _get_env_value("PROXY_CHANNEL_HISTORY_DAYS", settings.channels.channel_history_days, int)
+    settings.channels.channel_recovering_trend_threshold = _get_env_value("PROXY_CHANNEL_RECOVERING_TREND_THRESHOLD", settings.channels.channel_recovering_trend_threshold, float)
+    settings.channels.channel_min_recent_days_for_trend = _get_env_value("PROXY_CHANNEL_MIN_RECENT_DAYS_FOR_TREND", settings.channels.channel_min_recent_days_for_trend, int)
+    settings.channels.max_config_age_days = _get_env_value("PROXY_MAX_CONFIG_AGE_DAYS", settings.channels.max_config_age_days, int)
+    settings.channels.archive_max_age_days = _get_env_value("PROXY_ARCHIVE_MAX_AGE_DAYS", settings.channels.archive_max_age_days, int)
+    settings.channels.simple_max_age_days = _get_env_value("PROXY_SIMPLE_MAX_AGE_DAYS", settings.channels.simple_max_age_days, int)
 
-    # Настройки БД
-    settings.database.db_path = _get_env_value(
-        "PROXY_DB_PATH", settings.database.db_path, str
-    )
-    settings.database.max_history_runs = _get_env_value(
-        "PROXY_MAX_HISTORY_RUNS", settings.database.max_history_runs, int
-    )
-    settings.database.save_interval_seconds = _get_env_value(
-        "PROXY_SAVE_INTERVAL_SECONDS", settings.database.save_interval_seconds, int
-    )
-    settings.database.encrypt_ips = _get_env_value(
-        "PROXY_ENCRYPT_IPS", settings.database.encrypt_ips, bool
-    )
-    settings.database.encryption_salt = _get_env_value(
-        "PROXY_ENCRYPTION_SALT", settings.database.encryption_salt, str
-    )
-    settings.database.auto_cleanup_days = _get_env_value(
-        "PROXY_AUTO_CLEANUP_DAYS", settings.database.auto_cleanup_days, int
-    )
+    settings.database.db_path = _get_env_value("PROXY_DB_PATH", settings.database.db_path, str)
+    settings.database.max_history_runs = _get_env_value("PROXY_MAX_HISTORY_RUNS", settings.database.max_history_runs, int)
+    settings.database.save_interval_seconds = _get_env_value("PROXY_SAVE_INTERVAL_SECONDS", settings.database.save_interval_seconds, int)
+    settings.database.encrypt_ips = _get_env_value("PROXY_ENCRYPT_IPS", settings.database.encrypt_ips, bool)
+    settings.database.encryption_salt = _get_env_value("PROXY_ENCRYPTION_SALT", settings.database.encryption_salt, str)
+    settings.database.auto_cleanup_days = _get_env_value("PROXY_AUTO_CLEANUP_DAYS", settings.database.auto_cleanup_days, int)
 
-    # Настройки датацентров
-    settings.datacenter.geolite2_asn_path = _get_env_value(
-        "PROXY_GEOLITE2_ASN_PATH", settings.datacenter.geolite2_asn_path, str
-    )
+    settings.datacenter.geolite2_asn_path = _get_env_value("PROXY_GEOLITE2_ASN_PATH", settings.datacenter.geolite2_asn_path, str)
 
-    # Расширенные настройки
-    settings.advanced.min_runs_for_adaptive_thresholds = _get_env_value(
-        "PROXY_MIN_RUNS_FOR_ADAPTIVE_THRESHOLDS", settings.advanced.min_runs_for_adaptive_thresholds, int
-    )
-    # Уменьшаем grace_period_runs, чтобы новые каналы быстрее получали шанс
-    settings.advanced.grace_period_runs = _get_env_value(
-        "PROXY_GRACE_PERIOD_RUNS", 3, int
-    )
+    settings.advanced.min_runs_for_adaptive_thresholds = _get_env_value("PROXY_MIN_RUNS_FOR_ADAPTIVE_THRESHOLDS", settings.advanced.min_runs_for_adaptive_thresholds, int)
+    settings.advanced.grace_period_runs = _get_env_value("PROXY_GRACE_PERIOD_RUNS", settings.advanced.grace_period_runs, int)
 
-    # Валидируем настройки
     settings.model_validate(settings)
     return settings
 
 
-# Глобальный экземпляр настроек
 _settings: Optional[Settings] = None
 
-
 def get_settings() -> Settings:
-    """Возвращает глобальный экземпляр настроек."""
     global _settings
     if _settings is None:
         _settings = load_settings()
     return _settings
 
-
 def reload_settings() -> Settings:
-    """Перезагружает настройки из переменных окружения и файлов."""
     global _settings
     _settings = load_settings()
     return _settings
 
-
-# ============================================================================
-# СОВМЕСТИМОСТЬ С СТАРЫМ КОДОМ (переменные для обратной совместимости)
-# ============================================================================
-
+# Совместимость со старым кодом
 settings = get_settings()
 
-# Сетевые параметры
 TCP_TIMEOUT = settings.network.tcp_timeout
 HTTP_TIMEOUT = settings.network.http_timeout
 MAX_LATENCY_MS = settings.network.max_latency_ms
@@ -394,18 +297,15 @@ PER_HOST_LIMIT = settings.network.per_host_limit
 TELEGRAM_CALLS_PER_SECOND = settings.network.telegram_calls_per_second
 MAX_RESPONSE_SIZE_BYTES = settings.network.max_response_size_bytes
 
-# Настройки повторных попыток
 CHANNEL_RETRY_ATTEMPTS = settings.retry.channel_retry_attempts
 CHANNEL_RETRY_BASE_DELAY = settings.retry.channel_retry_base_delay
 CHANNEL_RETRY_MAX_DELAY = settings.retry.channel_retry_max_delay
 CHANNEL_RETRY_DEADLINE = settings.retry.channel_retry_deadline
 
-# Настройки скоринга
 SCORE_MIN_THRESHOLD = settings.scoring.score_min_threshold
 SCORE_WEIGHTS = settings.scoring.score_weights
 DECAY_PERIOD_HOURS = settings.scoring.decay_period_hours
 
-# Настройки каналов
 SOURCE_URLS = settings.channels.source_urls
 USE_MAXIMUM_POWER = settings.channels.use_maximum_power
 SPECIFIC_CONFIG_COUNT = settings.channels.specific_config_count
@@ -421,7 +321,6 @@ MAX_CONFIG_AGE_DAYS = settings.channels.max_config_age_days
 ARCHIVE_MAX_AGE_DAYS = settings.channels.archive_max_age_days
 SIMPLE_MAX_AGE_DAYS = settings.channels.simple_max_age_days
 
-# Настройки БД
 DB_PATH = settings.database.db_path
 MAX_HISTORY_RUNS = settings.database.max_history_runs
 SAVE_INTERVAL_SECONDS = settings.database.save_interval_seconds
@@ -429,14 +328,11 @@ ENCRYPT_IPS = settings.database.encrypt_ips
 ENCRYPTION_SALT = settings.database.encryption_salt
 AUTO_CLEANUP_DAYS = settings.database.auto_cleanup_days
 
-# Настройки датацентров
 GEOLITE2_ASN_PATH = settings.datacenter.geolite2_asn_path
 BUILTIN_DATACENTER_ASNS = settings.datacenter.builtin_datacenter_asns
 
-# Настройки протоколов
 ENABLED_PROTOCOLS = settings.protocols.enabled_protocols
 
-# Расширенные настройки
 MIN_RUNS_FOR_ADAPTIVE_THRESHOLDS = settings.advanced.min_runs_for_adaptive_thresholds
 ANOMALY_Z_SCORE_THRESHOLD = settings.advanced.anomaly_z_score_threshold
 ANOMALY_IQR_MULTIPLIER = settings.advanced.anomaly_iqr_multiplier
