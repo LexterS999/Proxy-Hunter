@@ -17,12 +17,13 @@ env:
   PROXY_ACTIVE_CHECKER_WORKERS: ${{ secrets.PROXY_ACTIVE_CHECKER_WORKERS || '100' }}
   PROXY_PER_HOST_LIMIT: ${{ secrets.PROXY_PER_HOST_LIMIT || '10' }}
   PROXY_SCORE_MIN_THRESHOLD: ${{ secrets.PROXY_SCORE_MIN_THRESHOLD || '30.0' }}
-  # === Новые / обновлённые параметры ===
-  PROXY_CHANNEL_HEALTH_THRESHOLD: ${{ secrets.PROXY_CHANNEL_HEALTH_THRESHOLD || '20.0' }}  # было 30
-  PROXY_GRACE_PERIOD_RUNS: ${{ secrets.PROXY_GRACE_PERIOD_RUNS || '7' }}                # было 5
-  PROXY_CHANNEL_MIN_CONFIGS: ${{ secrets.PROXY_CHANNEL_MIN_CONFIGS || '5' }}            # добавлено
-  PROXY_CHANNEL_HISTORY_DAYS: ${{ secrets.PROXY_CHANNEL_HISTORY_DAYS || '14' }}         # добавлено
+  PROXY_CHANNEL_HEALTH_THRESHOLD: ${{ secrets.PROXY_CHANNEL_HEALTH_THRESHOLD || '20.0' }}
+  PROXY_GRACE_PERIOD_RUNS: ${{ secrets.PROXY_GRACE_PERIOD_RUNS || '7' }}
+  PROXY_CHANNEL_MIN_CONFIGS: ${{ secrets.PROXY_CHANNEL_MIN_CONFIGS || '5' }}
+  PROXY_CHANNEL_HISTORY_DAYS: ${{ secrets.PROXY_CHANNEL_HISTORY_DAYS || '14' }}
   PROXY_ADAPTIVE_THRESHOLD_PERCENTILE: ${{ secrets.PROXY_ADAPTIVE_THRESHOLD_PERCENTILE || '20' }}
+  # === Логирование ===
+  LOG_LEVEL: ${{ secrets.LOG_LEVEL || 'DEBUG' }}   # можно переопределить на INFO
   # === Конец параметров ===
 
 jobs:
@@ -100,10 +101,6 @@ jobs:
       - name: Download GeoLite2 ASN database (optional)
         if: steps.cache-geolite.outputs.cache-hit != 'true'
         run: |
-          # Если у вас есть лицензионный ключ MaxMind, раскомментируйте строку ниже
-          # и добавьте секрет MAXMIND_LICENSE_KEY в настройках репозитория.
-          # wget -O configs/GeoLite2-ASN.mmdb "https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-ASN&license_key=${{ secrets.MAXMIND_LICENSE_KEY }}&suffix=mmdb"
-          # Если ключа нет – создаём заглушку (будет использован встроенный список).
           touch configs/GeoLite2-ASN.mmdb
           echo "⚠️ GeoLite2 база не установлена. Будет использован встроенный список датацентров."
 
@@ -135,16 +132,32 @@ jobs:
         run: |
           bash install.sh --install-xray-only
 
-      # ===== Основной запуск (с улучшенным логированием) =====
+      # ===== Основной запуск (с полным выводом в реальном времени) =====
       - name: Run optimized pipeline
         id: pipeline
         continue-on-error: true
         env:
           PYTHONUNBUFFERED: 1
-          LOG_LEVEL: INFO   # можно сменить на DEBUG для ещё более детального вывода
+          LOG_LEVEL: ${{ env.LOG_LEVEL }}
         run: |
-          set -x
-          python -u src/pipeline_optimized.py 2>&1 | tee pipeline_debug.log
+          # Используем stdbuf для отключения буферизации вывода
+          stdbuf -oL -eL python -u src/pipeline_optimized.py 2>&1 | tee pipeline_debug.log
+
+      # ===== Вывод полного лога после выполнения =====
+      - name: Display full log
+        if: always()
+        run: |
+          echo "========================================"
+          echo "📜 FULL PIPELINE LOG (begin)"
+          echo "========================================"
+          if [ -f "pipeline_debug.log" ]; then
+            cat pipeline_debug.log
+          else
+            echo "⚠️ Log file not found!"
+          fi
+          echo "========================================"
+          echo "📜 FULL PIPELINE LOG (end)"
+          echo "========================================"
 
       # ===== Вакуумирование SQLite (сжатие) =====
       - name: Vacuum SQLite database
@@ -311,7 +324,6 @@ jobs:
                       print('  Protocols:')
                       for p, count in protocols.items():
                           print(f'    {p}: {count}')
-                  # Дополнительно: количество активных каналов из таблицы channels
                   cursor.execute('SELECT COUNT(*) FROM channels WHERE enabled = 1')
                   active_channels = cursor.fetchone()[0]
                   cursor.execute('SELECT COUNT(*) FROM channels')
@@ -332,13 +344,6 @@ jobs:
             echo "⚠️ Pipeline step did NOT succeed. See 'Run optimized pipeline' step output above"
             echo "   and the 'pipeline-debug-log' artifact for details."
           fi
-
-      # ===== Вывод последних строк лога =====
-      - name: Show last 50 lines of log
-        if: always()
-        run: |
-          echo "=== Последние 50 строк лога ==="
-          tail -50 pipeline_debug.log || true
 
       # ===== Загрузка артефактов =====
       - name: Upload all artifacts
@@ -386,7 +391,6 @@ jobs:
           name: pipeline-debug-log
           path: |
             pipeline_debug.log
-            pipeline_debug.log.*
             logs/
           retention-days: 7
           if-no-files-found: warn
