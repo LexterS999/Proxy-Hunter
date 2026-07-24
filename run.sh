@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -e
+set -x  # <-- включает подробный вывод команд
 
 cd "$(dirname "$0")"
 
@@ -24,7 +25,6 @@ else
     echo "ℹ️  Using system Python: $(command -v python3)"
 fi
 
-# ИСПРАВЛЕНИЕ #13: Убрана проверка geoip2 (не используется в проекте)
 # Проверка зависимостей
 echo "➤ Checking required Python modules..."
 $PYTHON_CMD -c "import aiohttp, bs4, xxhash, aiofiles, tqdm" 2>/dev/null || {
@@ -42,7 +42,7 @@ else
     exit 1
 fi
 
-# ИСПРАВЛЕНИЕ #12: Проверяем output_archive.txt (реальный выходной файл пайплайна)
+# Проверка выходных файлов
 echo ""
 if [ -f "configs/output_archive.txt" ]; then
     FILE_SIZE=$(wc -c < "configs/output_archive.txt")
@@ -59,7 +59,6 @@ else
     exit 1
 fi
 
-# Также проверяем simple output
 if [ -f "configs/output_simple.txt" ]; then
     SIMPLE_SIZE=$(wc -c < "configs/output_simple.txt")
     SIMPLE_LINES=$(wc -l < "configs/output_simple.txt")
