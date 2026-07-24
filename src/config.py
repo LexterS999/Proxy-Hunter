@@ -187,7 +187,9 @@ class ProxyConfig:
 
         self.SUPPORTED_PROTOCOLS = self._initialize_protocols(settings)
         initial_urls: List[ChannelConfig] = [ChannelConfig(url=url) for url in settings.channels.source_urls]
+        logger.info(f"Loaded {len(initial_urls)} channels from settings before dedup")
         self.SOURCE_URLS = self._remove_duplicate_urls(initial_urls)
+        logger.info(f"After dedup: {len(self.SOURCE_URLS)} channels")
         self._initialize_settings()
         self._set_smart_limits()
         self._analyzer = None
@@ -244,7 +246,7 @@ class ProxyConfig:
                 return f"telegram:{channel_name}"
             return f"{parsed.scheme}://{parsed.netloc}{path}"
         except Exception as e:
-            logger.error(f"URL normalization error: {str(e)}")
+            logger.error(f"URL normalization error for {url}: {str(e)}")
             raise
 
     def _remove_duplicate_urls(self, channel_configs: List[ChannelConfig]) -> List[ChannelConfig]:
@@ -260,7 +262,8 @@ class ProxyConfig:
                     if normalized_url not in seen_urls:
                         seen_urls[normalized_url] = True
                         unique_configs.append(config)
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"Skipping channel due to normalization error: {config.url} - {e}")
                     continue
             if not unique_configs:
                 self.save_empty_config_file()
@@ -299,14 +302,14 @@ class ProxyConfig:
     def _prune_dead_channels(self) -> None:
         """Удаляет неработающие каналы с учётом реабилитации и более долгого окна (7 дней)."""
         db = get_db_safe()
-        cutoff = datetime.now() - timedelta(days=7)   # было 1
+        cutoff = datetime.now() - timedelta(days=7)
         enabled_count = 0
         disabled_count = 0
         rehabilitated_count = 0
 
         for ch in self.SOURCE_URLS:
             try:
-                history = db.get_channel_history(ch.url, limit=5)  # последние 5 запусков
+                history = db.get_channel_history(ch.url, limit=5)
                 recent_success = False
                 total = 0
                 for h in history:
@@ -320,14 +323,12 @@ class ProxyConfig:
                         except:
                             pass
 
-                # Если канал выключен, но за последние 3 запуска были конфиги – реабилитируем
                 if not ch.enabled:
                     recent_configs = sum(1 for h in history[-3:] if h.get('total_configs', 0) > 0)
-                    if recent_configs >= 1:   # хотя бы один запуск с конфигами
+                    if recent_configs >= 1:
                         ch.enabled = True
                         rehabilitated_count += 1
                         logger.info(f"Channel {ch.url} rehabilitated (found configs in last 3 runs).")
-                        # Сбрасываем счётчик ошибок
                         ch.metrics.fail_count = 0
                         continue
 
