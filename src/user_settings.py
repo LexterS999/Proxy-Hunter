@@ -181,12 +181,13 @@ class Settings(BaseModel):
 def _load_channels_from_file(file_path: str) -> List[str]:
     """Загружает каналы из файла, возвращает список URL."""
     channels: List[str] = []
-    if not Path(file_path).exists():
+    file_path_obj = Path(file_path)
+    if not file_path_obj.exists():
         logger.warning(f"File {file_path} not found.")
         return channels
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            for line in f:
+        with open(file_path_obj, "r", encoding="utf-8") as f:
+            for line_num, line in enumerate(f, 1):
                 line = line.strip()
                 if not line or line.startswith("#"):
                     continue
@@ -198,8 +199,9 @@ def _load_channels_from_file(file_path: str) -> List[str]:
                         line = "https://t.me/s/" + line.lstrip("/")
                 if line.startswith("https://t.me/s/"):
                     channels.append(line)
+                    logger.debug(f"Loaded channel from {file_path} line {line_num}: {line}")
                 else:
-                    logger.debug(f"Skipping non-telegram channel: {line}")
+                    logger.debug(f"Skipping non-telegram channel at line {line_num}: {line}")
         logger.info(f"Loaded {len(channels)} channels from {file_path}")
     except Exception as e:
         logger.error(f"Failed to load channels from {file_path}: {e}")
@@ -236,6 +238,7 @@ def load_settings() -> Settings:
             "https://t.me/s/MiTiVPN",
             "https://t.me/s/WangCai2",
         ]
+        logger.info(f"Using {len(custom_channels)} default channels")
 
     settings = Settings(
         channels=ChannelSettings(source_urls=custom_channels),
