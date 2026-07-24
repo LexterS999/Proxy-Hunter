@@ -1,5 +1,5 @@
 # ============================================================================
-# Файл: src/user_settings.py (исправлен, без циклических импортов)
+# Файл: src/user_settings.py (исправлен, единый стиль нижнего регистра)
 # ============================================================================
 
 import sys
@@ -86,12 +86,12 @@ SCORE_WEIGHTS = {
 }
 
 # ============================================================================
-# КЛАССЫ НАСТРОЕК
+# КЛАССЫ НАСТРОЕК (все поля в нижнем регистре)
 # ============================================================================
 
 @dataclass
 class ChannelSettings:
-    SOURCE_URLS: List[str] = field(default_factory=lambda: [
+    source_urls: List[str] = field(default_factory=lambda: [
         "https://t.me/s/SOSkeyNET",
         "https://t.me/s/GozargahAzad",
         "https://t.me/s/generalconfiig",
@@ -99,10 +99,9 @@ class ChannelSettings:
         "https://t.me/s/MiTiVPN",
         "https://t.me/s/WangCai2",
     ])
-    USE_MAXIMUM_POWER: bool = USE_MAXIMUM_POWER
-    SPECIFIC_CONFIG_COUNT: int = SPECIFIC_CONFIG_COUNT
-    MAX_CONFIG_AGE_DAYS: int = 14
-    CHANNEL_HEALTH_THRESHOLD: float = CHANNEL_HEALTH_THRESHOLD
+    use_maximum_power: bool = USE_MAXIMUM_POWER
+    specific_config_count: int = SPECIFIC_CONFIG_COUNT
+    max_config_age_days: int = 14
     channel_health_threshold: float = CHANNEL_HEALTH_THRESHOLD
     channel_min_configs: int = 1
     channel_min_valid_ratio: float = 0.05
@@ -112,15 +111,18 @@ class ChannelSettings:
     channel_recovering_trend_threshold: float = 0.1
     channel_min_recent_days_for_trend: int = 2
 
+
 @dataclass
 class ProtocolSettings:
-    ENABLED_PROTOCOLS: Dict[str, bool] = field(default_factory=lambda: ENABLED_PROTOCOLS)
+    enabled_protocols: Dict[str, bool] = field(default_factory=lambda: ENABLED_PROTOCOLS)
+
 
 @dataclass
 class AdvancedSettings:
     grace_period_runs: int = 3
     adaptive_threshold_percentile: int = 20
     min_records_for_adaptive: int = 10
+
 
 @dataclass
 class Settings:
@@ -133,13 +135,16 @@ class Settings:
     encrypt_ips: bool = True
     encryption_salt: str = "proxy_hunter_salt_2026"
     auto_cleanup_days: int = 30
-    source_urls: List[str] = field(default_factory=lambda: ChannelSettings().SOURCE_URLS)
+    # Дублируем для обратной совместимости, если где-то используется settings.source_urls
+    source_urls: List[str] = field(default_factory=lambda: ChannelSettings().source_urls)
+
 
 # ============================================================================
 # ГЛОБАЛЬНЫЙ ЭКЗЕМПЛЯР НАСТРОЕК (синглтон)
 # ============================================================================
 
 _settings: Optional[Settings] = None
+
 
 def get_settings() -> Settings:
     """Возвращает глобальный объект настроек (создаёт при первом вызове)."""
@@ -148,7 +153,7 @@ def get_settings() -> Settings:
         _settings = Settings()
     return _settings
 
+
 # Для обратной совместимости
 def get_settings_safe() -> Settings:
     return get_settings()
-
