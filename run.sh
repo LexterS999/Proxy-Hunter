@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 
-set -e
-set -x  # <-- включает подробный вывод команд
+# Запрещаем падать на ошибках в пайплайне — логируем всё
+# set -e оставляем, но tee с unbuffered вывод покажет весь процесс
+set -o pipefail
+set -x  # <-- печатает каждую команду для трассировки
 
 cd "$(dirname "$0")"
 
@@ -9,12 +11,18 @@ LOG_DIR="logs"
 mkdir -p "$LOG_DIR"
 TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
 LOG_FILE="$LOG_DIR/run_$TIMESTAMP.log"
+DEBUG_FILE="pipeline_debug.log"
 
-exec > >(tee -a "$LOG_FILE") 2>&1
+# Фикс: гарантируем полное логирование (раньше свёрнуто в INFO)
+export LOG_LEVEL=DEBUG
+export PYTHONUNBUFFERED=1
+
+exec > >(tee -a "$LOG_FILE" "$DEBUG_FILE") 2>&1
 
 echo "════════════════════════════════════════════════════════════════"
 echo "  Proxy-Hunter Optimized Pipeline"
 echo "  Started at: $(date)"
+echo "  LOG_LEVEL=$LOG_LEVEL  PYTHONUNBUFFERED=$PYTHONUNBUFFERED"
 echo "════════════════════════════════════════════════════════════════"
 
 PYTHON_CMD="python3"
